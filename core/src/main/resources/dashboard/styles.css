@@ -1,0 +1,538 @@
+:root {
+    --bg-color: #f5f5f5;
+    --card-bg: white;
+    --text-color: #1a1a1a;
+    --text-secondary: #666;
+    --shadow: rgba(0,0,0,0.12);
+}
+
+[data-theme="dark"] {
+    --bg-color: #1a1a1a;
+    --card-bg: #2d2d2d;
+    --text-color: #ffffff;
+    --text-secondary: #aaaaaa;
+    --shadow: rgba(0,0,0,0.3);
+}
+
+body {
+    font-family: system-ui, -apple-system, sans-serif;
+    margin: 0;
+    padding: 0;
+    background: var(--bg-color);
+    color: var(--text-color);
+    transition: background-color 0.3s ease;
+}
+
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+	padding-top: 8px;	
+    padding-right: 16px;
+    padding-bottom: 8px;
+    padding-left: 16px;    
+	background: var(--card-bg);
+    box-shadow: 0 1px 3px var(--shadow);
+}
+
+.header h1 {
+    margin: 0;
+    font-size: 22px;
+    font-weight: bold;
+}
+
+.header-controls {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+}
+
+.sync-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.sync-label {
+    font-size: 14px;
+    color: var(--text-color);
+}
+
+.sync-indicator {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background-color: #EF4444;  /* Default red */
+    transition: background-color 0.3s ease;
+}
+
+.sync-indicator.synced {
+    background-color: #10B981;  /* Green when synced */
+}
+
+.theme-switch {
+    position: relative;
+    display: inline-block;
+    width: 60px;
+    height: 34px;
+}
+
+.theme-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #ccc;
+    transition: .4s;
+    border-radius: 34px;
+}
+
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 26px;
+    width: 26px;
+    left: 4px;
+    bottom: 4px;
+    background-color: white;
+    transition: .4s;
+    border-radius: 50%;
+}
+
+input:checked + .slider {
+    background-color: #2196F3;
+}
+
+input:checked + .slider:before {
+    transform: translateX(26px);
+}
+
+.container {
+    padding: clamp(4px, 2vw, 8px);  /* Responsive padding */
+}
+
+.grid {
+    display: grid;
+    grid-template-columns: repeat(24, 1fr);
+    gap: clamp(4px, 1.5vw, 8px);  /* Responsive gap */
+    margin-bottom: clamp(4px, 1.5vw, 8px);
+}
+
+.card {
+    background: var(--card-bg);
+    border-radius: 6px;
+    padding: clamp(4px, 1.5vw, 8px);  /* Responsive padding */
+    box-shadow: 0 1px 3px var(--shadow);
+    transition: background-color 0.3s ease;
+    overflow: hidden;  /* Prevent content overflow */
+}
+
+.col-span-1 { grid-column: span 1; }
+.col-span-2 { grid-column: span 2; }
+.col-span-3 { grid-column: span 3; }
+.col-span-4 { grid-column: span 4; }
+.col-span-5 { grid-column: span 5; }
+.col-span-6 { grid-column: span 6; }
+.col-span-7 { grid-column: span 7; }
+.col-span-8 { grid-column: span 8; }
+.col-span-9 { grid-column: span 9; }
+.col-span-10 { grid-column: span 10; }
+.col-span-11 { grid-column: span 11; }
+.col-span-12 { grid-column: span 12; }
+.col-span-13 { grid-column: span 13; }
+.col-span-14 { grid-column: span 14; }
+.col-span-15 { grid-column: span 15; }
+.col-span-16 { grid-column: span 16; }
+.col-span-17 { grid-column: span 17; }
+.col-span-18 { grid-column: span 18; }
+.col-span-19 { grid-column: span 19; }
+.col-span-20 { grid-column: span 20; }
+.col-span-21 { grid-column: span 21; }
+.col-span-22 { grid-column: span 22; }
+.col-span-23 { grid-column: span 23; }
+.col-span-24 { grid-column: span 24; }
+
+.title {
+    font-size: 15px;
+    color: var(--text-secondary);
+    margin: 0 0 6px 0;
+}
+
+.value {
+    font-size: 18px;
+    font-weight: bold;
+    margin: 0;
+    color: var(--text-color);
+}
+
+.monospace {
+    font-family: monospace;
+    word-break: break-all;
+    font-size: 19px;
+}
+
+.title-small {
+    font-size: 15px;
+    color: var(--text-secondary);
+    margin: 0 0 0 0;
+}
+
+.value-small {
+    font-size: 15px;
+    font-weight: bold;
+    margin: 0;
+    color: var(--text-color);
+}
+
+.gauge-container {
+    position: relative;
+    margin: 0 auto;
+    height: 250px;
+}
+
+.gauge-value {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-size: 30px;
+    font-weight: bold;
+}
+
+.chart-container {
+    position: relative;
+    height: 250px;
+}
+
+.table-container {
+    overflow-x: auto;
+}
+
+.subtitle {
+    font-size: 16px;
+    font-weight: bold;
+    color: var(--text-color);
+    margin: 0px 0 8px 0;
+}
+
+.connection-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 16px;
+    font-size: 14px;
+	table-layout: fixed;
+	min-width: 1024px;
+}
+
+.connection-table th {
+    text-align: left;
+    padding: 8px;
+    border-bottom: 2px solid var(--text-secondary);
+    color: var(--text-secondary);
+}
+.connection-table th.small,
+.connection-table td.small {
+	min-width: 128px;
+	width: 15%;
+	white-space: nowrap;
+}
+
+.connection-table th.tiny,
+.connection-table td.tiny {
+	min-width: 96px;
+	width: 10%;
+	white-space: nowrap;
+}
+
+.connection-table th.medium {
+	width: 25%
+}
+
+.connection-table td {
+    padding: 8px;
+    border-bottom: 1px solid var(--text-secondary);
+    color: var(--text-color);
+}
+
+.connection-table td:first-child {
+    font-weight: 500;
+}
+
+.connection-table tbody tr:hover {
+    background-color: var(--shadow);
+}
+
+.connection-table .direction-icon {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.connection-table .direction-icon svg {
+    width: 16px;
+    height: 16px;
+}
+
+.outbound-icon {
+    transform: rotate(45deg);
+}
+
+.inbound-icon {
+    transform: rotate(-135deg);
+}
+
+/* Large screens */
+#nodeIdentity { grid-column: span 15;}
+
+#nodeUptime { grid-column: span 3; }
+#nodeShardGroup { grid-column: span 3;}
+#universeShardCount { grid-column: span 3;}
+
+#proposalTime { grid-column: span 5; }
+#proposalHeight { grid-column: span 4; }
+#proposalSize { grid-column: span 3; }
+#proposalHash { grid-column: span 12; }
+
+#consensusFinality { grid-column: span 5;}
+#clientFinality { grid-column: span 5;}
+#finalityTimeline { grid-column: span 14;}
+
+#shardTransactionThroughput { grid-column: span 5;}
+#totalTransactionThroughput { grid-column: span 5;}
+#transactionThroughputTimeline { grid-column: span 14;}
+
+#phaseRoundCommit { grid-column: span 3;}
+#pendingTransactions { grid-column: span 4;}
+#failedTransactions { grid-column: span 4;}
+#crossShardRatio { grid-column: span 3;}
+#transactionsPerShard { grid-column: span 5;}
+#totalTransactions { grid-column: span 5;}
+
+#inboundBytesTotal { grid-column: span 6;}
+#outboundBytesTotal { grid-column: span 6;}
+#inboundMessagesTotal { grid-column: span 6;}
+#outboundMessages { grid-column: span 6;}
+#networkBandwidth { grid-column: span 12;}
+#messagesThroughput { grid-column: span 12;}
+
+#proposalIntervals { font-size: 14px; }
+
+@media (max-width: 1500px)
+{
+	.monospace {
+		font-size: 18px;
+	}
+}
+
+@media (max-width: 1400px)
+{
+	.monospace {
+		font-size: 17px;
+	}
+}
+
+@media (max-width: 1300px) 
+{
+	.gauge-container {
+		height: 225px;
+	}
+
+	.chart-container {
+		position: relative;
+		height: 225px;
+	}
+	
+	.monospace {
+		font-size: 16px;
+	}
+}
+
+@media (max-width: 1200px) 
+{
+	.gauge-container {
+		height: 200px;
+	}
+
+	.gauge-value {
+		font-size: 24px;
+	}
+
+	.chart-container {
+		position: relative;
+		height: 200px;
+	}
+
+	.title {
+		font-size: 14px;
+	}
+
+	.value {
+		font-size: 16px;
+	}
+
+	.monospace {
+		font-size: 14.5px;
+	}
+
+	.title-small {
+		font-size: 12px;
+	}
+
+	.value-small {
+		font-size: 12px;
+	}
+}
+
+@media (max-width: 1100px) 
+{
+	.gauge-container {
+		height: 200px;
+	}
+
+	.gauge-value {
+		font-size: 22px;
+	}
+
+	.chart-container {
+		position: relative;
+		height: 200px;
+	}
+
+	.title {
+		font-size: 13px;
+	}
+
+	.value {
+		font-size: 15px;
+	}
+
+	.monospace {
+		font-size: 13.5px;
+	}
+
+	.title-small {
+		font-size: 11px;
+	}
+
+	.value-small {
+		font-size: 11px;
+	}
+}
+
+
+/* Small screens */
+@media (max-width: 1024px) {
+	#nodeIdentity { grid-column: span 24;}
+
+	#nodeUptime { grid-column: span 4; }
+	#nodeShardGroup { grid-column: span 3;}
+	#universeShardCount { grid-column: span 3;}
+	
+	#proposalTime { grid-column: span 7; }
+	#proposalHeight { grid-column: span 7; }
+	#proposalSize { grid-column: span 6; }
+	#proposalHash { grid-column: span 24; }
+
+	#consensusFinality { grid-column: span 12; }
+	#clientFinality { grid-column: span 12; }
+	#finalityTimeline { grid-column: span 24; }
+	
+	#shardTransactionThroughput { grid-column: span 12; }
+	#totalTransactionThroughput { grid-column: span 12; }
+	#transactionThroughputTimeline { grid-column: span 24; }
+	
+	#phaseRoundCommit { grid-column: span 6;}
+	#pendingTransactions { grid-column: span 9;}
+	#failedTransactions { grid-column: span 9;}
+	#crossShardRatio { grid-column: span 6;}
+	#transactionsPerShard { grid-column: span 9;}
+	#totalTransactions { grid-column: span 9;}
+	
+	#inboundBytesTotal { grid-column: span 12;}
+	#outboundBytesTotal { grid-column: span 12;}
+	#inboundMessagesTotal { grid-column: span 12;}
+	#outboundMessages { grid-column: span 12;}
+	#networkBandwidth { grid-column: span 24;}
+	#messagesThroughput { grid-column: span 24;}
+	
+	.monospace {
+		font-family: monospace;
+		word-break: break-all;
+		font-size: 17px;
+	}
+}
+
+@media (max-width: 720px) {
+	#nodeIdentity { grid-column: span 24;}
+
+	#nodeUptime { grid-column: span 11; }
+	#nodeShardGroup { grid-column: span 7;}
+	#universeShardCount { grid-column: span 6;}
+
+	#proposalTime { grid-column: span 11; }
+	#proposalHeight { grid-column: span 7; }
+	#proposalSize { grid-column: span 6; }
+	#proposalHash { grid-column: span 24; }
+
+	#consensusFinality { grid-column: span 12; }
+	#clientFinality { grid-column: span 12; }
+	#finalityTimeline { grid-column: span 24; }
+
+	#shardTransactionThroughput { grid-column: span 12; }
+	#totalTransactionThroughput { grid-column: span 12; }
+	#transactionThroughputTimeline { grid-column: span 24; }
+	
+	#phaseRoundCommit { grid-column: span 6;}
+	#pendingTransactions { grid-column: span 9;}
+	#failedTransactions { grid-column: span 9;}
+	#crossShardRatio { grid-column: span 6;}
+	#transactionsPerShard { grid-column: span 9;}
+	#totalTransactions { grid-column: span 9;}
+	
+	.header {
+		margin-bottom: 8px;	
+	}
+
+	.container {
+		padding: 0px;
+	}
+
+	.monospace {
+		font-family: monospace;
+		word-break: break-all;
+		font-size: 1.1em;
+	}
+}
+
+@media (max-width: 600px) {
+	.monospace {
+		font-family: monospace;
+		word-break: break-all;
+		font-size: 1em;
+	}
+
+	.gauge-container {
+		height: 175px;
+	}
+}
+
+@media (max-width: 500px) {
+	.monospace {
+		font-family: monospace;
+		word-break: break-all;
+		font-size: 11px;
+	}
+
+	.gauge-container {
+		height: 150px;
+	}
+}

@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hyperscale Dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.7.0/chart.min.js"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+	<div class="header">
+		<h1>Hyperscale Alpha</h1>
+		<div class="header-controls">
+			<div class="sync-status">
+				<span class="sync-label">Synced</span>
+				<span class="sync-indicator"></span>
+			</div>
+			<label class="theme-switch">
+				<input type="checkbox" id="theme-toggle">
+				<span class="slider"></span>
+			</label>
+		</div>
+	</div>
+    <div class="container">
+		<!-- Node Info -->
+		<div class="grid">
+			<div id="nodeIdentity" class="card">
+				<div class="title">Node Identity</div>
+				<div class="value monospace" id="nodeIdentityValue">-</div>
+			</div>
+            <div id="nodeUptime" class="card">
+                <div class="title">Node Up Time</div>
+                <div class="value" id="nodeUpTimeValue">-</div>
+            </div>
+			<div id="nodeShardGroup" class="card">
+				<div class="title">Node Shard</div>
+				<div class="value" id="nodeShardGroupValue">-</div>
+			</div>
+            <div id="universeShardCount" class="card">
+                <div class="title">Total Shards</div>
+                <div class="value" id="universeShardCountValue">-</div>
+            </div>
+		</div>
+		<div class="grid">
+            <div id="proposalTime" class="card">
+                <div class="title">Proposal Time</div>
+                <div class="value" id="proposalTimeValue">-</div>
+            </div>
+            <div id="proposalHeight" class="card">
+                <div class="title">Proposal Height</div>
+                <div class="value" id="proposalHeightValue">-</div>
+            </div>
+            <div id="proposalSize" class="card">
+                <div class="title">Proposal Size</div>
+                <div class="value" id="proposalSizeValue">-</div>
+            </div>
+            <div id="proposalHash" class="card">
+                <div class="title">Proposal Hash</div>
+                <div class="value monospace" id="proposalHashValue">-</div>
+            </div>
+        </div>
+
+        <!-- Throughput Section -->
+        <div class="grid">
+            <div id="shardTransactionThroughput" class="card">
+                <div class="title">Shard Throughput</div>
+                <div class="gauge-container">
+                    <canvas id="shardTransactionThroughputGauge"></canvas>
+                    <div class="gauge-value" id="shardTransactionThroughputValue">0 TPS</div>
+                </div>
+            </div>
+            <div id="totalTransactionThroughput" class="card">
+                <div class="title">Total Throughput</div>
+                <div class="gauge-container">
+                    <canvas id="totalTransactionThroughputGauge"></canvas>
+                    <div class="gauge-value" id="totalTransactionThroughputValue">0 TPS</div>
+                </div>
+            </div>
+            <div id="transactionThroughputTimeline" class="card">
+                <div class="title">Execution Throughput</div>
+                <div class="chart-container">
+                    <canvas id="transactionThroughputChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Finality Section -->
+        <div class="grid">
+            <div id="clientFinality" class="card">
+                <div class="title">Local Finality</div>
+                <div class="gauge-container">
+                    <canvas id="finalityClientGauge"></canvas>
+                    <div class="gauge-value" id="finalityClientValue">0 ms</div>
+                </div>
+            </div>
+            <div id="consensusFinality" class="card">
+                <div class="title">Consensus Finality</div>
+                <div class="gauge-container">
+                    <canvas id="finalityConsensusGauge"></canvas>
+                    <div class="gauge-value" id="finalityConsensusValue">0 ms</div>
+                </div>
+            </div>
+            <div id="finalityTimeline" class="card">
+                <div class="title">Finality</div>
+                <div class="chart-container">
+                    <canvas id="finalityChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom Stats -->
+        <div class="grid">
+            <div id="phaseRoundCommit" class="card">
+                <div class="title-small">Phase: <span class="value-small" id="phaseValue">-</span></div>
+                <div class="title-small">Commit: <span class="value-small" id="commitValue">-</span></div>
+                <div class="title-small">Round: <span class="value-small" id="roundValue">-</span></div>
+            </div>
+            <div id="pendingTransactions" class="card">
+                <div class="title">Pending Transactions</div>
+                <div class="value" id="pendingTx">-</div>
+            </div>
+            <div id="failedTransactions" class="card">
+                <div class="title">Failed Transactions</div>
+                <div class="value" id="failedTx">-</div>
+            </div>
+            <div id="crossShardRatio" class="card">
+                <div class="title">Cross Shard</div>
+                <div class="value" id="csrValue">-</div>
+            </div>
+            <div id="transactionsPerShard" class="card">
+                <div class="title">Transactions / Shard</div>
+                <div class="value" id="txPerShard">-</div>
+            </div>
+            <div id="totalTransactions" class="card">
+                <div class="title">Total Transactions</div>
+                <div class="value" id="totalTx">-</div>
+            </div>
+        </div>
+
+		<!-- Network Connections -->
+		<div class="grid">
+			<div id="networkConnections" class="card col-span-24">
+				<div class="title">Network Connections</div>
+				<div class="table-container">
+					<div class="subtitle">Sync Connections</div>
+					<table class="connection-table" id="syncGroupTable">
+						<thead>
+							<tr>
+								<th class="tiny"></th>
+								<th class="medium">Host</th>
+								<th class="small">Direction</th>
+								<th class="small">Connected</th>
+								<th class="tiny">Latency</th>
+								<th class="small">Throughput (Out/In)</th>
+								<th class="small">Transferred (Out/In)</th>
+								<th class="small">Gossip (Req./Items)</th>
+							</tr>
+						</thead>
+						<tbody>
+							<!-- Filled dynamically -->
+						</tbody>
+					</table>
+					
+					<div class="subtitle">Shard Connections</div>
+					<table class="connection-table" id="shardGroupTable">
+						<thead>
+							<tr>
+								<th class="tiny">Shard</th>
+								<th class="medium">Host</th>
+								<th class="small">Direction</th>
+								<th class="small">Connected</th>
+								<th class="tiny">Latency</th>
+								<th class="small">Throughput (Out/In)</th>
+								<th class="small">Transferred (Out/In)</th>
+								<th class="small">Gossip (Req./Items)</th>
+							</tr>
+						</thead>
+						<tbody>
+							<!-- Filled dynamically -->
+						</tbody>
+					</table>
+				</div>
+			</div>
+		</div>
+		
+		<!-- Network Statistics -->
+		<div class="grid">
+            <div id="inboundBytesTotal" class="card">
+                <div class="title">Inbound Bytes</div>
+                <div class="value" id="inboundBytesTotalValue">-</div>
+            </div>
+            <div id="outboundBytesTotal" class="card">
+                <div class="title">Outbound Bytes</div>
+                <div class="value" id="outboundBytesTotalValue">-</div>
+            </div>
+            <div id="inboundMessagesTotal" class="card">
+                <div class="title">Inbound Messages</div>
+                <div class="value" id="inboundMessagesTotalValue">-</div>
+            </div>
+            <div id="outboundMessages" class="card">
+                <div class="title">Outbound Messages</div>
+                <div class="value" id="outboundMessagesTotalValue">-</div>
+            </div>
+		</div>
+		<div class="grid">
+			<div id="networkBandwidth" class="card">
+				<div class="title">Network Bandwidth</div>
+				<div class="chart-container">
+					<canvas id="networkBandwidthChart"></canvas>
+				</div>
+			</div>
+			<div id="messagesThroughput" class="card">
+				<div class="title">Messages Throughput</div>
+				<div class="chart-container">
+					<canvas id="messagesThroughputChart"></canvas>
+				</div>
+			</div>
+		</div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

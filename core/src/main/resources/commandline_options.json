@@ -1,0 +1,89 @@
+{
+	"network.address":{
+		"short":"na",
+		"long":"network.address",
+		"desc":"IP Address to bind to",
+		"has_arg":true
+	},
+
+	"network.port":{
+		"short":"np",
+		"long":"network.port",
+		"desc":"Port to bind to",
+		"has_arg":true
+	},
+
+	"config":{
+		"short":"config",
+		"long":"config",
+		"desc":"The configuration to load",
+		"has_arg":true
+	},
+
+	"console":{
+		"short":"c",
+		"long":"console",
+		"desc":"Runs in console mode",
+		"has_arg":false
+	},
+
+	"contexts":{	
+		"long":"contexts",
+		"desc":"Number of contexts to create",
+		"has_arg":true
+	},
+
+	"clean":{	
+		"long":"clean",
+		"desc":"Clean the database and other state",
+		"has_arg":false
+	},
+	
+	"home":{	
+		"long":"home",
+		"desc":"Home directory for database and other data",
+		"has_arg":true
+	},
+	
+	"singleton":{	
+		"long":"singleton",
+		"desc":"Network is singletons (one node per shard for testing)",
+		"has_arg":false
+	},
+	
+	"godix":{	
+		"long":"godix",
+		"desc":"Whether GODIX mode is enabled",
+		"has_arg":false
+	},
+	
+	"debug":{	
+		"long":"debug",
+		"desc":"Enable debug options and logging",
+		"has_arg":false
+	},
+	
+	"info":{	
+		"long":"info",
+		"desc":"Enable info logging",
+		"has_arg":false
+	},
+
+	"skipbls":{	
+		"long":"skipbls",
+		"desc":"Skips BLS signing and verification",
+		"has_arg":false
+	},
+	
+	"skipec":{	
+		"long":"skipec",
+		"desc":"Skips EC signing and verification",
+		"has_arg":false
+	},
+
+	"skipmerkle":{	
+		"long":"skipmerkle",
+		"desc":"Skips Merkle auditing",
+		"has_arg":false
+	}
+}		

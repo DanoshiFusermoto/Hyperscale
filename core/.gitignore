@@ -1,0 +1,19 @@
+/*.*
+!/.gitignore
+!/build.gradle.kts
+
+# gradle intermediate
+.gradle/
+
+# build intermediate
+build/
+
+# eclipse project
+bin/
+.settings/
+.project
+.classpath
+
+# execution intermediate
+/database/
+/logs/
