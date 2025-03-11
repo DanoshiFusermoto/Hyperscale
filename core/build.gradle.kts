@@ -32,12 +32,8 @@ tasks.jar {
 }
 
 dependencies {
-    // JUnit Jupiter dependency configuration
-    testImplementation(platform("org.junit:junit-bom:5.9.2"))
-    testImplementation("org.junit.jupiter:junit-jupiter-api")
-    testImplementation("org.junit.jupiter:junit-jupiter-params")
-    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine")
-    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    // JUnit 4 dependencies
+    testImplementation("junit:junit:4.13.2")
 
     // This dependency is exported to consumers, that is to say found on their compile classpath.
     api(libs.commons.math3)
@@ -99,75 +95,24 @@ java {
     }
 }
 
+// Standard source sets configuration
 sourceSets {
     main {
         java {
             srcDirs("src/main/java")
         }
     }
-
-    create("unit") {
+    
+    test {
         java {
-            srcDir("src/test/unit")
-            compileClasspath += sourceSets.main.get().output
-            runtimeClasspath += sourceSets.main.get().output
-        }
-    }
-
-    create("integration") {
-        java {
-            srcDir("src/test/integration")
-            compileClasspath += sourceSets.main.get().output
-            runtimeClasspath += sourceSets.main.get().output
-        }
-    }
-
-    create("system") {
-        java {
-            srcDir("src/test/system")
-            compileClasspath += sourceSets.main.get().output
-            runtimeClasspath += sourceSets.main.get().output
+            srcDirs("src/test/java")
         }
     }
 }
 
-// Configure the test task for the main sourceSet
-tasks.named<Test>("test") {
-    useJUnitPlatform()
-    testLogging {
-        events("passed", "skipped", "failed")
-    }
-}
-
-// Configure custom test tasks for each custom sourceSet
-tasks.register<Test>("unitTest") {
-    description = "Runs unit tests."
-    group = "verification"
-    testClassesDirs = sourceSets["unit"].output.classesDirs
-    classpath = sourceSets["unit"].runtimeClasspath
-    useJUnitPlatform()
-    testLogging {
-        events("passed", "skipped", "failed")
-    }
-}
-
-tasks.register<Test>("integrationTest") {
-    description = "Runs integration tests."
-    group = "verification"
-    testClassesDirs = sourceSets["integration"].output.classesDirs
-    classpath = sourceSets["integration"].runtimeClasspath
-    useJUnitPlatform()
-    testLogging {
-        events("passed", "skipped", "failed")
-    }
-}
-
-tasks.register<Test>("systemTest") {
-    description = "Runs system tests."
-    group = "verification"
-    testClassesDirs = sourceSets["system"].output.classesDirs
-    classpath = sourceSets["system"].runtimeClasspath
-    useJUnitPlatform()
+// Configure the test task to run JUnit 4 tests
+tasks.test {
+    useJUnit()  // This configures Gradle to use JUnit 4
     testLogging {
         events("passed", "skipped", "failed")
     }
