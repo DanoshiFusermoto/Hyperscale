@@ -12,5 +12,3 @@ plugins {
 
 rootProject.name = "Hyperscale"
 include("core")
-include(":incubator-milagro-java")
-project(":incubator-milagro-java").projectDir = file("../incubator-milagro-java")
