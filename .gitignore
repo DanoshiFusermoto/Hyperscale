@@ -15,6 +15,7 @@ build
 !.java-version
 !.dockerignore
 !compose.yml
+!.devcontainer
 
 # A directory used as bind mount in a docker setup
 run
