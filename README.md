@@ -67,6 +67,48 @@ Hyperscale builds on and extends several key areas of distributed systems resear
 - Cross-shard atomic commitment
 - Distributed validator coordination
 
+## Installation
+
+### MacOS
+
+On MacOS, you can install gradle and OpenJDK version 21 using [Homebrew](https://brew.sh):
+```
+brew install gradle openjdk@21
+```
+
+You can check which Java version `gradle` is using by running:
+```
+gradle --version
+```
+
+This is likely Java 23, while we need Java 21.
+
+You can tell `gradle` to use Java 21 by running:
+```
+export JAVA_HOME=`/usr/libexec/java_home -v 21`
+```
+
+This will only change the Java version in your current running terminal, so you'd need to run it every time you want to build Hyperscale. You can add this line to `~/.zshrc` to make it persistant.
+
+## Building
+
+You can build Hyperscale by running
+```
+gradle jar
+```
+
+## Running
+
+After building Hyperscale you can find the jar file in `core/build/libs/hyperscale.jar`. 
+
+* Copy this jar file into a new directory. 
+* Copy the two `.key` files in the `core/` into the same directory. 
+
+You can now start Hyperscale by running:
+```
+java -jar hyperscale.jar -console -singleton
+```
+
 ## Contributing
 
 While this is primarily a research prototype, we welcome discussion and feedback on the consensus mechanisms and cross-shard protocols demonstrated here.
