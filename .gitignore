@@ -13,3 +13,8 @@ build
 !/gradle/wrapper/gradle-wrapper.properties
 !.github/
 !.java-version
+!.dockerignore
+!compose.yml
+
+# A directory used as bind mount in a docker setup
+run
