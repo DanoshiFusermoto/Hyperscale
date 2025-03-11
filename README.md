@@ -5,13 +5,17 @@ Hyperscale is a prototype sharded Layer 1 blockchain demonstrating novel consens
 ## Key Features
 
 ### Cassandra Consensus
+
 Hyperscale introduces Cassandra, a hybrid consensus mechanism that combines:
+
 - Classical BFT-style safety guarantees during healthy network conditions
 - Nakamoto-style probabilistic safety during network distress
 - Maintained liveness throughout all network conditions
 
 ### Cross-Shard Atomic Commitment
+
 Built on Cerberus principles, Hyperscale implements atomic cross-shard transactions through:
+
 - Coordinated consensus orchestration between shards
 - Deterministic commit/abort decisions
 - Fault-tolerant message propagation
@@ -19,6 +23,7 @@ Built on Cerberus principles, Hyperscale implements atomic cross-shard transacti
 ## Technical Implementation
 
 The prototype includes core cryptographic and consensus elements:
+
 - Validator signature verification
 - Merkle proof generation and validation
 - Validator voting mechanics
@@ -28,18 +33,22 @@ The prototype includes core cryptographic and consensus elements:
 ## Scope and Limitations
 
 This prototype is designed to demonstrate the feasibility of:
+
 1. High-throughput transaction processing
 2. Low-finality confirmation times
 3. Atomic cross-shard consensus
 4. Permissionless validator participation
 
 ### Intellectual Property Protection
+
 Several critical mechanisms required to develop a main net deployment are intentionally omitted to protect valuable intellectual property, including:
+
 - Shard reconfiguration algorithms to dynamically adjust to changing load over time
 - Validator shuffling mechanisms between shards (designed to prevent adversarial shard control)
 - Novel asymmetric proposal weighting function that creates computational overhead for attackers while remaining efficient for honest participants
 
 ### Implementation Notes
+
 - This codebase was developed as a research prototype to demonstrate consensus mechanisms and cross-shard atomic commitment
 - Code quality reflects research priorities rather than production standards
 - Contains expected "code smell" as the focus was on proving theoretical concepts rather than maintaining optimal code structure
@@ -50,6 +59,7 @@ While the implementation includes all essential elements to prove these capabili
 ## Architecture Overview
 
 The system operates through several key components:
+
 - Consensus engine (Cassandra)
 - Cross-shard communication protocol
 - Validator management system
@@ -62,6 +72,7 @@ This is a research prototype intended to demonstrate the viability of specific c
 ## Research Background
 
 Hyperscale builds on and extends several key areas of distributed systems research:
+
 - Byzantine Fault Tolerance protocols
 - Nakamoto consensus
 - Cross-shard atomic commitment
@@ -72,39 +83,74 @@ Hyperscale builds on and extends several key areas of distributed systems resear
 ### MacOS
 
 On MacOS, you can install gradle and OpenJDK version 21 using [Homebrew](https://brew.sh):
+
 ```
 brew install gradle openjdk@21
 ```
 
 You can check which Java version `gradle` is using by running:
+
 ```
 gradle --version
 ```
 
-This is likely Java 23, while we need Java 21.
+This is likely to be Java 23, while we need Java 21.
+We can tell it which version to use by setting JAVA_HOME.
 
-You can tell `gradle` to use Java 21 by running:
-```
-export JAVA_HOME=`/usr/libexec/java_home -v 21`
+On Apple Silicon macs, homebrew should install the openjdk to `/opt/homebrew/opt/openjdk@21`
+This may be different for intel macs, it could be `/usr/local/opt/openjdk@21`
+
+To use java 21 in the current shell session, run the following command:
+
+For Apple Silicon:
+
+```bash
+export JAVA_HOME="/opt/homebrew/opt/openjdk@21"
 ```
 
-This will only change the Java version in your current running terminal, so you'd need to run it every time you want to build Hyperscale. You can add this line to `~/.zshrc` to make it persistant.
+For Intel:
+
+```bash
+export JAVA_HOME="/usr/local/opt/openjdk@21"
+```
+
+This will only change the Java version in your current running terminal, so you'd need to run it every time you want to build/run Hyperscale. To make this persist across shell restarts, add it to `~/.zshrc`:
+
+For Apple Silicon:
+
+```bash
+cat << 'EOF' >> ~/.zshrc
+# Set the openjdk version 21 as JAVA_HOME
+export JAVA_HOME="/opt/homebrew/opt/openjdk@21"
+EOF
+```
+
+For intel:
+
+```bash
+cat << 'EOF' >> ~/.zshrc
+# Set the openjdk version 21 as JAVA_HOME
+export JAVA_HOME="/usr/local/opt/openjdk@21"
+EOF
+```
 
 ## Building
 
 You can build Hyperscale by running
+
 ```
 gradle jar
 ```
 
 ## Running
 
-After building Hyperscale you can find a `hyperscale.jar` file in `core/build/libs/`. 
+After building Hyperscale you can find a `hyperscale.jar` file in `core/build/libs/`.
 
-* Copy the `hyperscale.jar` jar file into a new directory. 
-* Copy the `node-0.key` and `universe.key` files from `core/` into the same directory. 
+- Copy the `hyperscale.jar` jar file into a new directory.
+- Copy the `node-0.key` and `universe.key` files from `core/` into the same directory.
 
 You can now start Hyperscale by going to the newly created directory and run:
+
 ```
 java -jar hyperscale.jar -console -singleton
 ```
