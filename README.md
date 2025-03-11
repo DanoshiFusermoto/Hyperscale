@@ -99,12 +99,12 @@ gradle jar
 
 ## Running
 
-After building Hyperscale you can find the jar file in `core/build/libs/hyperscale.jar`. 
+After building Hyperscale you can find a `hyperscale.jar` file in `core/build/libs/`. 
 
-* Copy this jar file into a new directory. 
-* Copy the two `.key` files in the `core/` into the same directory. 
+* Copy the `hyperscale.jar` jar file into a new directory. 
+* Copy the `node-0.key` and `universe.key` files from `core/` into the same directory. 
 
-You can now start Hyperscale by running:
+You can now start Hyperscale by going to the newly created directory and run:
 ```
 java -jar hyperscale.jar -console -singleton
 ```
