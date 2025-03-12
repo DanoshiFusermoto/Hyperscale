@@ -78,46 +78,27 @@ Hyperscale builds on and extends several key areas of distributed systems resear
 - Cross-shard atomic commitment
 - Distributed validator coordination
 
-## Installation
+## Installation / building from source
 
 ### MacOS
 
-On MacOS, you can install gradle and OpenJDK version 21 using [Homebrew](https://brew.sh):
+On MacOS, you can install the correct OpenJDK using [Homebrew](https://brew.sh):
 
 ```
-brew install gradle openjdk@21
+brew install openjdk@21
 ```
-
-You can check which Java version `gradle` is using by running:
-
-```
-gradle --version
-```
-
-This is likely to be Java 23, while we need Java 21.
-We can tell it which version to use by setting JAVA_HOME.
 
 On Apple Silicon macs, homebrew should install the openjdk to `/opt/homebrew/opt/openjdk@21`
-This may be different for intel macs, it could be `/usr/local/opt/openjdk@21`
+This may be different for intel macs, it could be `/usr/local/opt/openjdk@21`.
 
-To use java 21 in the current shell session, run the following command:
-
-For Apple Silicon:
+To use this openjdk in the current shell session, export the JAVA_HOME variable using the following command:
 
 ```bash
 export JAVA_HOME="/opt/homebrew/opt/openjdk@21"
-```
-
-For Intel:
-
-```bash
-export JAVA_HOME="/usr/local/opt/openjdk@21"
 ```
 
 This will only change the Java version in your current running terminal, so you'd need to run it every time you want to build/run Hyperscale. To make this persist across shell restarts, add it to `~/.zshrc`:
 
-For Apple Silicon:
-
 ```bash
 cat << 'EOF' >> ~/.zshrc
 # Set the openjdk version 21 as JAVA_HOME
@@ -125,21 +106,10 @@ export JAVA_HOME="/opt/homebrew/opt/openjdk@21"
 EOF
 ```
 
-For intel:
-
-```bash
-cat << 'EOF' >> ~/.zshrc
-# Set the openjdk version 21 as JAVA_HOME
-export JAVA_HOME="/usr/local/opt/openjdk@21"
-EOF
-```
-
-## Building
-
-You can build Hyperscale by running
+You can build Hyperscale by running the gradle wrapper script
 
 ```
-gradle jar
+./gradlew jar
 ```
 
 ## Running
