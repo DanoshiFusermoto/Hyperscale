@@ -1,0 +1,19 @@
+services:
+  hyperscale:
+    build: .
+    container_name: hyperscale
+    # Bind a 'run' directory to the container, which may contain
+    # the config file, keys, etc and will be used to store the logs and database
+    volumes:
+      - ./run:/app:rw
+    ports:
+      # Expose the port for the http dashboard
+      - "8080:8080"
+      # Gossip port
+      - "30000:30000"
+    # Override the command if you need to, for example to run singleton mode
+    # command: ["java", "-jar", "/jar/hyperscale.jar", "-console", "-singleton"]
+    # Satisfy the send/receive buffer size requirements
+    sysctls:
+      net.core.rmem_max: 1048576
+      net.core.wmem_max: 1048576

@@ -1,0 +1,11 @@
+{
+  "name": "jdk-21",
+  "image": "gradle:8.13.0-jdk21",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "vscjava.vscode-gradle"
+      ]
+    }
+  }
+}
