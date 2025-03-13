@@ -284,8 +284,7 @@ public final class DatabaseEnvironment
 	public void deregister(final DatabaseStore database)
 	{
 		Objects.requireNonNull(database, "Database to deregister is null");
-		if (this.databases.containsKey(database.getClass()))
-			this.databases.remove(database.getClass());
+        this.databases.remove(database.getClass());
 	}
 
 	public OperationStatus put(final Transaction transaction, final String resource, final String key, final byte[] value)
