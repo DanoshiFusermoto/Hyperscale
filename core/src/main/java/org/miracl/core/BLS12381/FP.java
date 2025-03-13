@@ -22,11 +22,57 @@
 package org.miracl.core.BLS12381;
 import org.miracl.core.RAND;
 
-public final class FP {
+public final class FP 
+{
+	private static final ThreadLocal<FP[]> equalsFP_2 = ThreadLocal.withInitial(() -> new FP[] { new FP(0), new FP(0) });
+	private static final ThreadLocal<BIG[]> reduceBIG_2 = ThreadLocal.withInitial(() -> new BIG[] { new BIG(0), new BIG(0) });
+	
+	private static final ThreadLocal<FP> subFP = ThreadLocal.withInitial(() -> new FP(0));
+	private static final ThreadLocal<FP> rsubFP = ThreadLocal.withInitial(() -> new FP(0));
+	
+	private static final ThreadLocal<FP> inverseFP = ThreadLocal.withInitial(() -> new FP());
+
+	private static final ThreadLocal<FP[]> fpowFP_2 = ThreadLocal.withInitial(() -> new FP[] { new FP(0), new FP(0) });
+	private static final ThreadLocal<FP[]> fpowFP_11 = ThreadLocal.withInitial(() -> new FP[] { new FP(), new FP(), new FP(), new FP(), new FP(), new FP(), new FP(), new FP(), new FP(), new FP(), new FP() });
+
+	private static final ThreadLocal<long[]> modLONG_2 = ThreadLocal.withInitial(() -> new long[2]);
+	private static final ThreadLocal<BIG> modBIG = ThreadLocal.withInitial(() -> new BIG(0));
+
+	private static final ThreadLocal<BIG> negBIG = ThreadLocal.withInitial(() -> new BIG(0));
+	
+	private static final ThreadLocal<BIG> nresBIG = ThreadLocal.withInitial(() -> new BIG(0));
+	private static final ThreadLocal<DBIG> nresDBIG = ThreadLocal.withInitial(() -> new DBIG(0));
+
+	private static final ThreadLocal<BIG> progenBIG = ThreadLocal.withInitial(() -> new BIG(0));
+	
+	private static final ThreadLocal<FP[]> powFP_16 = ThreadLocal.withInitial(() -> { FP arr[] = {new FP(), new FP(), new FP(), new FP(), new FP(), new FP(), new FP(), new FP(), new FP(), new FP(), new FP(), new FP(), new FP(), new FP(), new FP(), new FP()}; return arr;});
+	private static final ThreadLocal<BIG> powBIG = ThreadLocal.withInitial(() -> new BIG(0));
+	private static final ThreadLocal<byte[]> powBYTE = ThreadLocal.withInitial(() -> new byte[1 + (BIG.NLEN * CONFIG_BIG.BASEBITS + 3) / 4]);
+	
+	private static final ThreadLocal<BIG> mulBIG = ThreadLocal.withInitial(() -> new BIG(0));
+	private static final ThreadLocal<DBIG> mulDBIG = ThreadLocal.withInitial(() -> new DBIG(0));
+
+	private static final ThreadLocal<BIG> sqrBIG = ThreadLocal.withInitial(() -> new BIG(0));
+	private static final ThreadLocal<DBIG> sqrDBIG = ThreadLocal.withInitial(() -> new DBIG(0));
 
     public static final long OMASK = (long)(-1) << (CONFIG_FIELD.MODBITS % CONFIG_BIG.BASEBITS);
     public static final int TBITS = CONFIG_FIELD.MODBITS % CONFIG_BIG.BASEBITS; // Number of active bits in top word
     public static final long TMASK = ((long)1 << TBITS) - 1;
+    
+	public static final FP ONE = new FP(1);
+	public final static FP ROM_CURVE_HTPC2 = new FP(BIG.ROM_CURVE_HTPC2);
+	public static final FP ROM_CURVE_HTPC = new FP(BIG.ROM_CURVE_HTPC);
+	public static final FP ROM_CURVE_Ad = new FP(BIG.ROM_CURVE_Ad);
+	public static final FP ROM_CURVE_Bd = new FP(BIG.ROM_CURVE_Bd);
+	public static final FP ROM_CURVE_A = new FP(CONFIG_CURVE.CURVE_A);
+	public static final FP ROM_CURVE_B = new FP(BIG.ROM_CURVE_B);
+	public static final FP ROM_PC[];
+	static
+	{
+		ROM_PC = new FP[ROM.PC.length];
+		for (int i = 0 ; i < ROM.PC.length ; i++)
+			ROM_PC[i] = new FP(new BIG(ROM.PC[i]));
+	}
 
     public final BIG x;
     public int XES;
@@ -34,45 +80,52 @@ public final class FP {
     /**************** 64-bit specific ************************/
 
     /* reduce a DBIG to a BIG using the appropriate form of the modulus */
-    public static BIG mod(DBIG d) {
+    public static BIG mod(DBIG d)
+    {
+    	BIG o=new BIG(0);
+    	mod(d, o);
+    	return o;
+    }
+
+    /* reduce a DBIG to a BIG using the appropriate form of the modulus */
+    public static BIG mod(DBIG d, BIG o) 
+    {
         if (CONFIG_FIELD.MODTYPE == CONFIG_FIELD.PSEUDO_MERSENNE) {
             BIG b;
             long v, tw;
-            BIG t = d.split(CONFIG_FIELD.MODBITS);
-            b = new BIG(d);
+            d.split(CONFIG_FIELD.MODBITS, o);
+            b = modBIG.get(); b.copy(d);
 
-            v = t.pmul((int)ROM.MConst);
+            v = o.pmul((int)ROM.MConst);
 
-            t.add(b);
-            t.norm();
+            o.add(b);
+            o.norm();
 
-            tw = t.w[BIG.NLEN - 1];
-            t.w[BIG.NLEN - 1] &= FP.TMASK;
-            t.w[0] += (ROM.MConst * ((tw >> TBITS) + (v << (CONFIG_BIG.BASEBITS - TBITS))));
+            tw = o.w[BIG.NLEN - 1];
+            o.w[BIG.NLEN - 1] &= FP.TMASK;
+            o.w[0] += (ROM.MConst * ((tw >> TBITS) + (v << (CONFIG_BIG.BASEBITS - TBITS))));
 
-            t.norm();
-            return t;
+            o.norm();
+            return o;
         }
         if (CONFIG_FIELD.MODTYPE == CONFIG_FIELD.MONTGOMERY_FRIENDLY) {
-            BIG b;
             long[] cr = new long[2];
             for (int i = 0; i < BIG.NLEN; i++) {
-                cr = BIG.muladd(d.w[i], ROM.MConst - 1, d.w[i], d.w[BIG.NLEN + i - 1]);
+                BIG.muladd(d.w[i], ROM.MConst - 1, d.w[i], d.w[BIG.NLEN + i - 1], cr);
                 d.w[BIG.NLEN + i] += cr[0];
                 d.w[BIG.NLEN + i - 1] = cr[1];
             }
 
-            b = new BIG(0);
             for (int i = 0; i < BIG.NLEN; i++ )
-                b.w[i] = d.w[BIG.NLEN + i];
-            b.norm();
-            return b;
+                o.w[i] = d.w[BIG.NLEN + i];
+            o.norm();
+            return o;
         }
         if (CONFIG_FIELD.MODTYPE == CONFIG_FIELD.GENERALISED_MERSENNE) {
             // GoldiLocks Only
             BIG b;
             BIG t = d.split(CONFIG_FIELD.MODBITS);
-            b = new BIG(d);
+            b = modBIG.get(); b.copy(d);
             b.add(t);
             DBIG dd = new DBIG(t);
             dd.shl(CONFIG_FIELD.MODBITS / 2);
@@ -91,13 +144,15 @@ public final class FP {
 
             b.w[224 / CONFIG_BIG.BASEBITS] += carry << (224 % CONFIG_BIG.BASEBITS);
             b.norm();
-            return b;
+            o.copy(b);
+            return o;
         }
         if (CONFIG_FIELD.MODTYPE == CONFIG_FIELD.NOT_SPECIAL) {
-            return BIG.monty(new BIG(ROM.Modulus), ROM.MConst, d);
+            return BIG.monty(BIG.ROM_MODULUS, ROM.MConst, d, o);
         }
 
-        return new BIG(0);
+        o.zero();
+        return o;
     }
 
     private static int quo(BIG n, BIG m) {
@@ -116,9 +171,11 @@ public final class FP {
     }
 
     /* reduce this mod Modulus */
-    public void reduce() {
-        BIG m = new BIG(ROM.Modulus);
-        BIG r = new BIG(ROM.Modulus);
+    public void reduce() 
+    {
+    	BIG[] BIG_2 = reduceBIG_2.get();
+        BIG m = BIG_2[0]; m.copy(BIG.ROM_MODULUS);
+        BIG r = BIG_2[1]; r.copy(BIG.ROM_MODULUS);
         int sr, sb, q;
         long carry;
         x.norm();
@@ -195,11 +252,14 @@ public final class FP {
     /* convert to Montgomery n-residue form */
     public void nres() {
         if (CONFIG_FIELD.MODTYPE != CONFIG_FIELD.PSEUDO_MERSENNE && CONFIG_FIELD.MODTYPE != CONFIG_FIELD.GENERALISED_MERSENNE) {
-            DBIG d = BIG.mul(x, new BIG(ROM.R2modp)); /*** Change ***/
-            x.copy(mod(d));
+        	BIG o = nresBIG.get();
+        	DBIG d = nresDBIG.get();
+            BIG.mul(x, BIG.ROM_R2MODP, d);
+            mod(d, o);
+            x.copy(o);
             XES = 2;
         } else {
-            BIG m = new BIG(ROM.Modulus);
+            BIG m = BIG.ROM_MODULUS;
             x.mod(m);
             XES = 1;
         }
@@ -287,7 +347,11 @@ public final class FP {
     }
 
     /* normalise this */
-    public void norm() {
+    public void norm() 
+    {
+    	if (XES == 1)
+    		return;
+    	
         x.norm();
     }
 
@@ -309,13 +373,24 @@ public final class FP {
     }
 
     /* this*=b mod Modulus */
-    public void mul(FP b) {
-        if ((long)XES * b.XES > (long)CONFIG_FIELD.FEXCESS) reduce();
+	public void mul(FP b)
+	{
+		if ((long)XES * b.XES > (long)CONFIG_FIELD.FEXCESS) reduce();
 
-        DBIG d = BIG.mul(x, b.x);
-        x.copy(mod(d));
-        XES = 2;
-    }
+		if (x.iszilch() || b.x.iszilch())
+	    {
+	        x.zero();
+	        XES = 1;
+	        return;
+	    }
+		
+		BIG o=mulBIG.get(); o.zero();
+		DBIG d=mulDBIG.get(); d.zero();
+		BIG.mul(x,b.x,d);
+		mod(d, o);
+        x.copy(o);
+		XES=2;
+	}
 
     /* this*=c mod Modulus, where c is a small int */
     public void imul(int c) {
@@ -345,12 +420,15 @@ public final class FP {
     }
 
     /* this*=this mod Modulus */
-    public void sqr() {
-        DBIG d;
+    public void sqr() 
+    {
         if ((long)XES * XES > (long)CONFIG_FIELD.FEXCESS) reduce();
 
-        d = BIG.sqr(x);
-        x.copy(mod(d));
+		BIG o=sqrBIG.get(); // o.zero();
+        DBIG d=sqrDBIG.get(); d.zero();
+        BIG.sqr(x, d);
+        mod(d, o);
+        x.copy(o);
         XES = 2;
     }
 
@@ -381,7 +459,7 @@ public final class FP {
     /* this = -this mod Modulus */
     public void neg() {
         int sb;
-        BIG m = new BIG(ROM.Modulus);
+        BIG m = negBIG.get(); m.copy(BIG.ROM_MODULUS);
 
         sb = logb2(XES - 1);
         m.fshl(sb);
@@ -393,13 +471,13 @@ public final class FP {
 
     /* this-=b */
     public void sub(FP b) {
-        FP n = new FP(b);
+        FP n = subFP.get(); n.copy(b);
         n.neg();
         this.add(n);
     }
 
     public void rsub(FP b) {
-        FP n = new FP(this);
+        FP n = rsubFP.get(); n.copy(this);
         n.neg();
         this.copy(b);
         this.add(n);
@@ -407,7 +485,7 @@ public final class FP {
 
     /* this/=2 mod Modulus */
     public void div2() {
-        BIG m=new BIG(ROM.Modulus);
+        BIG m=BIG.ROM_MODULUS;
         int pr=x.parity();
         BIG w = new BIG(x);
         x.fshr(1);
@@ -424,20 +502,25 @@ public final class FP {
     }
 
     /* return TRUE if this==a */
-    public boolean equals(FP a) {
-        FP f = new FP(this);
-        FP s = new FP(a);
+    public boolean equals(FP a) 
+    {
+    	FP[] FP_2 = equalsFP_2.get();
+        FP f = FP_2[0]; f.copy(this);
+        FP s = FP_2[1]; s.copy(a);
         f.reduce();
         s.reduce();
         if (BIG.comp(f.x, s.x) == 0) return true;
         return false;
     }
 
-    private FP pow(BIG e) {
-        byte[] w = new byte[1 + (BIG.NLEN * CONFIG_BIG.BASEBITS + 3) / 4];
-        FP [] tb = new FP[16];
+    private FP pow(BIG e) 
+    {
+        byte[] w = powBYTE.get();
+        FP [] tb = powFP_16.get();
+        
         norm();
-        BIG t = new BIG(e);
+        
+        BIG t = powBIG.get(); t.copy(e);
         t.norm();
         int nb = 1 + (t.nbits() + 3) / 4;
 
@@ -448,12 +531,14 @@ public final class FP {
             w[i] = (byte)lsbs;
             t.fshr(4);
         }
-        tb[0] = new FP(1);
-        tb[1] = new FP(this);
-        for (int i = 2; i < 16; i++) {
-            tb[i] = new FP(tb[i - 1]);
+        tb[0].one();
+        tb[1].copy(this);
+        for (int i = 2; i < 16; i++) 
+        {
+            tb[i].copy(tb[i - 1]);
             tb[i].mul(this);
         }
+        
         FP r = new FP(tb[w[nb - 1]]);
         for (int i = nb - 2; i >= 0; i--) {
             r.sqr();
@@ -468,23 +553,24 @@ public final class FP {
 
 
 // See eprint paper https://eprint.iacr.org/2018/1038
+    private final static int[]  FPOW_AC = {1, 2, 3, 6, 12, 15, 30, 60, 120, 240, 255};
     private FP fpow() {
         int i, j, k, bw, w, c, nw, lo, m, n, nd, e=CONFIG_FIELD.PM1D2;
-        FP [] xp = new FP[11];
-        int[]  ac = {1, 2, 3, 6, 12, 15, 30, 60, 120, 240, 255};
+        FP [] xp = fpowFP_11.get();
+        FP[] FP_2 = fpowFP_2.get();
 // phase 1
 
-        xp[0] = new FP(this);	// 1
-        xp[1] = new FP(this); xp[1].sqr(); // 2
-        xp[2] = new FP(xp[1]); xp[2].mul(this); //3
-        xp[3] = new FP(xp[2]); xp[3].sqr(); // 6
-        xp[4] = new FP(xp[3]); xp[4].sqr(); // 12
-        xp[5] = new FP(xp[4]); xp[5].mul(xp[2]); // 15
-        xp[6] = new FP(xp[5]); xp[6].sqr(); // 30
-        xp[7] = new FP(xp[6]); xp[7].sqr(); // 60
-        xp[8] = new FP(xp[7]); xp[8].sqr(); // 120
-        xp[9] = new FP(xp[8]); xp[9].sqr(); // 240
-        xp[10] = new FP(xp[9]); xp[10].mul(xp[5]); // 255
+        xp[0].copy(this);	// 1
+        xp[1].copy(this); xp[1].sqr(); // 2
+        xp[2].copy(xp[1]); xp[2].mul(this); //3
+        xp[3].copy(xp[2]); xp[3].sqr(); // 6
+        xp[4].copy(xp[3]); xp[4].sqr(); // 12
+        xp[5].copy(xp[4]); xp[5].mul(xp[2]); // 15
+        xp[6].copy(xp[5]); xp[6].sqr(); // 30
+        xp[7].copy(xp[6]); xp[7].sqr(); // 60
+        xp[8].copy(xp[7]); xp[8].sqr(); // 120
+        xp[9].copy(xp[8]); xp[9].sqr(); // 240
+        xp[10].copy(xp[9]); xp[10].mul(xp[5]); // 255
 
         n = CONFIG_FIELD.MODBITS;
         if (CONFIG_FIELD.MODTYPE == CONFIG_FIELD.GENERALISED_MERSENNE) // Goldilocks ONLY
@@ -505,17 +591,18 @@ public final class FP {
         bw = 0; w = 1; while (w < c) {w *= 2; bw += 1;}
         k = w - c;
 
-        FP key = new FP(); i = 10;
+        FP key = FP_2[0]; 
+        i = 10;
         if (k != 0) {
-            while (ac[i] > k) i--;
+            while (FPOW_AC[i] > k) i--;
             key.copy(xp[i]);
-            k -= ac[i];
+            k -= FPOW_AC[i];
         }
         while (k != 0) {
             i--;
-            if (ac[i] > k) continue;
+            if (FPOW_AC[i] > k) continue;
             key.mul(xp[i]);
-            k -= ac[i];
+            k -= FPOW_AC[i];
         }
 
 // phase 2
@@ -525,8 +612,8 @@ public final class FP {
 
         j = 3; m = 8;
         nw = n - bw;
-        FP t = new FP();
 
+        FP t = FP_2[1]; 
         while (2 * m < nw) {
             t.copy(xp[j++]);
             for (i = 0; i < m; i++)
@@ -572,7 +659,7 @@ public final class FP {
         return r;
     }
 
-// calculates r=x^(p-1-2^e)/2^{e+1) where 2^e|p-1
+ // calculates r=x^(p-1-2^e)/2^{e+1) where 2^e|p-1
     private void progen() {
         if (CONFIG_FIELD.MODTYPE == CONFIG_FIELD.PSEUDO_MERSENNE || CONFIG_FIELD.MODTYPE == CONFIG_FIELD.GENERALISED_MERSENNE) 
         {
@@ -580,7 +667,7 @@ public final class FP {
             return;
         }
         int e=CONFIG_FIELD.PM1D2;
-        BIG m = new BIG(ROM.Modulus);
+        BIG m = progenBIG.get(); m.copy(BIG.ROM_MODULUS);
         m.dec(1);
         m.shr(e);
         m.dec(1);
@@ -589,22 +676,26 @@ public final class FP {
     }
 
     /* this=1/this mod Modulus */
-    public void inverse(FP h) {
+    public void inverse(FP h) 
+    {
         int e=CONFIG_FIELD.PM1D2;
         norm();
-        FP s=new FP(this);
 
+        FP s=inverseFP.get(); s.copy(this);
         for (int i=0;i<e-1;i++)
         {
             s.sqr();
             s.mul(this);
         }
+        
         if (h==null)
             progen();
         else
             copy(h);
+        
         for (int i=0;i<=e;i++)
             sqr();
+        
         mul(s);
         reduce();
     } 

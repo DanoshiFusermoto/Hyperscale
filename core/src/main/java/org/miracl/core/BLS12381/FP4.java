@@ -24,7 +24,17 @@
 package org.miracl.core.BLS12381;
 import org.miracl.core.RAND;
 
-public final class FP4 {
+public final class FP4 
+{
+	// Working Variables //
+	private static final ThreadLocal<FP2[]> mulFP2_4 = ThreadLocal.withInitial(() -> new FP2[] {new FP2(), new FP2(), new FP2(), new FP2()});
+	private static final ThreadLocal<FP2[]> negFP2_2 = ThreadLocal.withInitial(() -> new FP2[] {new FP2(), new FP2()});
+	private static final ThreadLocal<FP2[]> sqrFP2_3 = ThreadLocal.withInitial(() -> new FP2[] {new FP2(), new FP2(), new FP2()});
+	private static final ThreadLocal<FP4>   subFP4 = ThreadLocal.withInitial(() -> new FP4());
+	private static final ThreadLocal<FP2>  	timesiFP2 = ThreadLocal.withInitial(() -> new FP2(0));
+
+	public static final FP4 ONE = new FP4(1);
+
 	private final FP2 a;
 	private final FP2 b;
 /* reduce all components of this mod Modulus */
@@ -80,9 +90,9 @@ public final class FP4 {
 	}
 
 /* test this==1 ? */
-	public boolean isunity() {
-		FP2 one=new FP2(1);
-		return (a.equals(one) && b.iszilch());
+	public boolean isunity() 
+	{
+		return (a.equals(FP2.ONE) && b.iszilch());
 	}
 
 /* test is w real? That is in a+ib test b is zero */
@@ -160,12 +170,24 @@ public final class FP4 {
         b=new FP2(rng);
     }
 
-/* copy this=x */
 	public void copy(FP4 x)
 	{
 		a.copy(x.a);
 		b.copy(x.b);
 	}
+	
+	public void copy(FP2 x)
+	{
+		a.copy(x);
+		b.zero();
+	}
+	
+	public void copy(FP2 x, FP2 y)
+	{
+		a.copy(x);
+		b.copy(y);
+	}
+
 /* set this=0 */
 	public void zero()
 	{
@@ -200,8 +222,9 @@ public final class FP4 {
 	public void neg()
 	{
 		norm();
-		FP2 m=new FP2(a);
-		FP2 t=new FP2();
+		FP2[] FP2_2 = negFP2_2.get();
+		FP2 m=FP2_2[0]; m.copy(a);
+		FP2 t=FP2_2[1];
 		m.add(b);
 		m.neg();
 		t.copy(m); t.add(b);
@@ -229,7 +252,7 @@ public final class FP4 {
 /* this-=x */
 	public void sub(FP4 x)
 	{
-		FP4 m=new FP4(x);
+		FP4 m=subFP4.get();m.copy(x);
 		m.neg();
 		add(m);
 	}
@@ -258,9 +281,10 @@ public final class FP4 {
 /* this*=this */	
 	public void sqr()
 	{
-		FP2 t1=new FP2(a);
-		FP2 t2=new FP2(b);
-		FP2 t3=new FP2(a);
+		FP2[] T = sqrFP2_3.get();
+		FP2 t1=T[0]; t1.copy(a);
+		FP2 t2=T[1]; t2.copy(b);
+		FP2 t3=T[2]; t3.copy(a);
 
 		t3.mul(b);
 		t1.add(b);
@@ -290,10 +314,11 @@ public final class FP4 {
 /* this*=y */
 	public void mul(FP4 y)
 	{
-		FP2 t1=new FP2(a);
-		FP2 t2=new FP2(b);
-		FP2 t3=new FP2();
-		FP2 t4=new FP2(b);
+		FP2[] T = mulFP2_4.get();
+		FP2 t1=T[0]; t1.copy(a);
+		FP2 t2=T[1]; t2.copy(b);
+		FP2 t3=T[2];
+		FP2 t4=T[3]; t4.copy(b);
 
 		t1.mul(y.a);
 		t2.mul(y.b);
@@ -356,7 +381,7 @@ public final class FP4 {
 /* this*=i where i = sqrt(-1+sqrt(-1)) */
 	public void times_i()
 	{
-		FP2 t=new FP2(b);
+		FP2 t=timesiFP2.get(); t.copy(b);
 		b.copy(a);
 		t.mul_ip();
 		a.copy(t);

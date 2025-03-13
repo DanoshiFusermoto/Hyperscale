@@ -22,8 +22,13 @@
 package org.miracl.core.BLS12381;
 import org.miracl.core.RAND;
 
-public class BIG {
-
+public class BIG 
+{
+	// Working Variables //
+	private static final ThreadLocal<long[]> mulLONG_2 = ThreadLocal.withInitial(() -> new long[2]);
+	private static final ThreadLocal<long[]> montyLONG_2 = ThreadLocal.withInitial(() -> new long[2]);
+	private static final ThreadLocal<BIG> nbitsBIG = ThreadLocal.withInitial(() -> new BIG(0));
+	
     public static final int CHUNK = 64; /* Set word size */
 
     public static final int NLEN = (1 + ((8 * CONFIG_BIG.MODBYTES - 1) / CONFIG_BIG.BASEBITS));
@@ -34,8 +39,21 @@ public class BIG {
     public static final long HMASK = (((long)1 << HBITS) - 1);
     public static final int NEXCESS = ((int)1 << (CHUNK - CONFIG_BIG.BASEBITS - 1));
     public static final int BIGBITS = (CONFIG_BIG.MODBYTES * 8);
+    
+	public static final BIG ROM_MODULUS = new BIG(ROM.Modulus); 
+	public static final BIG ROM_CURVE_B = new BIG(ROM.CURVE_B);
+    public static final BIG ROM_R2MODP = new BIG(ROM.R2modp); 
+	public static final BIG ROM_CURVE_HTPC = new BIG(ROM.CURVE_HTPC);
+	public static final BIG ROM_CURVE_HTPC2 = new BIG(ROM.CURVE_HTPC2);
+	public static final BIG ROM_CURVE_Ad = new BIG(ROM.CURVE_Ad);
+	public static final BIG ROM_CURVE_Bd = new BIG(ROM.CURVE_Bd);
+	public static final BIG ROM_CURVE_Adr = new BIG(ROM.CURVE_Adr);
+	public static final BIG ROM_CURVE_Bdr = new BIG(ROM.CURVE_Bdr);
+	public static final BIG ROM_CURVE_Adi = new BIG(ROM.CURVE_Adi);
+	public static final BIG ROM_CURVE_Bdi = new BIG(ROM.CURVE_Bdi);
 
     protected long[] w = new long[NLEN];
+    
     /* Constructors */
     public BIG() {
         for (int i = 0; i < NLEN; i++)
@@ -123,7 +141,7 @@ public class BIG {
 
     /* return number of bits */
     public int nbits() {
-        BIG t = new BIG(this);
+        BIG t = nbitsBIG.get(); t.copy(this);
         int bts, k = NLEN - 1;
         long c;
         t.norm();
@@ -164,11 +182,8 @@ public class BIG {
     }
 
     /* set this[i]+=x*y+c, and return high part */
-
-    public static long[] muladd(long a, long b, long c, long r) {
-// need JDK 9+
-
-        long[] tb = new long[2];
+    public static void muladd(long a, long b, long c, long r, long[] cr) 
+    {
         long tp=Math.multiplyHigh(a,b);  // useful intrinsic
         long bt=a*b;
         long bot=bt&BMASK;
@@ -177,32 +192,8 @@ public class BIG {
         long carry=bot >>> CONFIG_BIG.BASEBITS;
         bot &= BMASK;
         top+=carry;
-        tb[0] = top;
-        tb[1] = bot;
-        return tb;
-
-// alternate method
-/*
-        long x0, x1, y0, y1;
-        long[] tb = new long[2];
-        x0 = a & HMASK;
-        x1 = (a >> HBITS);
-        y0 = b & HMASK;
-        y1 = (b >> HBITS);
-        long bot = x0 * y0;
-        long top = x1 * y1;
-        long mid = x0 * y1 + x1 * y0;
-        x0 = mid & HMASK;
-        x1 = (mid >> HBITS);
-        bot += x0 << HBITS; bot += c; bot += r;
-        top += x1;
-        long carry = bot >> CONFIG_BIG.BASEBITS;
-        bot &= BMASK;
-        top += carry;
-        tb[0] = top;
-        tb[1] = bot;
-        return tb; 
-*/
+        cr[0] = top;
+        cr[1] = bot;
     }
 
     /* this*=x, where x is >NEXCESS */
@@ -214,7 +205,7 @@ public class BIG {
             ak = w[i];
             w[i] = 0;
 
-            cr = muladd(ak, (long)c, carry, w[i]);
+            muladd(ak, (long)c, carry, w[i], cr);
             carry = cr[0];
             w[i] = cr[1];
 
@@ -228,7 +219,7 @@ public class BIG {
         long[] cr = new long[2];
         long carry = 0;
         for (int j = 0; j < NLEN; j++) {
-            cr = muladd(w[j], (long)c, carry, m.w[j]);
+            muladd(w[j], (long)c, carry, m.w[j], cr);
             carry = cr[0];
             m.w[j] = cr[1];
         }
@@ -258,7 +249,7 @@ public class BIG {
             carry = 0;
             for (int j = 0; j < NLEN; j++)
                 if (i + j < NLEN) {
-                    cr = muladd(a.w[i], b.w[j], carry, c.w[i + j]);
+                    muladd(a.w[i], b.w[j], carry, c.w[i + j], cr);
                     carry = cr[0];
                     c.w[i + j] = cr[1];
                 }
@@ -266,77 +257,107 @@ public class BIG {
         return c;
     }
 
-    /* return a*b as DBIG */
-    /* Inputs must be normed */
-    public static DBIG mul(BIG a, BIG b) {
-        DBIG c = new DBIG(0);
-        long carry;
-        long[] cr = new long[2];
+	/* return a*b as DBIG */
+	/* Inputs must be normed */
+	public static DBIG mul(BIG a,BIG b)
+	{
+		return mul(a, b, new DBIG(0));
+	}
 
-        for (int i = 0; i < NLEN; i++) {
+	/* a*b as DBIG into o*/
+	/* Inputs must be normed */
+	public static DBIG mul(BIG a, BIG b, DBIG o)
+	{
+        long carry;
+        long[] cr = mulLONG_2.get();
+
+        o.zero();
+        for (int i = 0; i < NLEN; i++) 
+        {
             carry = 0;
-            for (int j = 0; j < NLEN; j++) {
-                cr = muladd(a.w[i], b.w[j], carry, c.w[i + j]);
+            for (int j = 0; j < NLEN; j++) 
+            {
+                muladd(a.w[i], b.w[j], carry, o.w[i + j], cr);
                 carry = cr[0];
-                c.w[i + j] = cr[1];
+                o.w[i + j] = cr[1];
             }
-            c.w[NLEN + i] = carry;
+            o.w[NLEN + i] = carry;
         }
 
-        return c;
+        return o;
     }
 
     /* return a^2 as DBIG */
     /* Input must be normed */
-    public static DBIG sqr(BIG a) {
-        DBIG c = new DBIG(0);
+    public static DBIG sqr(BIG a)
+   	{
+    	return sqr(a, new DBIG(0));
+   	}
+    
+    /* a^2 as DBIG into o */
+    /* Input must be normed */
+    public static DBIG sqr(BIG a, DBIG o) 
+    {
         long carry;
         long[] cr = new long[2];
 
-        for (int i = 0; i < NLEN; i++) {
+        for (int i = 0; i < NLEN; i++) 
+        {
             carry = 0;
-            for (int j = i + 1; j < NLEN; j++) {
-                cr = muladd(2 * a.w[i], a.w[j], carry, c.w[i + j]);
+            for (int j = i + 1; j < NLEN; j++) 
+            {
+                muladd(2 * a.w[i], a.w[j], carry, o.w[i + j], cr);
                 carry = cr[0];
-                c.w[i + j] = cr[1];
+                o.w[i + j] = cr[1];
             }
-            c.w[NLEN + i] = carry;
+            o.w[NLEN + i] = carry;
         }
 
-        for (int i = 0; i < NLEN; i++) {
-            cr = muladd(a.w[i], a.w[i], 0, c.w[2 * i]);
-            c.w[2 * i + 1] += cr[0];
-            c.w[2 * i] = cr[1];
+        for (int i = 0; i < NLEN; i++) 
+        {
+            muladd(a.w[i], a.w[i], 0, o.w[2 * i], cr);
+            o.w[2 * i + 1] += cr[0];
+            o.w[2 * i] = cr[1];
         }
-        c.norm();
-        return c;
+        o.norm();
+        return o;
     }
 
-    static BIG monty(BIG md, long MC, DBIG d) {
-        BIG b;
+    static BIG monty(BIG md, long MC, DBIG d) 
+    {
+    	BIG o = new BIG(0);
+    	monty(md, MC, d, o);
+    	return o;
+    }
+    
+    static BIG monty(BIG md, long MC, DBIG d, BIG o) 
+    {
         long m, carry;
-        long[] cr = new long[2];
-        for (int i = 0; i < NLEN; i++) {
-            if (MC == -1) m = (-d.w[i]) & BMASK;
-            else {
+        long[] cr = montyLONG_2.get();
+        for (int i = 0; i < NLEN; i++) 
+        {
+            if (MC == -1) 
+            	m = (-d.w[i]) & BMASK;
+            else 
+            {
                 if (MC == 1) m = d.w[i];
                 else m = (MC * d.w[i]) & BMASK;
             }
 
             carry = 0;
-            for (int j = 0; j < NLEN; j++) {
-                cr = muladd(m, md.w[j], carry, d.w[i + j]);
+            for (int j = 0; j < NLEN; j++) 
+            {
+                muladd(m, md.w[j], carry, d.w[i + j], cr);
                 carry = cr[0];
                 d.w[i + j] = cr[1];
             }
             d.w[NLEN + i] += carry;
         }
 
-        b = new BIG(0);
         for (int i = 0; i < NLEN; i++ )
-            b.w[i] = d.w[NLEN + i];
-        b.norm();
-        return b;
+            o.w[i] = d.w[NLEN + i];
+        o.norm();
+        return o;
     }
 
     public static int ssn(BIG r, BIG a, BIG m) {

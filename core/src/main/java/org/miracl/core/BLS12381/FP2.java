@@ -24,7 +24,30 @@
 package org.miracl.core.BLS12381;
 import org.miracl.core.RAND;
 
-public final class FP2 {
+public final class FP2 
+{
+	// Working Variables //
+	private static final ThreadLocal<BIG[]> mulBIG_3 = ThreadLocal.withInitial(() -> new BIG[] {new BIG(0), new BIG(0), new BIG(0)});
+	private static final ThreadLocal<DBIG[]> mulDBIG_5 = ThreadLocal.withInitial(() -> new DBIG[] {new DBIG(0), new DBIG(0), new DBIG(0), new DBIG(0), new DBIG(0)});
+	private static final ThreadLocal<FP[]> negFP_2 = ThreadLocal.withInitial(() -> new FP[] {new FP(0), new FP(0)});
+	private static final ThreadLocal<FP[]> sqrFP_3 = ThreadLocal.withInitial(() -> new FP[] {new FP(0), new FP(0), new FP(0)});
+	private static final ThreadLocal<FP2> subFP2 = ThreadLocal.withInitial(() -> new FP2(0));
+	private static final ThreadLocal<FP2> mulipFP2 = ThreadLocal.withInitial(() -> new FP2(0));
+	private static final ThreadLocal<FP2> qrFP2 = ThreadLocal.withInitial(() -> new FP2(0));
+	private static final ThreadLocal<FP>  timesiFP = ThreadLocal.withInitial(() -> new FP(0));
+
+	public static final FP2 ONE = new FP2(1);
+	public static final FP2 ROM_CURVE_ADRI = new FP2(BIG.ROM_CURVE_Adr, BIG.ROM_CURVE_Adi);
+	public static final FP2 ROM_CURVE_BDRI = new FP2(BIG.ROM_CURVE_Bdr, BIG.ROM_CURVE_Bdi); 
+	public static final FP2 ROM_CURVE_RIAD = new FP2(CONFIG_FIELD.RIADZG2A,CONFIG_FIELD.RIADZG2B);
+	public static final FP2 ROM_PCR_PCI[];
+	static
+	{
+		ROM_PCR_PCI = new FP2[ROM.PCR.length];
+		for (int i = 0 ; i < ROM.PCR.length ; i++)
+			ROM_PCR_PCI[i] = new FP2(new BIG(ROM.PCR[i]), new BIG(ROM.PCI[i]));
+	}
+
 	private final FP a;
 	private final FP b;
 
@@ -43,7 +66,8 @@ public final class FP2 {
 	}
 
 /* test this=0 ? */
-	public boolean iszilch() {
+	public boolean iszilch() 
+	{
 		return (a.iszilch() && b.iszilch());
 	}
 
@@ -83,13 +107,14 @@ public final class FP2 {
 	}
 
 /* test this=1 ? */
-	public boolean isunity() {
-		FP one=new FP(1);
-		return (a.equals(one) && b.iszilch());
+	public boolean isunity() 
+	{
+		return (a.equals(FP.ONE) && b.iszilch());
 	}
 
 /* test this=x */
-	public boolean equals(FP2 x) {
+	public boolean equals(FP2 x) 
+	{
 		return (a.equals(x.a) && b.equals(x.b));
 	}
 
@@ -178,6 +203,12 @@ public final class FP2 {
 		a.copy(x.a);
 		b.copy(x.b);
 	}
+	
+	public void copy(FP x)
+	{
+		a.copy(x);
+		b.zero();
+	}
 
 /* set this=0 */
 	public void zero()
@@ -212,8 +243,9 @@ public final class FP2 {
 /* negate this mod Modulus */
 	public void neg()
 	{
-		FP m=new FP(a);
-		FP t=new FP();
+		FP[] FP_2 = negFP_2.get();
+		FP m=FP_2[0]; m.copy(a);
+		FP t=FP_2[1];
 
 		m.add(b);
 		m.neg();
@@ -240,7 +272,8 @@ public final class FP2 {
 /* this-=a */
 	public void sub(FP2 x)
 	{
-		FP2 m=new FP2(x);
+		FP2 m=subFP2.get(); 
+		m.copy(x);
 		m.neg();
 		add(m);
 	}
@@ -268,9 +301,10 @@ public final class FP2 {
 /* this*=this */
 	public void sqr()
 	{
-		FP w1=new FP(a);
-		FP w3=new FP(a);
-		FP mb=new FP(b);
+		FP[] FP_3 = sqrFP_3.get();
+		FP w1=FP_3[0]; w1.copy(a);
+		FP w3=FP_3[1]; w3.copy(a);
+		FP mb=FP_3[2]; mb.copy(b);
 
 		w1.add(b);
 		mb.neg();
@@ -297,27 +331,29 @@ public final class FP2 {
 			if (b.XES>1) b.reduce();		
 		}
 
-		DBIG pR=new DBIG(0);
-		BIG C=new BIG(a.x);
-		BIG D=new BIG(y.a.x);
+		BIG[] BIG_3 = mulBIG_3.get();
+		DBIG[] DBIG_5 = mulDBIG_5.get();
+		
+		BIG C=BIG_3[0]; C.copy(a.x);
+		BIG D=BIG_3[1]; D.copy(y.a.x);
 
-		pR.ucopy(new BIG(ROM.Modulus));
-
-		DBIG A=BIG.mul(a.x,y.a.x);
-		DBIG B=BIG.mul(b.x,y.b.x);
+		DBIG pR=DBIG_5[0]; pR.ucopy(BIG.ROM_MODULUS);
+		DBIG A=DBIG_5[1]; BIG.mul(a.x, y.a.x, A);
+		DBIG B=DBIG_5[2]; BIG.mul(b.x, y.b.x, B);
 
 		C.add(b.x); C.norm();
 		D.add(y.b.x); D.norm();
 
-		DBIG E=BIG.mul(C,D);
-		DBIG F=new DBIG(A); F.add(B);
+		DBIG E=DBIG_5[3]; BIG.mul(C,D,E);
+		DBIG F=DBIG_5[4]; F.copy(A); F.add(B);
 		B.rsub(pR);
 
 		A.add(B); A.norm();
 		E.sub(F); E.norm();
 
-		a.x.copy(FP.mod(A)); a.XES=3;
-		b.x.copy(FP.mod(E)); b.XES=2;
+		BIG O=BIG_3[2];
+		a.x.copy(FP.mod(A, O)); a.XES=3;
+		b.x.copy(FP.mod(E, O)); b.XES=2;
 	}
 /*
     public void pow(BIG b)
@@ -339,7 +375,7 @@ public final class FP2 {
 */
     public int qr(FP h)
     {
-        FP2 c = new FP2(this);
+        FP2 c = qrFP2.get(); c.copy(this);
         c.conj();
         c.mul(this);
 
@@ -447,7 +483,7 @@ public final class FP2 {
 /* this*=sqrt(-1) */
 	public void times_i()
 	{
-		FP z=new FP(a);
+		FP z=timesiFP.get(); z.copy(a);
 		a.copy(b); a.neg();
 		b.copy(z);
 	}
@@ -456,7 +492,7 @@ public final class FP2 {
 /* where X*2-(2^i+sqrt(-1)) is irreducible for FP4 */
 	public void mul_ip()
 	{
-		FP2 t=new FP2(this);
+		FP2 t=mulipFP2.get(); t.copy(this);
 		int i=CONFIG_FIELD.QNRI;
 		times_i();
 		while (i>0)
