@@ -11,9 +11,12 @@ services:
       - "8080:8080"
       # Gossip port
       - "30000:30000"
+
     # Override the command if you need to, for example to run singleton mode
     # command: ["java", "-jar", "/jar/hyperscale.jar", "-console", "-singleton"]
+
     # Satisfy the send/receive buffer size requirements
-    sysctls:
-      net.core.rmem_max: 1048576
-      net.core.wmem_max: 1048576
+    # This may not work on all systems due to privilege restrictions
+    # sysctls:
+    #   net.core.rmem_max: 1048576
+    #   net.core.wmem_max: 1048576
