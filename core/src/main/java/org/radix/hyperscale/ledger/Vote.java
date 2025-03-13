@@ -84,10 +84,10 @@ abstract class Vote<KP extends KeyPair<?, K, S>, K extends PublicKey<S>, S exten
 	{
 		if (object == null)
 			return false;
-		
-		if (object != this)
-			return false;
-		
+
+		if (object == this)
+			return true;
+
 		if (object instanceof Vote vote)
 		{
 			if (vote.decision.equals(this.decision) == false)

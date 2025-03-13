@@ -747,11 +747,11 @@ public final class Network implements Service
 
 		if (shuffle)
 			Collections.shuffle(connections);
-		
-		if (connections.size() <= limit || limit == Integer.MAX_VALUE)
+
+		if (connections.size() <= limit)
 			return connections;
 		else
-			return connections.subList(0, Math.min(limit, connections.size()));
+			return connections.subList(0, limit);
 	}
 
 	public int count(final ConnectionFilter<AbstractConnection> filter)
