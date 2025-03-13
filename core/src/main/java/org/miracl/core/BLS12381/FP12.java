@@ -22,7 +22,21 @@
 
 package org.miracl.core.BLS12381;
 
-public final class FP12 {
+public final class FP12 
+{
+	// Working Variables //
+	private static final ThreadLocal<FP2[]> frobFP2_2 = ThreadLocal.withInitial(() -> new FP2[] {new FP2(), new FP2()});
+	private static final ThreadLocal<FP4[]> inverseFP4_4 = ThreadLocal.withInitial(() -> new FP4[] {new FP4(), new FP4(), new FP4(), new FP4()});
+	private static final ThreadLocal<FP4[]> mulFP4_4 = ThreadLocal.withInitial(() -> new FP4[] {new FP4(), new FP4(), new FP4(), new FP4()});
+	private static final ThreadLocal<FP4[]> mulFP4_2 = ThreadLocal.withInitial(() -> new FP4[] {new FP4(), new FP4()});
+	private static final ThreadLocal<BIG[]> powBIG_2 = ThreadLocal.withInitial(() -> new BIG[] {new BIG(), new BIG()});
+	private static final ThreadLocal<FP12[]> powFP12_2 = ThreadLocal.withInitial(() -> new FP12[] {new FP12(), new FP12()});
+	private static final ThreadLocal<FP4[]> sqrFP4_4 = ThreadLocal.withInitial(() -> new FP4[] {new FP4(), new FP4(), new FP4(), new FP4()});
+	private static final ThreadLocal<FP2[]> smulFP2_9 = ThreadLocal.withInitial(() -> new FP2[] {new FP2(), new FP2(), new FP2(), new FP2(), new FP2(), new FP2(), new FP2(), new FP2(), new FP2()});
+	private static final ThreadLocal<FP4[]> ssmulFP4_4 = ThreadLocal.withInitial(() -> new FP4[] {new FP4(), new FP4(), new FP4(), new FP4()});
+	private static final ThreadLocal<FP4[]> ssmulFP4_2 = ThreadLocal.withInitial(() -> new FP4[] {new FP4(), new FP4()});
+	private static final ThreadLocal<FP4[]> usqrFP4_4 = ThreadLocal.withInitial(() -> new FP4[] {new FP4(), new FP4(), new FP4(), new FP4()});
+
 	public static final int ZERO=0;
 	public static final int ONE=1;
 	public static final int SPARSEST=2;
@@ -106,10 +120,11 @@ public final class FP12 {
 
 
 /* test x==1 ? */
-	public boolean isunity() {
-		FP4 one=new FP4(1);
-		return (a.equals(one) && b.iszilch() && c.iszilch());
+	public boolean isunity() 
+	{
+		return (a.equals(FP4.ONE) && b.iszilch() && c.iszilch());
 	}
+	
 /* return 1 if x==y, else 0 */
 	public boolean equals(FP12 x)
 	{
@@ -130,6 +145,16 @@ public final class FP12 {
 	{
 		return c;
 	}
+	
+	public void copy(FP4 x, FP4 y, FP4 z, int t)
+	{
+		a.copy(x);
+		b.copy(y);
+		c.copy(z);
+		type=t;
+	}
+
+	
 /* copy this=x */
 	public void copy(FP12 x)
 	{
@@ -208,10 +233,11 @@ public final class FP12 {
 /* Granger-Scott Unitary Squaring */
 	public void usqr()
 	{
-		FP4 A=new FP4(a);
-		FP4 B=new FP4(c);
-		FP4 C=new FP4(b);
-		FP4 D=new FP4();
+		FP4[] FP4_4 = usqrFP4_4.get();
+		FP4 A=FP4_4[0]; A.copy(a);
+		FP4 B=FP4_4[1]; B.copy(c);
+		FP4 C=FP4_4[2]; C.copy(b);
+		FP4 D=FP4_4[3];
 
 		a.sqr();
 		D.copy(a); D.add(a);
@@ -251,10 +277,11 @@ public final class FP12 {
 		if (type==ONE)
 			return;
 
-		FP4 A=new FP4(a);
-		FP4 B=new FP4(b);
-		FP4 C=new FP4(c);
-		FP4 D=new FP4(a);
+		FP4[] FP4_4 = sqrFP4_4.get();
+		FP4 A=FP4_4[0]; A.copy(a);
+		FP4 B=FP4_4[1]; B.copy(b);
+		FP4 C=FP4_4[2]; C.copy(c);
+		FP4 D=FP4_4[3]; D.copy(a);
 
 		A.sqr();
 		B.mul(c);
@@ -295,12 +322,14 @@ public final class FP12 {
 /* FP12 full multiplication this=this*y */
 	public void mul(FP12 y)
 	{
-		FP4 z0=new FP4(a);
-		FP4 z1=new FP4();
-		FP4 z2=new FP4(b);
-		FP4 z3=new FP4();
-		FP4 t0=new FP4(a);
-		FP4 t1=new FP4(y.a);
+		FP4[] FP4_4 = mulFP4_4.get();
+		FP4[] FP4_2 = mulFP4_2.get();
+		FP4 z0=FP4_4[0]; z0.copy(a);
+		FP4 z1=FP4_4[1]; z1.zero();
+		FP4 z2=FP4_4[2]; z2.copy(b);
+		FP4 z3=FP4_4[3]; z3.zero();
+		FP4 t0=FP4_2[0]; t0.copy(a);
+		FP4 t1=FP4_2[1]; t1.copy(y.a);
 
 		z0.mul(y.a);
 		z2.mul(y.b);
@@ -358,6 +387,7 @@ public final class FP12 {
 /* w and y are both sparser or sparsest line functions - cost <= 6m */ 
 	public void smul(FP12 y)
 	{
+		FP2[] FP2_9 = smulFP2_9.get();
 		if (CONFIG_CURVE.SEXTIC_TWIST==CONFIG_CURVE.D_TYPE)
 		{	
 			FP2 w1=new FP2(a.geta());
@@ -429,8 +459,8 @@ public final class FP12 {
 			b.norm();
 
 		} else {
-			FP2 w1=new FP2(a.geta());
-			FP2 w2=new FP2(a.getb());
+			FP2 w1=FP2_9[0];w1.copy(a.geta());
+			FP2 w2=FP2_9[1];w2.copy(a.getb());
 			FP2 w3;
 
 			w1.mul(y.a.geta());
@@ -442,36 +472,36 @@ public final class FP12 {
 				{
 					FP t=new FP(c.getb().geta());
 					t.mul(y.c.getb().geta());
-					w3=new FP2(t);
+					w3=FP2_9[2]; w3.copy(t);
 				} else {
 					if (y.type!=SPARSEST)
 					{
-						w3=new FP2(y.c.getb());
+						w3=FP2_9[2]; w3.copy(y.c.getb());
 						w3.pmul(c.getb().geta());
 					} else {
-						w3=new FP2(c.getb());
+						w3=FP2_9[2]; w3.copy(c.getb());
 						w3.pmul(y.c.getb().geta());
 					}
 				}
 			} else {
-				w3=new FP2(c.getb());
+				w3=FP2_9[2]; w3.copy(c.getb());
 				w3.mul(y.c.getb());
 			}
 
-			FP2 ta=new FP2(a.geta());
-			FP2 tb=new FP2(y.a.geta());
+			FP2 ta=FP2_9[3]; ta.copy(a.geta());
+			FP2 tb=FP2_9[4]; tb.copy(y.a.geta());
 			ta.add(a.getb()); ta.norm();
 			tb.add(y.a.getb()); tb.norm();
-			FP2 tc=new FP2(ta);
+			FP2 tc=FP2_9[5]; tc.copy(ta);
 			tc.mul(tb);
-			FP2 t=new FP2(w1);
+			FP2 t=FP2_9[6]; t.copy(w1);
 			t.add(w2);
 			t.neg();
 			tc.add(t);
 
 			ta.copy(a.geta()); ta.add(c.getb()); ta.norm();
 			tb.copy(y.a.geta()); tb.add(y.c.getb()); tb.norm();
-			FP2 td=new FP2(ta);
+			FP2 td=FP2_9[7]; td.copy(ta);
 			td.mul(tb);
 			t.copy(w1);
 			t.add(w3);
@@ -480,7 +510,7 @@ public final class FP12 {
 
 			ta.copy(a.getb()); ta.add(c.getb()); ta.norm();
 			tb.copy(y.a.getb()); tb.add(y.c.getb()); tb.norm();
-			FP2 te=new FP2(ta);
+			FP2 te=FP2_9[8]; te.copy(ta);
 			te.mul(tb);
 			t.copy(w2);
 			t.add(w3);
@@ -522,10 +552,11 @@ public final class FP12 {
 
 		if (y.type>=SPARSE)
 		{
-			FP4 z0=new FP4(a);
-			FP4 z1=new FP4();
-			FP4 z2=new FP4();
-			FP4 z3=new FP4();
+			FP4 FP4_4[] = ssmulFP4_4.get();
+			FP4 z0=FP4_4[0]; z0.copy(a);
+			FP4 z1=FP4_4[1];
+			FP4 z2=FP4_4[2];
+			FP4 z3=FP4_4[3];
 			z0.mul(y.a);
 
 			if (CONFIG_CURVE.SEXTIC_TWIST==CONFIG_CURVE.M_TYPE)
@@ -554,8 +585,9 @@ public final class FP12 {
 				z2.copy(b);
 				z2.mul(y.b);
 			}
-			FP4 t0=new FP4(a);
-			FP4 t1=new FP4(y.a);
+			FP4 FP4_2[] = ssmulFP4_2.get();
+			FP4 t0=FP4_2[0]; t0.copy(a);
+			FP4 t1=FP4_2[1]; t1.copy(y.a);
 			t0.add(b); t0.norm();
 			t1.add(y.b); t1.norm();
 
@@ -667,12 +699,14 @@ public final class FP12 {
 			}
 			if (CONFIG_CURVE.SEXTIC_TWIST==CONFIG_CURVE.M_TYPE)
 			{
-				FP4 z0=new FP4(a);
-				FP4 z1=new FP4();
-				FP4 z2=new FP4();
-				FP4 z3=new FP4();
-				FP4 t0=new FP4(a);
-				FP4 t1=new FP4();
+				FP4 FP4_4[] = ssmulFP4_4.get();
+				FP4 FP4_2[] = ssmulFP4_2.get();
+				FP4 z0=FP4_4[0]; z0.copy(a);
+				FP4 z1=FP4_4[1];
+				FP4 z2=FP4_4[2];
+				FP4 z3=FP4_4[3];
+				FP4 t0=FP4_2[0]; t0.copy(a);
+				FP4 t1=FP4_2[1];
 		
 				z0.mul(y.a);
 				t0.add(b); t0.norm();
@@ -726,11 +760,12 @@ public final class FP12 {
 /* this=1/this */
 	public void inverse()
 	{
-		FP4 f0=new FP4(a);
-		FP4 f1=new FP4(b);
-		FP4 f2=new FP4(a);
-		FP4 f3=new FP4();
-
+		FP4[] FP4_4 = usqrFP4_4.get();
+		FP4 f0=FP4_4[0];f0.copy(a);
+		FP4 f1=FP4_4[1];f1.copy(b);
+		FP4 f2=FP4_4[2];f2.copy(a);
+		FP4 f3=FP4_4[3];f3.zero();
+		
 		norm();
 		f0.sqr();
 		f1.mul(c);
@@ -768,8 +803,9 @@ public final class FP12 {
 /* this=this^p using Frobenius */
 	public void frob(FP2 f)
 	{
-		FP2 f2=new FP2(f);
-		FP2 f3=new FP2(f);
+		FP2[] FP2_2 = frobFP2_2.get();
+		FP2 f2=FP2_2[0];f2.copy(f);
+		FP2 f3=FP2_2[1];f3.copy(f);
 
 		f2.sqr();
 		f3.mul(f2);
@@ -830,15 +866,17 @@ public final class FP12 {
 /* Note this is simple square and multiply, so not side-channel safe */
 	public FP12 pow(BIG e)
 	{
-		BIG e1=new BIG(e);
+		BIG[] BIG_2 = powBIG_2.get();
+		FP12[] FP12_2 = powFP12_2.get();
+		BIG e1=BIG_2[0]; e1.copy(e);
 		e1.norm();
-		BIG e3=new BIG(e1);
+		BIG e3=BIG_2[1]; e3.copy(e1);
 		e3.pmul(3);
 		e3.norm();
 
-		FP12 sf=new FP12(this);
+		FP12 sf=FP12_2[0]; sf.copy(this);
 		sf.norm();
-		FP12 w=new FP12(sf);
+		FP12 w=FP12_2[1]; w.copy(sf);
         if (e3.iszilch()) {
             w.one();
             return w;

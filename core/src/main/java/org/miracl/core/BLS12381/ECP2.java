@@ -21,7 +21,13 @@
 
 package org.miracl.core.BLS12381;
 
-public final class ECP2 {
+public final class ECP2 
+{
+	private static final ThreadLocal<FP2[]> addFP2_8 = ThreadLocal.withInitial(() -> new FP2[] { new FP2(), new FP2(), new FP2(), new FP2(), new FP2(), new FP2(), new FP2(), new FP2()});
+	private static final ThreadLocal<FP2[]> dblFP2_6 = ThreadLocal.withInitial(() -> new FP2[] { new FP2(), new FP2(), new FP2(), new FP2(), new FP2(), new FP2()});
+	private static final ThreadLocal<FP[]> m2pFP_2 = ThreadLocal.withInitial(() -> new FP[] { new FP(), new FP()});
+	private static final ThreadLocal<FP2[]> m2pFP2_16 = ThreadLocal.withInitial(() -> new FP2[] { new FP2(), new FP2(), new FP2(), new FP2(), new FP2(), new FP2(), new FP2(), new FP2(), new FP2(), new FP2(), new FP2(), new FP2(), new FP2(), new FP2(), new FP2(), new FP2()});
+
 	private FP2 x;
 	private FP2 y;
 	private FP2 z;
@@ -121,8 +127,7 @@ public final class ECP2 {
 /* set to Affine - (x,y,z) to (x,y) */
 	public void affine() {
 		if (is_infinity()) return;
-		FP2 one=new FP2(1);
-		if (z.equals(one))
+		if (z.equals(FP2.ONE))
 		{
 			x.reduce();
 			y.reduce();
@@ -132,7 +137,7 @@ public final class ECP2 {
 
 		x.mul(z); x.reduce();               // *****
 		y.mul(z); y.reduce();
-		z.copy(one);
+		z.copy(FP2.ONE);
 	}
 /* extract affine x as FP2 */
 	public FP2 getX()
@@ -305,21 +310,24 @@ public final class ECP2 {
 	}
 
 /* this+=this */
-	public int dbl() {
-		FP2 iy=new FP2(y);
+	public int dbl() 
+	{
+		FP2[] FP2_6 = dblFP2_6.get();
+		
+		FP2 iy=FP2_6[0]; iy.copy(y);
 		if (CONFIG_CURVE.SEXTIC_TWIST==CONFIG_CURVE.D_TYPE)
 		{
 			iy.mul_ip(); iy.norm();
 		}
-		FP2 t0=new FP2(y);
+		FP2 t0=FP2_6[1]; t0.copy(y);
 		t0.sqr();            // y^2
 		if (CONFIG_CURVE.SEXTIC_TWIST==CONFIG_CURVE.D_TYPE)
 		{
 			t0.mul_ip();
 		}
-		FP2 t1=new FP2(iy);
+		FP2 t1=FP2_6[2]; t1.copy(iy);
 		t1.mul(z);
-		FP2 t2=new FP2(z);
+		FP2 t2=FP2_6[3]; t2.copy(z);
 		t2.sqr();			// z^2
 
 		z.copy(t0);
@@ -335,10 +343,10 @@ public final class ECP2 {
 			t2.norm();
 		}
 
-		FP2 x3=new FP2(t2);
+		FP2 x3=FP2_6[4]; x3.copy(t2);
 		x3.mul(z);
 
-		FP2 y3=new FP2(t0);
+		FP2 y3=FP2_6[5]; y3.copy(t0);
 
 		y3.add(t2); y3.norm();
 		z.mul(t1);
@@ -355,19 +363,21 @@ public final class ECP2 {
 	}
 
 /* this+=Q - return 0 for add, 1 for double, -1 for O */
-	public int add(ECP2 Q) {
-
+	public int add(ECP2 Q) 
+	{
+		FP2[] FP2_8 = addFP2_8.get(); 
+		
 		int b=3*ROM.CURVE_B_I;
-		FP2 t0=new FP2(x);
+		FP2 t0=FP2_8[0]; t0.copy(x);
 		t0.mul(Q.x);         // x.Q.x
-		FP2 t1=new FP2(y);
+		FP2 t1=FP2_8[1]; t1.copy(y);
 		t1.mul(Q.y);		 // y.Q.y
 
-		FP2 t2=new FP2(z);
+		FP2 t2=FP2_8[2]; t2.copy(z);
 		t2.mul(Q.z);
-		FP2 t3=new FP2(x);
+		FP2 t3=FP2_8[3]; t3.copy(x);
 		t3.add(y); t3.norm();          //t3=X1+Y1
-		FP2 t4=new FP2(Q.x);
+		FP2 t4=FP2_8[4]; t4.copy(Q.x);
 		t4.add(Q.y); t4.norm();			//t4=X2+Y2
 		t3.mul(t4);						//t3=(X1+Y1)(X2+Y2)
 		t4.copy(t0); t4.add(t1);		//t4=X1.X2+Y1.Y2
@@ -379,7 +389,7 @@ public final class ECP2 {
 		}
 		t4.copy(y);
 		t4.add(z); t4.norm();			//t4=Y1+Z1
-		FP2 x3=new FP2(Q.y);
+		FP2 x3=FP2_8[5]; x3.copy(Q.y);
 		x3.add(Q.z); x3.norm();			//x3=Y2+Z2
 
 		t4.mul(x3);						//t4=(Y1+Z1)(Y2+Z2)
@@ -392,7 +402,7 @@ public final class ECP2 {
 			t4.mul_ip(); t4.norm();          //t4=(Y1+Z1)(Y2+Z2) - (Y1.Y2+Z1.Z2) = Y1.Z2+Y2.Z1
 		}
 		x3.copy(x); x3.add(z); x3.norm();	// x3=X1+Z1
-		FP2 y3=new FP2(Q.x);
+		FP2 y3=FP2_8[6]; y3.copy(Q.x);
 		y3.add(Q.z); y3.norm();				// y3=X2+Z2
 		x3.mul(y3);							// x3=(X1+Z1)(X2+Z2)
 		y3.copy(t0);
@@ -411,7 +421,7 @@ public final class ECP2 {
 		{
 			t2.mul_ip(); t2.norm();
 		}
-		FP2 z3=new FP2(t1); z3.add(t2); z3.norm();
+		FP2 z3=FP2_8[7]; z3.copy(t1); z3.add(t2); z3.norm();
 		t1.sub(t2); t1.norm();
 		y3.imul(b);
 		if (CONFIG_CURVE.SEXTIC_TWIST==CONFIG_CURVE.M_TYPE)
@@ -616,10 +626,13 @@ public final class ECP2 {
 /* Constant time Map to Point */
     public static ECP2 map2point(FP2 H)
     {
+    	FP[] FP_2 = m2pFP_2.get();
+    	FP2[] FP2_16 = m2pFP2_16.get();
+    	
     // Shallue and van de Woestijne method.
         int sgn,ne;
-        FP2 NY=new FP2(1);
-        FP2 T=new FP2(H);  /**/
+        FP2 NY=FP2_16[0]; NY.one();
+        FP2 T=FP2_16[1]; T.copy(H);  /**/
         ECP2 Q;
         sgn=T.sign(); /**/
 
@@ -683,30 +696,30 @@ CAHCNZF */
         } else {
 /* */
             Q=new ECP2();
-            FP2 Ad=new FP2(new BIG(ROM.CURVE_Adr),new BIG(ROM.CURVE_Adi));
-            FP2 Bd=new FP2(new BIG(ROM.CURVE_Bdr),new BIG(ROM.CURVE_Bdi)); 
-            FP2 ZZ=new FP2(CONFIG_FIELD.RIADZG2A,CONFIG_FIELD.RIADZG2B);
-            FP hint=new FP();
+            FP2 Ad=FP2_16[2]; Ad.copy(FP2.ROM_CURVE_ADRI);
+            FP2 Bd=FP2_16[3]; Bd.copy(FP2.ROM_CURVE_BDRI);
+            FP2 ZZ=FP2_16[4]; ZZ.copy(FP2.ROM_CURVE_RIAD);
+            FP hint=FP_2[0]; hint.zero();
 
             T.sqr();
             T.mul(ZZ);
-            FP2 W=new FP2(T);
+            FP2 W=FP2_16[5]; W.copy(T);
             W.add(NY); W.norm();
 
             W.mul(T);
-            FP2 D=new FP2(Ad);
+            FP2 D=FP2_16[6]; D.copy(Ad);
             D.mul(W);
 
             W.add(NY); W.norm();
             W.mul(Bd);
             W.neg(); W.norm();
 
-            FP2 X2=new FP2(W);
-            FP2 X3=new FP2(T);
+            FP2 X2=FP2_16[7]; X2.copy(W);
+            FP2 X3=FP2_16[8]; X3.copy(T);
             X3.mul(X2);
 
-            FP2 GX1=new FP2(X2); GX1.sqr();
-            FP2 D2=new FP2(D); D2.sqr();
+            FP2 GX1=FP2_16[9]; GX1.copy(X2); GX1.sqr();
+            FP2 D2=FP2_16[10]; D2.copy(D); D2.sqr();
             W.copy(Ad); W.mul(D2); GX1.add(W); GX1.norm(); GX1.mul(X2); D2.mul(D); W.copy(Bd); W.mul(D2); GX1.add(W); GX1.norm(); // x^3+Ax+b
 
             W.copy(GX1); W.mul(D);
@@ -721,7 +734,7 @@ CAHCNZF */
             D.copy(D2); D.mul(T);
             T.copy(W); T.mul(ZZ);
 
-            FP s=new FP(new BIG(ROM.CURVE_HTPC2));
+            FP s=FP_2[1];s.copy(FP.ROM_CURVE_HTPC2);
             s.mul(hint);
 
             X2.cmove(X3,1-qr);
@@ -729,7 +742,7 @@ CAHCNZF */
             D2.cmove(D,1-qr);
             hint.cmove(s,1-qr);
 
-            FP2 Y=new FP2(W); Y.sqrt(hint);
+            FP2 Y=FP2_16[11];Y.copy(W); Y.sqrt(hint);
             Y.mul(D2);
 
             ne=Y.sign()^sgn;
@@ -741,35 +754,35 @@ CAHCNZF */
             int isoy=3*(isox-1)/2;
 
         // xnum
-            FP2 xnum=new FP2(new BIG(ROM.PCR[k]),new BIG(ROM.PCI[k])); k++;
+            FP2 xnum=FP2_16[12]; xnum.copy(FP2.ROM_PCR_PCI[k]); k++;
             for (int i=0;i<isox;i++) {
                 xnum.mul(X2);
-                xnum.add(new FP2(new BIG(ROM.PCR[k]),new BIG(ROM.PCI[k]))); k++;
+                xnum.add(FP2.ROM_PCR_PCI[k]); k++;
                 xnum.norm();
             }
         //xden
-            FP2 xden=new FP2(X2);
-            xden.add(new FP2(new BIG(ROM.PCR[k]),new BIG(ROM.PCI[k]))); k++;
+            FP2 xden=FP2_16[13]; xden.copy(X2);
+            xden.add(FP2.ROM_PCR_PCI[k]); k++;
             xden.norm();
             for (int i=0;i<isox-2;i++) {
                 xden.mul(X2);
-                xden.add(new FP2(new BIG(ROM.PCR[k]),new BIG(ROM.PCI[k]))); k++;
+                xden.add(FP2.ROM_PCR_PCI[k]); k++;
                 xden.norm();                
             }
         //ynum
-            FP2 ynum=new FP2(new BIG(ROM.PCR[k]),new BIG(ROM.PCI[k])); k++;          
+            FP2 ynum=FP2_16[14]; ynum.copy(FP2.ROM_PCR_PCI[k]); k++;          
             for (int i=0;i<isoy;i++) {
                 ynum.mul(X2);
-                ynum.add(new FP2(new BIG(ROM.PCR[k]),new BIG(ROM.PCI[k]))); k++;
+                ynum.add(FP2.ROM_PCR_PCI[k]); k++;
                 ynum.norm();
             }
         //yden
-            FP2 yden=new FP2(X2);
-            yden.add(new FP2(new BIG(ROM.PCR[k]),new BIG(ROM.PCI[k]))); k++;
+            FP2 yden=FP2_16[15]; yden.copy(X2);
+            yden.add(FP2.ROM_PCR_PCI[k]); k++;
             yden.norm(); 
             for (int i=0;i<isoy-1;i++) {
                 yden.mul(X2);
-                yden.add(new FP2(new BIG(ROM.PCR[k]),new BIG(ROM.PCI[k]))); k++;
+                yden.add(FP2.ROM_PCR_PCI[k]); k++;
                 yden.norm();
             }
             ynum.mul(Y);

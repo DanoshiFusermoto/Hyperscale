@@ -540,7 +540,7 @@ public final class ECP
 			FP C=FPw[0]; C.copy(x);
 			FP D=FPw[1]; D.copy(y);
 			FP H=FPw[2]; H.copy(z);
-			FP J=FPw[3]; // J.zero();
+			FP J=FPw[3];
 
 			x.mul(y); x.add(x); x.norm();
 			C.sqr();

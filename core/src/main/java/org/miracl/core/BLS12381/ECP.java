@@ -21,7 +21,19 @@
 
 package org.miracl.core.BLS12381;
 
-public final class ECP {
+public final class ECP 
+{
+	// Working variables //
+	private static final ThreadLocal<FP> rhsFP = ThreadLocal.withInitial(() -> new FP());
+	private static final ThreadLocal<FP[]> addFP_8 = ThreadLocal.withInitial(() -> new FP[] { new FP(), new FP(), new FP(), new FP(), new FP(), new FP(), new FP(), new FP()});
+	private static final ThreadLocal<FP[]> dblFP_5 = ThreadLocal.withInitial(() -> new FP[] { new FP(), new FP(), new FP(), new FP(), new FP()});
+	private static final ThreadLocal<ECP> selectECP = ThreadLocal.withInitial(() -> new ECP());
+	private static final ThreadLocal<ECP> subECP = ThreadLocal.withInitial(() -> new ECP());
+	private static final ThreadLocal<BIG[]> clmulBIG_3 = ThreadLocal.withInitial(() -> new BIG[] { new BIG(), new BIG(), new BIG()});
+	private static final ThreadLocal<ECP[]> clmulECP_3 = ThreadLocal.withInitial(() -> new ECP[] { new ECP(), new ECP(), new ECP()});
+	private static final ThreadLocal<ECP[]> clmulECP_8 = ThreadLocal.withInitial(() -> new ECP[] {new ECP(), new ECP(), new ECP(), new ECP(), new ECP(), new ECP(), new ECP(), new ECP()});
+	private static final ThreadLocal<byte[]> clmulBYTES = ThreadLocal.withInitial(() -> new byte[1+(BIG.NLEN*CONFIG_BIG.BASEBITS+3)/4]);
+	private static final ThreadLocal<FP[]> m2pFP_16 = ThreadLocal.withInitial(() -> new FP[] { new FP(), new FP(), new FP(), new FP(), new FP(), new FP(), new FP(), new FP(), new FP(), new FP(), new FP(), new FP(), new FP(), new FP(), new FP(), new FP()});
 
 	private FP x;
 	private FP y;
@@ -91,7 +103,7 @@ public final class ECP {
 /* Constant time select from pre-computed table */
 	private void select(ECP W[],int b)
 	{
-		ECP MP=new ECP();
+		ECP MP=selectECP.get(); 
 		int m=b>>31;
 		int babs=(b^m)-m;
 
@@ -125,6 +137,13 @@ public final class ECP {
 			if (!a.equals(b)) return false;
 		}
 		return true;
+	}
+	
+	public void zero()
+	{
+		x.zero();
+		y.zero();
+		z.zero();
 	}
 
 /* this=P */
@@ -257,15 +276,13 @@ public final class ECP {
 /* set to affine - from (x,y,z) to (x,y) */
 	public void affine() {
 		if (is_infinity()) return;	//
-		FP one=new FP(1);
-		if (z.equals(one)) return;
+		if (z.equals(FP.ONE)) return;
+		
 		z.inverse(null);
 		x.mul(z); x.reduce();
 		if (CONFIG_CURVE.CURVETYPE!=CONFIG_CURVE.MONTGOMERY)            // Edits made
-		{
 			y.mul(z); y.reduce();
-		}
-		z.copy(one);
+		z.copy(FP.ONE);
 	}
 /* extract x as a BIG */
 	public BIG getX()
@@ -422,11 +439,12 @@ public final class ECP {
 		{
 			if (CONFIG_CURVE.CURVE_A==0)
 			{
-				FP t0=new FP(y);                      /*** Change ***/    // Edits made
+				FP[] FP_5 = dblFP_5.get();
+				FP t0=FP_5[0]; t0.copy(y);                      /*** Change ***/    // Edits made
 				t0.sqr();
-				FP t1=new FP(y);
+				FP t1=FP_5[1]; t1.copy(y);
 				t1.mul(z);
-				FP t2=new FP(z);
+				FP t2=FP_5[2]; t2.copy(z);
 				t2.sqr();
 
 				z.copy(t0);
@@ -434,10 +452,10 @@ public final class ECP {
 				z.add(z); z.add(z); z.norm();
 				t2.imul(3*ROM.CURVE_B_I);
 
-				FP x3=new FP(t2);
+				FP x3=FP_5[3]; x3.copy(t2);
 				x3.mul(z);
 
-				FP y3=new FP(t0);
+				FP y3=FP_5[4]; y3.copy(t0);
 				y3.add(t2); y3.norm();
 				z.mul(t1);
 				t1.copy(t2); t1.add(t2); t2.add(t1);
@@ -449,6 +467,7 @@ public final class ECP {
 			}
 			else
 			{
+				FP[] FP_5 = dblFP_5.get();
 				FP t0=new FP(x);
 				FP t1=new FP(y);
 				FP t2=new FP(z);
@@ -518,10 +537,11 @@ public final class ECP {
 		}
 		if (CONFIG_CURVE.CURVETYPE==CONFIG_CURVE.EDWARDS)
 		{
-			FP C=new FP(x);
-			FP D=new FP(y);
-			FP H=new FP(z);
-			FP J=new FP();
+			FP[] FP_5 = dblFP_5.get();
+			FP C=FP_5[0]; C.copy(x);
+			FP D=FP_5[1]; D.copy(y);
+			FP H=FP_5[2]; H.copy(z);
+			FP J=FP_5[3];
 
 			x.mul(y); x.add(x); x.norm();
 			C.sqr();
@@ -572,16 +592,17 @@ public final class ECP {
 		{
 			if (CONFIG_CURVE.CURVE_A==0)
 			{
+				FP[] FP_8 = addFP_8.get();
 				int b=3*ROM.CURVE_B_I;
-				FP t0=new FP(x);
+				FP t0=FP_8[0]; t0.copy(x);
 				t0.mul(Q.x);
-				FP t1=new FP(y);
+				FP t1=FP_8[1]; t1.copy(y);
 				t1.mul(Q.y);
-				FP t2=new FP(z);
+				FP t2=FP_8[2]; t2.copy(z);
 				t2.mul(Q.z);
-				FP t3=new FP(x);
+				FP t3=FP_8[3]; t3.copy(x);
 				t3.add(y); t3.norm();
-				FP t4=new FP(Q.x);
+				FP t4=FP_8[4]; t4.copy(Q.x);
 				t4.add(Q.y); t4.norm();
 				t3.mul(t4);
 				t4.copy(t0); t4.add(t1);
@@ -589,7 +610,7 @@ public final class ECP {
 				t3.sub(t4); t3.norm();
 				t4.copy(y);
 				t4.add(z); t4.norm();
-				FP x3=new FP(Q.y);
+				FP x3=FP_8[5]; x3.copy(Q.y);
 				x3.add(Q.z); x3.norm();
 
 				t4.mul(x3);
@@ -598,7 +619,7 @@ public final class ECP {
 
 				t4.sub(x3); t4.norm();
 				x3.copy(x); x3.add(z); x3.norm();
-				FP y3=new FP(Q.x);
+				FP y3=FP_8[6]; y3.copy(Q.x);
 				y3.add(Q.z); y3.norm();
 				x3.mul(y3);
 				y3.copy(t0);
@@ -608,7 +629,7 @@ public final class ECP {
 				t0.add(x3); t0.norm();
 				t2.imul(b);
 
-				FP z3=new FP(t1); z3.add(t2); z3.norm();
+				FP z3=FP_8[7]; z3.copy(t1); z3.add(t2); z3.norm();
 				t1.sub(t2); t1.norm();
 				y3.imul(b);
 
@@ -792,7 +813,8 @@ public final class ECP {
 	}
 /* this-=Q */
 	public void sub(ECP Q) {
-		ECP NQ=new ECP(Q);
+		ECP NQ=subECP.get(); 
+		NQ.copy(Q);
 		NQ.neg();
 		add(NQ);
 	}
@@ -842,9 +864,14 @@ public final class ECP {
 // Set P=e*P 
 /* return e.this */
 	public ECP clmul(BIG e,BIG maxe) {
-		if (e.iszilch() || is_infinity()) return new ECP();
+		if (e.iszilch() || is_infinity()) 
+			return new ECP();
+		
+		BIG[] BIG_3 = clmulBIG_3.get();
+		ECP[] ECP_3 = clmulECP_3.get();
+
 		ECP P=new ECP();
-        BIG cm=new BIG(e); cm.or(maxe);
+        BIG cm=BIG_3[0]; cm.copy(e); cm.or(maxe);
         int max=cm.nbits();
 
 		if (CONFIG_CURVE.CURVETYPE==CONFIG_CURVE.MONTGOMERY)
@@ -877,23 +904,23 @@ public final class ECP {
 		{
 // fixed size windows
 			int i,b,nb,m,s,ns;
-			BIG mt=new BIG();
-			BIG t=new BIG();
-			ECP Q=new ECP();
-			ECP C=new ECP();
-			ECP[] W=new ECP[8];
-			byte[] w=new byte[1+(BIG.NLEN*CONFIG_BIG.BASEBITS+3)/4];
+			BIG mt=BIG_3[1];
+			BIG t=BIG_3[2];
+			ECP Q=ECP_3[1];
+			ECP C=ECP_3[2];
+			
+			ECP[] W=ECP.clmulECP_8.get();
+			byte[] w=ECP.clmulBYTES.get();
 
 // precompute table
 			Q.copy(this);
 
 			Q.dbl();
-			W[0]=new ECP();
+			W[0].zero();
 			W[0].copy(this);
 
 			for (i=1;i<8;i++)
 			{
-				W[i]=new ECP();
 				W[i].copy(W[i-1]);
 				W[i].add(Q);
 			}
@@ -1094,6 +1121,8 @@ public final class ECP {
 /* Constant time Map to Point */
     public static ECP map2point(FP h)
     {
+    	FP FP_16[] = m2pFP_16.get();
+    	
         ECP P;
         if (CONFIG_CURVE.CURVETYPE==CONFIG_CURVE.MONTGOMERY)
         { // Elligator 2
@@ -1330,19 +1359,18 @@ public final class ECP {
 
         if (CONFIG_CURVE.CURVETYPE==CONFIG_CURVE.WEIERSTRASS)
         {
-            FP A=new FP();
-            FP B=new FP();
-            FP X1=new FP();
-            FP X2=new FP();
-            FP X3=new FP();
-            FP one=new FP(1);
-            FP Y=new FP();
-            FP D=new FP();
-            FP t=new FP(h);
-            FP w=new FP();
-            FP D2=new FP();
-            FP hint=new FP();
-            FP GX1=new FP();
+            FP A=FP_16[0];
+            FP B=FP_16[1];
+            FP X1=FP_16[2];
+            FP X2=FP_16[3];
+            FP X3=FP_16[4];
+            FP Y=FP_16[5];
+            FP D=FP_16[6];
+            FP t=FP_16[7];t.copy(h);
+            FP w=FP_16[8];
+            FP D2=FP_16[9];
+            FP hint=FP_16[10];
+            FP GX1=FP_16[11];
           //  FP Y3=new FP();
             int sgn=t.sign();
 
@@ -1351,22 +1379,22 @@ public final class ECP {
                 if (CONFIG_CURVE.HTC_ISO!=0)
                 {
 /* */
-                    A.copy(new FP(new BIG(ROM.CURVE_Ad)));
-                    B.copy(new FP(new BIG(ROM.CURVE_Bd)));
+                    A.copy(FP.ROM_CURVE_Ad);
+                    B.copy(FP.ROM_CURVE_Bd);
 /* */
                 } else {
-                    A.copy(new FP(CONFIG_CURVE.CURVE_A));
-                    B.copy(new FP(new BIG(ROM.CURVE_B)));
+                    A.copy(FP.ROM_CURVE_A);
+                    B.copy(FP.ROM_CURVE_B);
                 }
                 // SSWU Method
                 t.sqr();
                 t.imul(CONFIG_FIELD.RIADZ);
-                w.copy(t); w.add(one); w.norm();
+                w.copy(t); w.add(FP.ONE); w.norm();
 
                 w.mul(t); D.copy(A);
                 D.mul(w);
                
-                w.add(one); w.norm();
+                w.add(FP.ONE); w.norm();
                 w.mul(B);
                 w.neg(); w.norm();
 
@@ -1387,7 +1415,7 @@ public final class ECP {
 
                 D.copy(D2); D.mul(t);
                 t.copy(w); t.imul(CONFIG_FIELD.RIADZ);
-                X1.copy(new FP(new BIG(ROM.CURVE_HTPC)));
+                X1.copy(FP.ROM_CURVE_HTPC);
                 X1.mul(hint);
 
                 X2.cmove(X3,1-qr);
@@ -1426,39 +1454,40 @@ public final class ECP {
                     int isox=CONFIG_CURVE.HTC_ISO;
                     int isoy=3*(isox-1)/2;
                 // xnum
-                    FP xnum=new FP(new BIG(ROM.PC[k++]));
+                    FP xnum=FP_16[12];xnum.copy(FP.ROM_PC[k++]);
                     for (int i=0;i<isox;i++) {
                         xnum.mul(X2);
-                        w.copy(new FP(new BIG(ROM.PC[k++])));
+                        w.copy(FP.ROM_PC[k++]);
                         xnum.add(w); xnum.norm();
                     }
                 // xden
-                    FP xden=new FP(X2);
-                    w.copy(new FP(new BIG(ROM.PC[k++])));
+                    FP xden=FP_16[13];xden.copy(X2);
+                    w.copy(FP.ROM_PC[k++]);
                     xden.add(w); xden.norm();
                     for (int i=0;i<isox-2;i++) {
                         xden.mul(X2);
-                        w.copy(new FP(new BIG(ROM.PC[k++])));
+                        w.copy(FP.ROM_PC[k++]);
                         xden.add(w); xden.norm();
                     }
                 // ynum
-                    FP ynum=new FP(new BIG(ROM.PC[k++]));
+                    FP ynum=FP_16[14];ynum.copy(FP.ROM_PC[k++]);
                     for (int i=0;i<isoy;i++) {
                         ynum.mul(X2);
-                        w.copy(new FP(new BIG(ROM.PC[k++])));
+                        w.copy(FP.ROM_PC[k++]);
                         ynum.add(w); ynum.norm();
                     }
                 // yden
-                    FP yden=new FP(X2);
-                    w.copy(new FP(new BIG(ROM.PC[k++])));
+                    FP yden=FP_16[15];yden.copy(X2);
+                    w.copy(FP.ROM_PC[k++]);
                     yden.add(w); yden.norm();
                     for (int i=0;i<isoy-1;i++) {
                         yden.mul(X2);
-                        w.copy(new FP(new BIG(ROM.PC[k++])));
+                        w.copy(FP.ROM_PC[k++]);
                         yden.add(w); yden.norm();
                     }  
                     ynum.mul(Y);
                     w.copy(xnum); w.mul(yden);
+                    
                     P=new ECP();
                     P.x.copy(w);
                     w.copy(ynum); w.mul(xden);
@@ -1486,8 +1515,8 @@ public final class ECP {
 
                 t.sqr();
                 Y.copy(A); Y.mul(t);
-                t.copy(one); t.add(Y); t.norm();
-                Y.rsub(one); Y.norm();
+                t.copy(FP.ONE); t.add(Y); t.norm();
+                Y.rsub(FP.ONE); Y.norm();
                 D.copy(t); D.mul(Y);
                 D.mul(B);
 

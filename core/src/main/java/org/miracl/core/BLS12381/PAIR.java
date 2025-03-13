@@ -21,14 +21,26 @@
 
 package org.miracl.core.BLS12381;
 
-public final class PAIR {
+public final class PAIR 
+{
+	// Working Variables // 
+    private static final ThreadLocal<FP[]>  ateFP_4 = ThreadLocal.withInitial(() -> new FP[] {new FP(), new FP(), new FP(), new FP()});
+    private static final ThreadLocal<BIG[]> ateBIG_2 = ThreadLocal.withInitial(() -> new BIG[] {new BIG(), new BIG()});
+    private static final ThreadLocal<ECP[]> ateECP_2 = ThreadLocal.withInitial(() -> new ECP[] {new ECP(), new ECP()});
+    private static final ThreadLocal<ECP2[]> ateECP2_7 = ThreadLocal.withInitial(() -> new ECP2[] {new ECP2(), new ECP2(), new ECP2(), new ECP2(), new ECP2(), new ECP2(), new ECP2()});
+    private static final ThreadLocal<FP12[]> ateFP12_3 = ThreadLocal.withInitial(() -> new FP12[] {new FP12(), new FP12(), new FP12()});
+    private static final ThreadLocal<FP2[]> lineFP2_3 = ThreadLocal.withInitial(() -> new FP2[] {new FP2(), new FP2(), new FP2()});
+    private static final ThreadLocal<FP4[]> lineFP4_3 = ThreadLocal.withInitial(() -> new FP4[] {new FP4(), new FP4(), new FP4()});
+    private static final ThreadLocal<FP2> addFP2 = ThreadLocal.withInitial(() -> new FP2());
+    private static final ThreadLocal<FP2> dblFP2 = ThreadLocal.withInitial(() -> new FP2());
 
 //	public static final boolean GT_STRONG=false;
 
 // Point doubling for pairings
     private static void dbl(ECP2 A, FP2 AA, FP2 BB, FP2 CC) {
         CC.copy(A.getx());		//X
-        FP2 YY = new FP2(A.gety());	//Y
+        FP2 YY = dblFP2.get(); 
+        YY.copy(A.gety());		//Y
         BB.copy(A.getz());		//Z
         AA.copy(YY);
 
@@ -66,7 +78,8 @@ public final class PAIR {
     private static void add(ECP2 A, ECP2 B, FP2 AA, FP2 BB, FP2 CC) {
         AA.copy(A.getx());    // AA
         CC.copy(A.gety());    // CC
-        FP2 T1 = new FP2(A.getz());  // Z1
+        FP2 T1 = addFP2.get(); 
+        T1.copy(A.getz());		//Z1
         BB.copy(T1);    // Z1
 
         T1.mul(B.gety());    // T1=Z1.Y2
@@ -93,11 +106,13 @@ public final class PAIR {
     }
 
     /* Line function */
-    public static FP12 line(ECP2 A, ECP2 B, FP Qx, FP Qy) {
+    public static FP12 line(ECP2 A, ECP2 B, FP Qx, FP Qy, FP12 o) {
         FP4 a, b, c;
-        FP2 AA = new FP2();
-        FP2 BB = new FP2();
-        FP2 CC = new FP2();
+        
+        FP2[] AABBCC = lineFP2_3.get(); 
+        FP2 AA = AABBCC[0]; AA.zero();
+        FP2 BB = AABBCC[1]; BB.zero();
+        FP2 CC = AABBCC[2]; CC.zero();
 
         if (A == B)
             dbl(A, AA, BB, CC);
@@ -107,20 +122,20 @@ public final class PAIR {
         CC.pmul(Qx);
         AA.pmul(Qy);
 
-        a = new FP4(AA, BB);
+        FP4[] abc = lineFP4_3.get(); 
+        a = abc[0]; a.copy(AA, BB);
 
         if (CONFIG_CURVE.SEXTIC_TWIST == CONFIG_CURVE.D_TYPE) {
-            b = new FP4(CC);           // L(0,1) | L(0,0) | L(1,0)
-            c = new FP4();
+            b = abc[1]; b.copy(CC);           // L(0,1) | L(0,0) | L(1,0)
+            c = abc[2]; c.zero();
         }
         if (CONFIG_CURVE.SEXTIC_TWIST == CONFIG_CURVE.M_TYPE) {
-            b = new FP4();
-            c = new FP4(CC); c.times_i();
+            b = abc[1]; b.zero();
+            c = abc[2]; c.copy(CC); c.times_i();
         }
 
-        FP12 r = new FP12(a, b, c);
-        r.settype(FP12.SPARSER);
-        return r;
+        o.copy(a, b, c, FP12.SPARSER);
+        return o;
     }
 
     /* prepare ate parameter, n=6u+2 (BN) or n=u (BLS), n3=3*n */
@@ -309,7 +324,7 @@ public final class PAIR {
         BIG n = new BIG(0);
         BIG n3 = new BIG(0);
         ECP2 K = new ECP2();
-        FP12 lv, lv2;
+        FP12 lv = new FP12(0), lv2 = new FP12(0);
         int bt;
 
         if (Q1.is_infinity()) return;
@@ -340,15 +355,15 @@ public final class PAIR {
         int nb = lbits(n3, n);
 
         for (int i = nb - 2; i >= 1; i--) {
-            lv = line(A, A, Qx, Qy);
+            line(A, A, Qx, Qy, lv);
 
             bt = n3.bit(i) - n.bit(i);
             if (bt == 1) {
-                lv2 = line(A, P, Qx, Qy);
+                line(A, P, Qx, Qy, lv2);
                 lv.smul(lv2);
             }
             if (bt == -1) {
-                lv2 = line(A, MP, Qx, Qy);
+                line(A, MP, Qx, Qy, lv2);
                 lv.smul(lv2);
             }
             r[i].ssmul(lv);
@@ -361,10 +376,10 @@ public final class PAIR {
             }
             K.copy(P);
             K.frob(f);
-            lv = line(A, K, Qx, Qy);
+            line(A, K, Qx, Qy, lv);
             K.frob(f);
             K.neg();
-            lv2 = line(A, K, Qx, Qy);
+            line(A, K, Qx, Qy, lv2);
             lv.smul(lv2);
             r[0].ssmul(lv);
         }
@@ -376,7 +391,7 @@ public final class PAIR {
         BIG n = new BIG(0);
         BIG n3 = new BIG(0);
         ECP2 K = new ECP2();
-        FP12 lv, lv2;
+        FP12 lv = new FP12(0), lv2 = new FP12(0);
         int bt;
 
         if (Q1.is_infinity()) return new FP12(1);
@@ -409,15 +424,15 @@ public final class PAIR {
 
         for (int i = nb - 2; i >= 1; i--) {
             r.sqr();
-            lv = line(A, A, Qx, Qy);
+            line(A, A, Qx, Qy, lv);
 
             bt = n3.bit(i) - n.bit(i);
             if (bt == 1) {
-                lv2 = line(A, P, Qx, Qy);
+                line(A, P, Qx, Qy, lv2);
                 lv.smul(lv2);
             }
             if (bt == -1) {
-                lv2 = line(A, MP, Qx, Qy);
+                line(A, MP, Qx, Qy, lv2);
                 lv.smul(lv2);
             }
             r.ssmul(lv);
@@ -434,10 +449,10 @@ public final class PAIR {
             }
             K.copy(P);
             K.frob(f);
-            lv = line(A, K, Qx, Qy);
+            line(A, K, Qx, Qy, lv);
             K.frob(f);
             K.neg();
-            lv2 = line(A, K, Qx, Qy);
+            line(A, K, Qx, Qy, lv2);
             lv.smul(lv2);
             r.ssmul(lv);
         }
@@ -446,24 +461,30 @@ public final class PAIR {
 
     /* Optimal R-ate double pairing e(P,Q).e(R,S) */
     public static FP12 ate2(ECP2 P1, ECP Q1, ECP2 R1, ECP S1) {
+    	FP[] FP_4 = ateFP_4.get();
+    	BIG[] BIG_2 = ateBIG_2.get();
+    	ECP[] ECP_2 = ateECP_2.get();
+    	ECP2[] ECP2_7 = ateECP2_7.get();
+    	FP12[] FP12_3 = ateFP12_3.get();
+    	
         FP2 f;
-        BIG n = new BIG(0);
-        BIG n3 = new BIG(0);
-        ECP2 K = new ECP2();
-        FP12 lv, lv2;
+        BIG n=BIG_2[0];n.zero();
+        BIG n3=BIG_2[1];n3.zero();
+        ECP2 K=ECP2_7[0];
+        FP12 lv=FP12_3[0], lv2=FP12_3[1];
         int bt;
 
         if (Q1.is_infinity()) return ate(R1, S1);
         if (S1.is_infinity()) return ate(P1, Q1);
 
-        ECP2 P = new ECP2(P1);
-        ECP Q = new ECP(Q1);
+        ECP2 P=ECP2_7[1];P.copy(P1);
+        ECP Q=ECP_2[0];Q.copy(Q1);
 
         P.affine();
         Q.affine();
 
-        ECP2 R = new ECP2(R1);
-        ECP S = new ECP(S1);
+        ECP2 R=ECP2_7[2];R.copy(R1);
+        ECP S=ECP_2[1];S.copy(S1);
 
         R.affine();
         S.affine();
@@ -476,42 +497,42 @@ public final class PAIR {
             }
         }
 
-        FP Qx = new FP(Q.getx());
-        FP Qy = new FP(Q.gety());
-        FP Sx = new FP(S.getx());
-        FP Sy = new FP(S.gety());
+        FP Qx=FP_4[0];Qx.copy(Q.getx());
+        FP Qy=FP_4[1];Qy.copy(Q.gety());
+        FP Sx=FP_4[2];Sx.copy(S.getx());
+        FP Sy=FP_4[3];Sy.copy(S.gety());
 
-        ECP2 A = new ECP2();
-        ECP2 B = new ECP2();
-        FP12 r = new FP12(1);
+        ECP2 A=ECP2_7[3];
+        ECP2 B=ECP2_7[4];
+        FP12 r=FP12_3[2];r.one();
 
         A.copy(P);
         B.copy(R);
 
-        ECP2 MP = new ECP2();
+        ECP2 MP=ECP2_7[5];
         MP.copy(P); MP.neg();
-        ECP2 MR = new ECP2();
+        ECP2 MR=ECP2_7[6];
         MR.copy(R); MR.neg();
 
         int nb = lbits(n3, n);
 
         for (int i = nb - 2; i >= 1; i--) {
             r.sqr();
-            lv = line(A, A, Qx, Qy);
-            lv2 = line(B, B, Sx, Sy);
+            line(A, A, Qx, Qy, lv);
+            line(B, B, Sx, Sy, lv2);
             lv.smul(lv2);
             r.ssmul(lv);
 
             bt = n3.bit(i) - n.bit(i);
             if (bt == 1) {
-                lv = line(A, P, Qx, Qy);
-                lv2 = line(B, R, Sx, Sy);
+                line(A, P, Qx, Qy, lv);
+                line(B, R, Sx, Sy, lv2);
                 lv.smul(lv2);
                 r.ssmul(lv);
             }
             if (bt == -1) {
-                lv = line(A, MP, Qx, Qy);
-                lv2 = line(B, MR, Sx, Sy);
+                line(A, MP, Qx, Qy, lv);
+                line(B, MR, Sx, Sy, lv2);
                 lv.smul(lv2);
                 r.ssmul(lv);
             }
@@ -532,18 +553,18 @@ public final class PAIR {
             K.copy(P);
             K.frob(f);
 
-            lv = line(A, K, Qx, Qy);
+            line(A, K, Qx, Qy, lv);
             K.frob(f);
             K.neg();
-            lv2 = line(A, K, Qx, Qy);
+            line(A, K, Qx, Qy, lv2);
             lv.smul(lv2);
             r.ssmul(lv);
             K.copy(R);
             K.frob(f);
-            lv = line(B, K, Sx, Sy);
+            line(B, K, Sx, Sy, lv);
             K.frob(f);
             K.neg();
-            lv2 = line(B, K, Sx, Sy);
+            line(B, K, Sx, Sy, lv2);
             lv.smul(lv2);
             r.ssmul(lv);
         }
