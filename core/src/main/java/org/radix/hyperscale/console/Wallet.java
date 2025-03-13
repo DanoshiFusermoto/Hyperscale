@@ -23,17 +23,17 @@ public class Wallet extends Function
 														.addOption("key", false, "Returns the wallet private key");
 	
 	private static final Map<Context, SimpleWallet> wallets = Collections.synchronizedMap(new HashMap<Context, SimpleWallet>());
-	public static SimpleWallet get(Context context)
+	public static SimpleWallet get(final Context context)
 	{
 		return wallets.get(context);
 	}
 	
-	private static SimpleWallet put(Context context, SimpleWallet wallet)
+	private static SimpleWallet put(final Context context, final SimpleWallet wallet)
 	{
 		return wallets.put(context, wallet);
 	}
 
-	private static boolean remove(Context context, SimpleWallet wallet)
+	private static boolean remove(final Context context, final SimpleWallet wallet)
 	{
 		return wallets.remove(context, wallet);
 	}
@@ -44,20 +44,20 @@ public class Wallet extends Function
 	}
 
 	@Override
-	public void execute(Context context, String[] arguments, PrintStream printStream) throws Exception
+	public void execute(final Context context, final String[] arguments, final PrintStream printStream) throws Exception
 	{
-		CommandLine commandLine = Function.parser.parse(options, arguments);
+		final CommandLine commandLine = Function.parser.parse(options, arguments);
 		
 		SimpleWallet wallet = Wallet.get(context);
-
 		if (commandLine.hasOption("init"))
 		{
 			if (wallet != null)
 				throw new IllegalStateException("Wallet "+wallet.getIdentity()+" is already open");
 			
-			String filename = commandLine.getOptionValue("init", "wallet.key");
-			EDKeyPair walletKeyPair = EDKeyPair.fromFile(new File(filename), true);
+			final String filename = commandLine.getOptionValue("init", "wallet.key");
+			final EDKeyPair walletKeyPair = EDKeyPair.fromFile(new File(filename), true);
 			wallet = new SimpleWallet(context, walletKeyPair);
+			
 			Wallet.put(context, wallet);
 		}
 		else if (wallet == null)
@@ -71,6 +71,6 @@ public class Wallet extends Function
 		else if (commandLine.hasOption("address"))
 			printStream.println(wallet.getIdentity());
 		else if (commandLine.hasOption("key"))
-			printStream.println(BaseEncoding.base16().encode(wallet.getKey().getPrivateKey().toByteArray()));
+			printStream.println(BaseEncoding.base16().encode(wallet.getKeyPair().getPrivateKey().toByteArray()));
 	}
 }

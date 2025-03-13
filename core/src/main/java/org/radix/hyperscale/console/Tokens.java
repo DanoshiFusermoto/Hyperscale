@@ -44,18 +44,18 @@ public class Tokens extends Function
 	@Override
 	public void execute(Context context, String[] arguments, PrintStream printStream) throws Exception
 	{
-		CommandLine commandLine = Function.parser.parse(options, arguments);
+		final CommandLine commandLine = Function.parser.parse(options, arguments);
 		
-		SimpleWallet wallet = Wallet.get(context);
+		final SimpleWallet wallet = Wallet.get(context);
 		if (wallet == null)
 			throw new IllegalStateException("No wallet is open");
 		
 		if (commandLine.hasOption("balance"))
 		{
-			String ISO = commandLine.getOptionValue("balance", "CASSIE");
+			final String ISO = commandLine.getOptionValue("balance", "CASSIE");
 
-			Future<SubstateSearchResponse> tokenSearchFuture = context.getLedger().get(new SubstateSearchQuery(StateAddress.from(TokenComponent.class, Hash.valueOf(ISO.toLowerCase()))));
-			SubstateSearchResponse tokenSearchResult = tokenSearchFuture.get(10, TimeUnit.SECONDS);
+			final Future<SubstateSearchResponse> tokenSearchFuture = context.getLedger().get(new SubstateSearchQuery(StateAddress.from(TokenComponent.class, Hash.valueOf(ISO.toLowerCase()))));
+			final SubstateSearchResponse tokenSearchResult = tokenSearchFuture.get(10, TimeUnit.SECONDS);
 			if (tokenSearchResult.getResult() == null)
 			{
 				printStream.println("Token "+ISO+" not found");
@@ -66,17 +66,18 @@ public class Tokens extends Function
 		}
 		else if (commandLine.hasOption("transfer"))
 		{
-			Object[] options = Stream.of(commandLine.getOptionValues("transfer"), commandLine.getArgs()).flatMap(Stream::of).toArray();   
+			final Object[] options = Stream.of(commandLine.getOptionValues("transfer"), commandLine.getArgs()).flatMap(Stream::of).toArray();   
 			
-			Atom atom = new Atom();
+			final Atom.Builder atomBuilder = new Atom.Builder();
 			for (int o = 0 ; o < options.length ; o+=3)
 			{
 				Identity receiver = Identity.from((String) options[o]);
 				UInt256 amount = UInt256.from((String) options[o+1]);
 				String symbol = (String) options[o+2];
-				wallet.spend(atom, symbol, amount, receiver);
+				atomBuilder.push(wallet.spend(symbol, amount, receiver));
 			}
 
+			final Atom atom = atomBuilder.build();
 			wallet.submit(atom);
 
 			JSONObject atomJSON = Serialization.getInstance().toJsonObject(atom, Output.API);
@@ -97,20 +98,22 @@ public class Tokens extends Function
 				json.put("description", commandLine.getArgList().stream().collect(Collectors.joining(" ")));
 			}
 			
-			Atom atom = new Atom();
-			atom.push(TokenComponent.class.getAnnotation(StateContext.class).value()+"::create('"+json.getString("symbol")+"', '"+json.getString("description")+"', account('"+wallet.getIdentity()+"'))");
+			final Atom.Builder atomBuilder = new Atom.Builder();
+			atomBuilder.push(TokenComponent.class.getAnnotation(StateContext.class).value()+"::create('"+json.getString("symbol")+"', '"+json.getString("description")+"', account('"+wallet.getIdentity()+"'))");
 
+			final Atom atom = atomBuilder.build();
 			wallet.submit(atom);
+
 			printStream.println(Serialization.getInstance().toJson(atom, Output.API));
 		}
 		else if (commandLine.hasOption("mint"))
 		{
-			String[] options = commandLine.getOptionValues("mint");
-			UInt256 amount = UInt256.from(options[0]);
-			String ISO = options[1];
+			final String[] options = commandLine.getOptionValues("mint");
+			final UInt256 amount = UInt256.from(options[0]);
+			final String ISO = options[1];
 			
-			Future<SubstateSearchResponse> tokenSearchFuture = context.getLedger().get(new SubstateSearchQuery(StateAddress.from(TokenComponent.class, Hash.valueOf(ISO.toLowerCase()))));
-			SubstateSearchResponse tokenSearchResult = tokenSearchFuture.get(10, TimeUnit.SECONDS);
+			final Future<SubstateSearchResponse> tokenSearchFuture = context.getLedger().get(new SubstateSearchQuery(StateAddress.from(TokenComponent.class, Hash.valueOf(ISO.toLowerCase()))));
+			final SubstateSearchResponse tokenSearchResult = tokenSearchFuture.get(10, TimeUnit.SECONDS);
 			if (tokenSearchResult.getResult() == null)
 			{
 				printStream.println("Token "+ISO+" not found");
@@ -123,26 +126,28 @@ public class Tokens extends Function
 				return;
 			}
 
-			Atom atom = new Atom();
-			atom.push(TokenComponent.class.getAnnotation(StateContext.class).value()+"::mint('"+ISO+"', "+amount+", account('"+wallet.getIdentity()+"'))");
+			final Atom.Builder atomBuilder = new Atom.Builder();
+			atomBuilder.push(TokenComponent.class.getAnnotation(StateContext.class).value()+"::mint('"+ISO+"', "+amount+", account('"+wallet.getIdentity()+"'))");
 
+			final Atom atom = atomBuilder.build();
 			wallet.submit(atom);
+			
 			printStream.println(Serialization.getInstance().toJson(atom, Output.API));
 		}
 		else if (commandLine.hasOption("debits"))
 		{
-			String ISO = commandLine.getOptionValue("debits", "CASSIE");
+			final String ISO = commandLine.getOptionValue("debits", "CASSIE");
 			
-			Future<SubstateSearchResponse> tokenSearchFuture = context.getLedger().get(new SubstateSearchQuery(StateAddress.from(TokenComponent.class, Hash.valueOf(ISO.toLowerCase()))));
-			SubstateSearchResponse tokenSearchResult = tokenSearchFuture.get(10, TimeUnit.SECONDS);
+			final Future<SubstateSearchResponse> tokenSearchFuture = context.getLedger().get(new SubstateSearchQuery(StateAddress.from(TokenComponent.class, Hash.valueOf(ISO.toLowerCase()))));
+			final SubstateSearchResponse tokenSearchResult = tokenSearchFuture.get(10, TimeUnit.SECONDS);
 			if (tokenSearchResult.getResult() == null)
 			{
 				printStream.println("Token "+ISO+" not found");
 				return;
 			}
 			
-			Collection<Substate> transfers = wallet.get(TokenComponent.class.getAnnotation(StateContext.class).value()+".transfer", TokenComponent.class.getAnnotation(StateContext.class).value()+".burn");
-			for (Substate transfer : transfers)
+			final Collection<Substate> transfers = wallet.get(TokenComponent.class.getAnnotation(StateContext.class).value()+".transfer", TokenComponent.class.getAnnotation(StateContext.class).value()+".burn");
+			for (final Substate transfer : transfers)
 			{
 				if (ISO.equalsIgnoreCase(transfer.get("symbol")) == false)
 					continue;
@@ -155,18 +160,18 @@ public class Tokens extends Function
 		}
 		else if (commandLine.hasOption("credits"))
 		{
-			String ISO = commandLine.getOptionValue("credits", "CASSIE");
+			final String ISO = commandLine.getOptionValue("credits", "CASSIE");
 			
-			Future<SubstateSearchResponse> tokenSearchFuture = context.getLedger().get(new SubstateSearchQuery(StateAddress.from(TokenComponent.class, Hash.valueOf(ISO.toLowerCase()))));
-			SubstateSearchResponse tokenSearchResult = tokenSearchFuture.get(10, TimeUnit.SECONDS);
+			final Future<SubstateSearchResponse> tokenSearchFuture = context.getLedger().get(new SubstateSearchQuery(StateAddress.from(TokenComponent.class, Hash.valueOf(ISO.toLowerCase()))));
+			final SubstateSearchResponse tokenSearchResult = tokenSearchFuture.get(10, TimeUnit.SECONDS);
 			if (tokenSearchResult.getResult() == null)
 			{
 				printStream.println("Token "+ISO+" not found");
 				return;
 			}
 			
-			Collection<Substate> transfers = wallet.get(TokenComponent.class.getAnnotation(StateContext.class).value()+".transfer", TokenComponent.class.getAnnotation(StateContext.class).value()+".mint");
-			for (Substate transfer : transfers)
+			final Collection<Substate> transfers = wallet.get(TokenComponent.class.getAnnotation(StateContext.class).value()+".transfer", TokenComponent.class.getAnnotation(StateContext.class).value()+".mint");
+			for (final Substate transfer : transfers)
 			{
 				if (ISO.equalsIgnoreCase(transfer.get("symbol")) == false)
 					continue;
