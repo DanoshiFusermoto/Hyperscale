@@ -811,10 +811,10 @@ public final class PendingAtom implements Hashable, StateAddressable
 	{
 		if (object == null)
 			return false;
-
-		if (object == this)
-			return true;
-
+		
+		if (object != this)
+			return false;
+		
 		if (object instanceof PendingAtom pendingAtom)
 		{
 			if (pendingAtom.getHash().equals(this.hash))

@@ -119,10 +119,10 @@ public final class StateVote extends Vote<BLSKeyPair, BLSPublicKey, BLSSignature
 	{
 		if (obj == null)
 			return false;
-
-		if (obj == this)
-			return true;
-
+		
+		if (obj != this)
+			return false;
+		
 		if (obj instanceof StateVote stateVote)
 		{
 			if (stateVote.atom.equals(this.atom) == false)

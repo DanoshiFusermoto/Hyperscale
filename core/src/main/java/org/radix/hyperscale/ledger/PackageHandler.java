@@ -446,11 +446,12 @@ public final class PackageHandler implements Service
 	
 	Collection<PolyglotPackage> uncommitted()
 	{
-
-        this.lock.readLock().lock();
+		final List<PolyglotPackage> uncommitted = new ArrayList<PolyglotPackage>();
+		
+		this.lock.readLock().lock();
 		try
 		{
-            final List<PolyglotPackage> uncommitted = new ArrayList<>(this.uncommitted.values());
+			uncommitted.addAll(this.uncommitted.values());
 			return Collections.unmodifiableList(uncommitted);
 		}
 		finally

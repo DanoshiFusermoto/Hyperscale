@@ -161,7 +161,7 @@ public class LedgerStore extends DatabaseStore implements LedgerProvider
 
 		private void setClockEnd(long clock)
 		{
-			this.clockEnd = clock;
+			this.clockEnd = clock;;
 		}
 
 		long getWitnessedAt()

@@ -236,8 +236,8 @@ final class LedgerSearch implements Service, LedgerInterface
 				if (getQuery().getOrder().equals(Order.NATURAL))
 				{
 					long id1 = ss1.getID();
-					long id2 = ss2.getID();
-
+					long id2 = ss1.getID();
+					
 					if (id1 < id2)
 						return -1;
 					if (id1 > id2)

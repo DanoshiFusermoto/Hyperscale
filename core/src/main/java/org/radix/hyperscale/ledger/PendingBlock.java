@@ -981,10 +981,10 @@ public final class PendingBlock implements Hashable
 	{
 		if (object == null)
 			return false;
-
-		if (object == this)
-			return true;
-
+		
+		if (object != this)
+			return false;
+		
 		if (object instanceof PendingBlock pendingBlock)
 		{
 			if (pendingBlock.getHeader().getHash().equals(this.header.getHash()))

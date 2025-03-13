@@ -1,6 +1,5 @@
 package org.radix.hyperscale.collections;
 
-import java.util.Arrays;
 import java.util.Objects;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
@@ -227,8 +226,9 @@ public class LRUCacheMap<K, V>
     {
     	synchronized(this.mutex)
     	{
-            Arrays.fill(this.table, null);
-
+	        for (int i = 0; i < this.table.length; i++)
+	        	this.table[i] = null;
+	
 	        this.head.next = this.tail;
 	        this.tail.prev = this.head;
 	        this.size = 0;
