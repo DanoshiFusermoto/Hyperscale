@@ -225,17 +225,6 @@ public final class Atom extends ExtendedObject implements Primitive
 		this.signatures = new HashMap<Identity, Signature>(3);
 	}
 
-	@VisibleForTesting
-	// IMPORTANT: Use with care when setting the nonce manually.  Should only be used by system functions such as collaborative consensus
-/*	public Atom(long nonce)
-	{
-		super();
-		
-		this.nonce = nonce;
-		this.manifest = new ArrayList<String>(3);
-		this.signatures = new HashMap<Identity, EDSignature>(3);
-	}*/
-
 	/**
 	 * Create a copy of the supplied atom discarding the state snapshot.
 	 * 
@@ -255,21 +244,6 @@ public final class Atom extends ExtendedObject implements Primitive
 		this.signatures = new HashMap<Identity, Signature>(atom.signatures);
 	}
 
-/*	public Atom(final String ... manifest)
-	{
-		super();
-		
-		Objects.requireNonNull(manifest, "Manifest is null");
-		Numbers.isZero(manifest.length, "Manifest is empty");
-		Numbers.greaterThan(manifest.length, Atom.MAX_MANIFEST_ITEMS, "Manifest exceeds maximum items of "+Atom.MAX_MANIFEST_ITEMS);
-		
-		this.nonce = ThreadLocalRandom.current().nextLong();
-		this.manifest = new ArrayList<String>(manifest.length);
-		for(int i = 0 ; i < manifest.length ; i++)
-			this.manifest.add(manifest[i]);
-		this.signatures = new HashMap<Identity, EDSignature>(3);
-	}
-*/
 	private Atom(final long nonce, final List<String> manifest)
 	{
 		super();
@@ -344,7 +318,7 @@ public final class Atom extends ExtendedObject implements Primitive
 		return signature;
 	}
 
-	public Signature sign(final KeyPair<?,?,?> key, final Signature signature)
+	public Signature sign(final PublicKey<?> key, final Signature signature)
 	{
 		throwIfImmutable();
 		
