@@ -1215,7 +1215,7 @@ public class BlockHandler implements Service
 		if (progressRound.getState().equals(ProgressRound.State.VOTING))
 		{
 			// If the local instance shard is behind, don't cast a vote
-			if (progressRound.drift() <= 0 && 
+			if (progressRound.driftClock() <= 0 && 
 				progressRound.hasVoted(this.context.getNode().getIdentity()) == false)
 			{
 				PendingBranch selectedBranch = selectBranchToVote(progressRound);
@@ -1261,10 +1261,10 @@ public class BlockHandler implements Service
 
 			// Progress interval & delay
 			final long targetRoundDuration = Math.max(Constants.MINIMUM_ROUND_DURATION_MILLISECONDS, Configuration.getDefault().get("ledger.liveness.delay", 0));
-			final long roundDelayDuration = targetRoundDuration-progressRound.getDuration();
+			final long roundDelayDuration = (targetRoundDuration-progressRound.getDuration())+Math.max(progressRound.driftMilli(), 0);
 			
 			// Too fast
-			if (roundDelayDuration > 0 && this.shardClock.get() == nextProgressRound.clock())
+			if (roundDelayDuration > 0 && progressRound.driftClock() == 0)
 			{
 				try 
 				{
@@ -1493,7 +1493,7 @@ public class BlockHandler implements Service
 		if (round.clock() != this.progressClock.get())
 			throw new ValidationException("Attempted to vote on progress round "+round.clock()+" but vote clock is "+this.progressClock.get());
 
-		if (round.drift() > 0)
+		if (round.driftClock() > 0)
 			throw new ValidationException("Attempted to vote on progress round "+round.clock()+" but shard clock is "+this.shardClock.get());
 
 		if (round.hasVoted(this.context.getNode().getIdentity()))
@@ -1556,7 +1556,7 @@ public class BlockHandler implements Service
 			return;
 		
 		// If the local instances shard is behind, don't build
-		if (progressRound.drift() > 0)
+		if (progressRound.driftClock() > 0)
 			return;
 		
 		// Initial genesis MUST build on phase NONE
