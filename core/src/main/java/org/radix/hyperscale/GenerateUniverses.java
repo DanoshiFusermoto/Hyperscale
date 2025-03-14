@@ -30,7 +30,6 @@ import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Multimap;
 
 import java.io.File;
-import java.security.Security;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -174,7 +173,7 @@ public final class GenerateUniverses
 		final BLSKeyPair ephemeralValidator = new BLSKeyPair();
 		final EDKeyPair ephemeralIdentity = new EDKeyPair();
 		
-		final Atom genesisAtom = new Atom();
+		final Atom.Builder genesisAtomBuilder = new Atom.Builder();
 		
 		final Multimap<ShardGroupID, Identity> validatorsToShardGroups = HashMultimap.create();
 		for (Identity validator : this.validators)
@@ -190,65 +189,68 @@ public final class GenerateUniverses
 				genesisVotePowers.put(validator, Constants.VOTE_POWER_BOOTSTRAP);
 
 			final Blob votePowersBlob = new Blob("application/json", Serialization.getInstance().toJson(new VotePowers(0, genesisVotePowers), Output.WIRE));
-			genesisAtom.push(votePowersBlob.asDataURL());
-			genesisAtom.push("ledger::epoch("+0+", "+shardGroupID+", hash('"+votePowersBlob.getHash()+"'))");
+			genesisAtomBuilder.push(votePowersBlob.asDataURL());
+			genesisAtomBuilder.push("ledger::epoch("+0+", "+shardGroupID+", hash('"+votePowersBlob.getHash()+"'))");
 		}
 		
-		genesisAtom.push("account::create(account('"+this.universeKey.getIdentity()+"'))");
-		genesisAtom.push("token::create(token('XRD', WRITE), 'Radix token', account('"+this.universeKey.getIdentity()+"'))");
-		genesisAtom.push("token::mint(token('XRD', WRITE), "+UInt256.from(UInt128.HIGH_BIT).toString()+", vault('"+this.universeKey.getIdentity()+"'), identity('"+this.universeKey.getIdentity()+"'))");
+		genesisAtomBuilder.push("account::create(account('"+this.universeKey.getIdentity()+"'))");
+		genesisAtomBuilder.push("token::create(token('XRD', WRITE), 'Radix token', account('"+this.universeKey.getIdentity()+"'))");
+		genesisAtomBuilder.push("token::mint(token('XRD', WRITE), "+UInt256.from(UInt128.HIGH_BIT).toString()+", vault('"+this.universeKey.getIdentity()+"'), identity('"+this.universeKey.getIdentity()+"'))");
 
-		genesisAtom.push("token::create(token('CASSIE', WRITE), 'Cassie token', account('"+this.universeKey.getIdentity()+"'))");
-		genesisAtom.push("token::mint(token('CASSIE', WRITE), "+UInt256.from(UInt128.HIGH_BIT).toString()+", vault('"+this.universeKey.getIdentity()+"'), identity('"+this.universeKey.getIdentity()+"'))");
+		genesisAtomBuilder.push("token::create(token('CASSIE', WRITE), 'Cassie token', account('"+this.universeKey.getIdentity()+"'))");
+		genesisAtomBuilder.push("token::mint(token('CASSIE', WRITE), "+UInt256.from(UInt128.HIGH_BIT).toString()+", vault('"+this.universeKey.getIdentity()+"'), identity('"+this.universeKey.getIdentity()+"'))");
 		
-		genesisAtom.push("token::create(token('HUG', WRITE), 'Hug token', account('"+this.universeKey.getIdentity()+"'))");
-		genesisAtom.push("token::mint(token('HUG', WRITE), "+UInt256.from(UInt128.HIGH_BIT).toString()+", vault('"+this.universeKey.getIdentity()+"'), identity('"+this.universeKey.getIdentity()+"'))");
+		genesisAtomBuilder.push("token::create(token('HUG', WRITE), 'Hug token', account('"+this.universeKey.getIdentity()+"'))");
+		genesisAtomBuilder.push("token::mint(token('HUG', WRITE), "+UInt256.from(UInt128.HIGH_BIT).toString()+", vault('"+this.universeKey.getIdentity()+"'), identity('"+this.universeKey.getIdentity()+"'))");
 		
-		genesisAtom.push("token::create(token('DFP2', WRITE), 'DefiPlaza token', account('"+this.universeKey.getIdentity()+"'))");
-		genesisAtom.push("token::mint(token('DFP2', WRITE), "+UInt256.from(UInt128.HIGH_BIT).toString()+", vault('"+this.universeKey.getIdentity()+"'), identity('"+this.universeKey.getIdentity()+"'))");
+		genesisAtomBuilder.push("token::create(token('DFP2', WRITE), 'DefiPlaza token', account('"+this.universeKey.getIdentity()+"'))");
+		genesisAtomBuilder.push("token::mint(token('DFP2', WRITE), "+UInt256.from(UInt128.HIGH_BIT).toString()+", vault('"+this.universeKey.getIdentity()+"'), identity('"+this.universeKey.getIdentity()+"'))");
 		
-		genesisAtom.push("token::create(token('OCI', WRITE), 'Ociswap token', account('"+this.universeKey.getIdentity()+"'))");
-		genesisAtom.push("token::mint(token('OCI', WRITE), "+UInt256.from(UInt128.HIGH_BIT).toString()+", vault('"+this.universeKey.getIdentity()+"'), identity('"+this.universeKey.getIdentity()+"'))");
+		genesisAtomBuilder.push("token::create(token('OCI', WRITE), 'Ociswap token', account('"+this.universeKey.getIdentity()+"'))");
+		genesisAtomBuilder.push("token::mint(token('OCI', WRITE), "+UInt256.from(UInt128.HIGH_BIT).toString()+", vault('"+this.universeKey.getIdentity()+"'), identity('"+this.universeKey.getIdentity()+"'))");
 		
-		genesisAtom.push("token::create(token('EARLY', WRITE), 'Early token', account('"+this.universeKey.getIdentity()+"'))");
-		genesisAtom.push("token::mint(token('EARLY', WRITE), "+UInt256.from(UInt128.HIGH_BIT).toString()+", vault('"+this.universeKey.getIdentity()+"'), identity('"+this.universeKey.getIdentity()+"'))");
+		genesisAtomBuilder.push("token::create(token('EARLY', WRITE), 'Early token', account('"+this.universeKey.getIdentity()+"'))");
+		genesisAtomBuilder.push("token::mint(token('EARLY', WRITE), "+UInt256.from(UInt128.HIGH_BIT).toString()+", vault('"+this.universeKey.getIdentity()+"'), identity('"+this.universeKey.getIdentity()+"'))");
 		
-		genesisAtom.push("token::create(token('WOWO', WRITE), 'WonderWoman token', account('"+this.universeKey.getIdentity()+"'))");
-		genesisAtom.push("token::mint(token('WOWO', WRITE), "+UInt256.from(UInt128.HIGH_BIT).toString()+", vault('"+this.universeKey.getIdentity()+"'), identity('"+this.universeKey.getIdentity()+"'))");
+		genesisAtomBuilder.push("token::create(token('WOWO', WRITE), 'WonderWoman token', account('"+this.universeKey.getIdentity()+"'))");
+		genesisAtomBuilder.push("token::mint(token('WOWO', WRITE), "+UInt256.from(UInt128.HIGH_BIT).toString()+", vault('"+this.universeKey.getIdentity()+"'), identity('"+this.universeKey.getIdentity()+"'))");
 		
-		genesisAtom.push("token::create(token('IDA', WRITE), 'XIDAR token', account('"+this.universeKey.getIdentity()+"'))");
-		genesisAtom.push("token::mint(token('IDA', WRITE), "+UInt256.from(UInt128.HIGH_BIT).toString()+", vault('"+this.universeKey.getIdentity()+"'), identity('"+this.universeKey.getIdentity()+"'))");
+		genesisAtomBuilder.push("token::create(token('IDA', WRITE), 'XIDAR token', account('"+this.universeKey.getIdentity()+"'))");
+		genesisAtomBuilder.push("token::mint(token('IDA', WRITE), "+UInt256.from(UInt128.HIGH_BIT).toString()+", vault('"+this.universeKey.getIdentity()+"'), identity('"+this.universeKey.getIdentity()+"'))");
 		
-		genesisAtom.push("token::create(token('FOTON', WRITE), 'Foton token', account('"+this.universeKey.getIdentity()+"'))");
-		genesisAtom.push("token::mint(token('FOTON', WRITE), "+UInt256.from(UInt128.HIGH_BIT).toString()+", vault('"+this.universeKey.getIdentity()+"'), identity('"+this.universeKey.getIdentity()+"'))");
+		genesisAtomBuilder.push("token::create(token('FOTON', WRITE), 'Foton token', account('"+this.universeKey.getIdentity()+"'))");
+		genesisAtomBuilder.push("token::mint(token('FOTON', WRITE), "+UInt256.from(UInt128.HIGH_BIT).toString()+", vault('"+this.universeKey.getIdentity()+"'), identity('"+this.universeKey.getIdentity()+"'))");
 		
-		genesisAtom.push("token::create(token('CAVIAR', WRITE), 'Caviar9 token', account('"+this.universeKey.getIdentity()+"'))");
-		genesisAtom.push("token::mint(token('CAVIAR', WRITE), "+UInt256.from(UInt128.HIGH_BIT).toString()+", vault('"+this.universeKey.getIdentity()+"'), identity('"+this.universeKey.getIdentity()+"'))");
+		genesisAtomBuilder.push("token::create(token('CAVIAR', WRITE), 'Caviar9 token', account('"+this.universeKey.getIdentity()+"'))");
+		genesisAtomBuilder.push("token::mint(token('CAVIAR', WRITE), "+UInt256.from(UInt128.HIGH_BIT).toString()+", vault('"+this.universeKey.getIdentity()+"'), identity('"+this.universeKey.getIdentity()+"'))");
 		
-		genesisAtom.push("token::create(token('DAN', WRITE), 'Dan token', account('"+this.universeKey.getIdentity()+"'))");
-		genesisAtom.push("token::mint(token('DAN', WRITE), "+UInt256.from(UInt128.HIGH_BIT).toString()+", vault('"+this.universeKey.getIdentity()+"'), identity('"+this.universeKey.getIdentity()+"'))");
+		genesisAtomBuilder.push("token::create(token('DAN', WRITE), 'Dan token', account('"+this.universeKey.getIdentity()+"'))");
+		genesisAtomBuilder.push("token::mint(token('DAN', WRITE), "+UInt256.from(UInt128.HIGH_BIT).toString()+", vault('"+this.universeKey.getIdentity()+"'), identity('"+this.universeKey.getIdentity()+"'))");
 		
-		genesisAtom.push("token::create(token('PHNX', WRITE), 'Phoenix token', account('"+this.universeKey.getIdentity()+"'))");
-		genesisAtom.push("token::mint(token('PHNX', WRITE), "+UInt256.from(UInt128.HIGH_BIT).toString()+", vault('"+this.universeKey.getIdentity()+"'), identity('"+this.universeKey.getIdentity()+"'))");
+		genesisAtomBuilder.push("token::create(token('PHNX', WRITE), 'Phoenix token', account('"+this.universeKey.getIdentity()+"'))");
+		genesisAtomBuilder.push("token::mint(token('PHNX', WRITE), "+UInt256.from(UInt128.HIGH_BIT).toString()+", vault('"+this.universeKey.getIdentity()+"'), identity('"+this.universeKey.getIdentity()+"'))");
 		
-		genesisAtom.push("token::create(token('DPH', WRITE), 'Delphibets token', account('"+this.universeKey.getIdentity()+"'))");
-		genesisAtom.push("token::mint(token('DPH', WRITE), "+UInt256.from(UInt128.HIGH_BIT).toString()+", vault('"+this.universeKey.getIdentity()+"'), identity('"+this.universeKey.getIdentity()+"'))");
+		genesisAtomBuilder.push("token::create(token('DPH', WRITE), 'Delphibets token', account('"+this.universeKey.getIdentity()+"'))");
+		genesisAtomBuilder.push("token::mint(token('DPH', WRITE), "+UInt256.from(UInt128.HIGH_BIT).toString()+", vault('"+this.universeKey.getIdentity()+"'), identity('"+this.universeKey.getIdentity()+"'))");
 		
-		genesisAtom.push("token::create(token('ASTRL', WRITE), 'Astrolescent token', account('"+this.universeKey.getIdentity()+"'))");
-		genesisAtom.push("token::mint(token('ASTRL', WRITE), "+UInt256.from(UInt128.HIGH_BIT).toString()+", vault('"+this.universeKey.getIdentity()+"'), identity('"+this.universeKey.getIdentity()+"'))");
+		genesisAtomBuilder.push("token::create(token('ASTRL', WRITE), 'Astrolescent token', account('"+this.universeKey.getIdentity()+"'))");
+		genesisAtomBuilder.push("token::mint(token('ASTRL', WRITE), "+UInt256.from(UInt128.HIGH_BIT).toString()+", vault('"+this.universeKey.getIdentity()+"'), identity('"+this.universeKey.getIdentity()+"'))");
 
-		genesisAtom.push("token::create(token('EDGE', WRITE), 'Edge token', account('"+this.universeKey.getIdentity()+"'))");
-		genesisAtom.push("token::mint(token('EDGE', WRITE), "+UInt256.from(UInt128.HIGH_BIT).toString()+", vault('"+this.universeKey.getIdentity()+"'), identity('"+this.universeKey.getIdentity()+"'))");
+		genesisAtomBuilder.push("token::create(token('EDGE', WRITE), 'Edge token', account('"+this.universeKey.getIdentity()+"'))");
+		genesisAtomBuilder.push("token::mint(token('EDGE', WRITE), "+UInt256.from(UInt128.HIGH_BIT).toString()+", vault('"+this.universeKey.getIdentity()+"'), identity('"+this.universeKey.getIdentity()+"'))");
 
-		genesisAtom.push("token::create(token('GAB', WRITE), 'Gable token', account('"+this.universeKey.getIdentity()+"'))");
-		genesisAtom.push("token::mint(token('GAB', WRITE), "+UInt256.from(UInt128.HIGH_BIT).toString()+", vault('"+this.universeKey.getIdentity()+"'), identity('"+this.universeKey.getIdentity()+"'))");
+		genesisAtomBuilder.push("token::create(token('GAB', WRITE), 'Gable token', account('"+this.universeKey.getIdentity()+"'))");
+		genesisAtomBuilder.push("token::mint(token('GAB', WRITE), "+UInt256.from(UInt128.HIGH_BIT).toString()+", vault('"+this.universeKey.getIdentity()+"'), identity('"+this.universeKey.getIdentity()+"'))");
 
-		genesisAtom.push("token::create(token('WEFT', WRITE), 'Weft token', account('"+this.universeKey.getIdentity()+"'))");
-		genesisAtom.push("token::mint(token('WEFT', WRITE), "+UInt256.from(UInt128.HIGH_BIT).toString()+", vault('"+this.universeKey.getIdentity()+"'), identity('"+this.universeKey.getIdentity()+"'))");
+		genesisAtomBuilder.push("token::create(token('WEFT', WRITE), 'Weft token', account('"+this.universeKey.getIdentity()+"'))");
+		genesisAtomBuilder.push("token::mint(token('WEFT', WRITE), "+UInt256.from(UInt128.HIGH_BIT).toString()+", vault('"+this.universeKey.getIdentity()+"'), identity('"+this.universeKey.getIdentity()+"'))");
 
-		genesisAtom.push("token::create(token('USD', WRITE), 'USD token', account('"+this.universeKey.getIdentity()+"'))");
-		genesisAtom.push("token::mint(token('USD', WRITE), "+UInt256.from(UInt128.HIGH_BIT).toString()+", vault('"+this.universeKey.getIdentity()+"'), identity('"+this.universeKey.getIdentity()+"'))");
+		genesisAtomBuilder.push("token::create(token('USD', WRITE), 'USD token', account('"+this.universeKey.getIdentity()+"'))");
+		genesisAtomBuilder.push("token::mint(token('USD', WRITE), "+UInt256.from(UInt128.HIGH_BIT).toString()+", vault('"+this.universeKey.getIdentity()+"'), identity('"+this.universeKey.getIdentity()+"'))");
 
+		// Can build with zero difficulty as signed by universe key
+		final Atom genesisAtom = genesisAtomBuilder.build(0);
+		
 		// Test the manifest integrity and parsing
 		ManifestParser.parse(genesisAtom.getManifest());
 

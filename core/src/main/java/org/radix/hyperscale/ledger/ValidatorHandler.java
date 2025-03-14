@@ -525,13 +525,12 @@ public final class ValidatorHandler implements Service
 					{
 						final VotePowers pendingEpochVotePowers = new VotePowers(this.pendingEpoch.getClock(), this.pendingLocalEpochPowers);
 	
-						final Atom pendingEpochAtom = new Atom(Long.MAX_VALUE);
+						final Atom.Builder epochAtomBuilder = new Atom.Builder();
 						final Blob votePowersBlob = new Blob("application/json", Serialization.getInstance().toJson(pendingEpochVotePowers, Output.WIRE));
-						pendingEpochAtom.push(votePowersBlob.asDataURL());
-						pendingEpochAtom.push("ledger::epoch("+this.pendingEpoch.getClock()+", "+shardGroupID+", hash('"+votePowersBlob.getHash()+"'))");
-						pendingEpochAtom.sign(this.context.getNode().getKeyPair());
-						
-						this.context.getLedger().submit(pendingEpochAtom);
+						epochAtomBuilder.push(votePowersBlob.asDataURL());
+						epochAtomBuilder.push("ledger::epoch("+this.pendingEpoch.getClock()+", "+shardGroupID+", hash('"+votePowersBlob.getHash()+"'))");
+						epochAtomBuilder.signer(this.context.getNode().getKeyPair());
+						this.context.getLedger().submit(epochAtomBuilder.build());
 							
 						if (powerLog.hasLevel(Logging.DEBUG))
 							powerLog.debug(ValidatorHandler.this.context.getName()+": Submitted local vote powers for epoch "+ValidatorHandler.this.pendingEpoch.getClock());

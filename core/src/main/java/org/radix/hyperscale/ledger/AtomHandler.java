@@ -404,9 +404,15 @@ public class AtomHandler implements Service, LedgerInterface
 						continue;
 					}
 				
+					if (atom.getHash().leadingZeroBits() < Constants.MIN_PRIMITIVE_POW_DIFFICULTY && atom.hasAuthority(Universe.getDefault().getCreator()) == false)
+						throw new ValidationException("Atom POW does not meet leading bits requirement of "+Constants.MIN_PRIMITIVE_POW_DIFFICULTY);
+					
+					if (atom.verify() == false)
+						throw new ValidationException("Atom failed signature verification");
+						
 					if (pendingAtom.getAtom() == null)
 						pendingAtom.setAtom(atom);
-						
+
 					if (this.context.getLedger().getLedgerStore().store(pendingAtom.getAtom()).equals(OperationStatus.SUCCESS))
 						this.atomsToPrepareQueue.put(pendingAtom.getHash(), pendingAtom);
 					else
@@ -452,9 +458,6 @@ public class AtomHandler implements Service, LedgerInterface
 						continue;
 						
 					pendingAtom.getAtom().validate();
-						
-					if (pendingAtom.getAtom().verify() == false)
-						throw new ValidationException("Atom failed signature verification");
 						
 					if (atomsLog.hasLevel(Logging.DEBUG))
 						atomsLog.debug(this.context.getName()+": Preparing atom "+pendingAtom.getHash());

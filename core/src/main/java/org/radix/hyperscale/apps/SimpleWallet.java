@@ -29,7 +29,6 @@ import org.radix.hyperscale.common.Order;
 import org.radix.hyperscale.crypto.CryptoException;
 import org.radix.hyperscale.crypto.Hash;
 import org.radix.hyperscale.crypto.Identity;
-import org.radix.hyperscale.crypto.KeyPair;
 import org.radix.hyperscale.crypto.ed25519.EDKeyPair;
 import org.radix.hyperscale.exceptions.ValidationException;
 import org.radix.hyperscale.executors.Executable;
@@ -60,7 +59,6 @@ import org.radix.hyperscale.network.ConnectionState;
 import org.radix.hyperscale.network.Protocol;
 import org.radix.hyperscale.network.StandardConnectionFilter;
 import org.radix.hyperscale.serialization.Serialization;
-import org.radix.hyperscale.serialization.SerializationException;
 import org.radix.hyperscale.serialization.DsonOutput.Output;
 import org.radix.hyperscale.serialization.mapper.JacksonCodecConstants;
 import org.radix.hyperscale.utils.UInt256;
@@ -270,7 +268,7 @@ public class SimpleWallet implements AutoCloseable
 		return this.key.getIdentity();
 	}
 
-	public KeyPair<?,?,?> getKey() 
+	public EDKeyPair getKeyPair() 
 	{
 		return this.key;
 	}
@@ -314,18 +312,8 @@ public class SimpleWallet implements AutoCloseable
 		}
 	}
 	
-	public Atom spend(final String symbol, final UInt256 quantity, final Identity to) throws ValidationException, SerializationException, InsufficientBalanceException, InterruptedException, ExecutionException, TimeoutException
+	public String spend(String symbol, final UInt256 quantity, final Identity to) throws ValidationException, InsufficientBalanceException, InterruptedException, ExecutionException, TimeoutException
 	{
-		Atom atom = new Atom();
-		spend(atom, symbol, quantity, to);
-		return atom;
-	}
-
-	public Atom spend(final Atom atom, String symbol, final UInt256 quantity, final Identity to) throws ValidationException, InsufficientBalanceException, InterruptedException, ExecutionException, TimeoutException
-	{
-		if (atom.isSealed())
-			throw new IllegalStateException("Atom "+atom.getHash()+" is sealed");
-
 		symbol = symbol.toLowerCase();
 		Future<SubstateSearchResponse> tokenSubstateSearchResponseFuture = context.getLedger().get(new SubstateSearchQuery(StateAddress.from(TokenComponent.class, Hash.valueOf(symbol.toLowerCase()))));
 		SubstateSearchResponse tokenSubstateSearchResponse = tokenSubstateSearchResponseFuture.get(10, TimeUnit.SECONDS);
@@ -340,8 +328,7 @@ public class SimpleWallet implements AutoCloseable
 		if (balance.compareTo(quantity) < 0)
 			throw new InsufficientBalanceException(this.key.getIdentity(), symbol, quantity);
 
-		atom.push(TokenComponent.class.getAnnotation(StateContext.class).value()+"::transfer(token('"+symbol+"'), uint256("+quantity+"), vault('"+this.key.getIdentity()+"'), vault('"+to+"'))");
-		return atom;
+		return TokenComponent.class.getAnnotation(StateContext.class).value()+"::transfer(token('"+symbol+"'), uint256("+quantity+"), vault('"+this.key.getIdentity()+"'), vault('"+to+"'))";
 	}
 	
 	public Future<AtomCertificate> submit(Atom atom) throws IOException, CryptoException

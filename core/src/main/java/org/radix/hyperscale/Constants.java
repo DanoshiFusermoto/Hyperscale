@@ -71,6 +71,7 @@ public final class Constants
 	public static final int 	PRIMITIVE_STALE = 60;
 	public static final int 	PRIMITIVE_EXPIRE = 90;
 	public static final int 	PRIMITIVE_GC_INTERVAL = 3;
+	public static final int 	MIN_PRIMITIVE_POW_DIFFICULTY = 12;
 
 	// ATOMS
 	public static final int 	ATOM_DISCARD_AT_PENDING_LIMIT = 50000;

@@ -12,16 +12,15 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 
+import org.radix.hyperscale.Constants;
 import org.radix.hyperscale.common.ExtendedObject;
 import org.radix.hyperscale.common.Primitive;
 import org.radix.hyperscale.crypto.CryptoException;
 import org.radix.hyperscale.crypto.Hash;
 import org.radix.hyperscale.crypto.Identity;
-import org.radix.hyperscale.crypto.Key;
 import org.radix.hyperscale.crypto.KeyPair;
 import org.radix.hyperscale.crypto.PublicKey;
 import org.radix.hyperscale.crypto.Signature;
-import org.radix.hyperscale.crypto.ed25519.EDSignature;
 import org.radix.hyperscale.exceptions.ValidationException;
 import org.radix.hyperscale.ledger.StateContext;
 import org.radix.hyperscale.logging.Logger;
@@ -47,6 +46,161 @@ public final class Atom extends ExtendedObject implements Primitive
 
 	public static final int MAX_MANIFEST_ITEMS = 512;
 	
+	public final static class Builder
+	{
+		private Atom atom;
+		private long nonce;
+		private final List<String> manifest;
+		private final Map<Identity, KeyPair<?,?,?>> signers;
+		
+		private Builder(long nonce)
+		{
+			this.nonce = nonce;
+			this.manifest = new ArrayList<String>(6); 		 // Rarely will a manifest be larger than 6 instructions
+			this.signers = new HashMap<Identity, KeyPair<?,?,?>>(3); // Rarely will there be more than three signers
+		}
+
+		public Builder()
+		{
+			this(ThreadLocalRandom.current().nextLong());
+		}
+
+		public Builder(final List<String> manifest)
+		{
+			this(ThreadLocalRandom.current().nextLong(), manifest);
+		}
+		
+		public Builder(final long nonce, final List<String> manifest)
+		{
+			this(nonce);
+			this.manifest.addAll(manifest);
+		}
+		
+		private void throwIfBuilt()
+		{
+			if (this.atom == null)
+				return;
+			
+			this.atom.throwIfSealed();
+			this.atom.throwIfImmutable();
+		}
+		
+		public long getNonce()
+		{
+			return this.nonce;
+		}
+		
+		public Builder setNonce(final long nonce)
+		{
+			throwIfBuilt();
+			
+			this.nonce = nonce;
+			return this;
+		}
+		
+		public List<String> getManifest()
+		{
+			return Collections.unmodifiableList(this.manifest);
+		}
+		
+		public Builder push(final Blob blob) 
+		{
+			Objects.requireNonNull(blob);
+			
+			throwIfBuilt();
+
+			if (this.manifest.size() == Atom.MAX_MANIFEST_ITEMS)
+				throw new IllegalStateException("Manifest contains maximum items of "+Atom.MAX_MANIFEST_ITEMS);
+
+			this.manifest.add(blob.asDataURL());
+			return this;
+		}
+
+		public Builder push(final Collection<String> manifest) 
+		{
+			Objects.requireNonNull(manifest);
+			
+			throwIfBuilt();
+
+			if (this.manifest.size() + manifest.size() > Atom.MAX_MANIFEST_ITEMS)
+				throw new IllegalStateException("Manifest would exceed maximum items of "+Atom.MAX_MANIFEST_ITEMS);
+			
+			this.manifest.addAll(manifest);
+			return this;
+		}
+		
+		public Builder push(final String instruction) 
+		{
+			Objects.requireNonNull(instruction);
+			Numbers.isZero(instruction.length(), "Manifest instruction is empty");
+
+			throwIfBuilt();
+			
+			if (this.manifest.size() == Atom.MAX_MANIFEST_ITEMS)
+				throw new IllegalStateException("Manifest contains maximum items of "+Atom.MAX_MANIFEST_ITEMS);
+			
+			this.manifest.add(instruction);
+			return this;
+		}
+		
+		public Builder signer(final KeyPair<?,?,?> signer) 
+		{
+			Objects.requireNonNull(signer);
+			
+			throwIfBuilt();
+
+			this.signers.putIfAbsent(signer.getIdentity(), signer);
+			return this;
+		}
+
+		
+		public Atom build() throws CryptoException
+		{
+			return build(Constants.MIN_PRIMITIVE_POW_DIFFICULTY);
+		}
+		
+		public Atom build(final int difficulty) throws CryptoException
+		{
+			return build(difficulty, null);
+		}
+		
+		public Atom build(final int difficulty, List<KeyPair<?,?,?>> signers) throws CryptoException
+		{
+			throwIfBuilt();
+
+			this.atom = new Atom(this.nonce, this.manifest);
+			
+			if (difficulty > 0)
+				discoverPOW(this.atom, difficulty);
+
+			// Signers set via builder
+			if (this.signers.isEmpty() == false)
+			{
+				for (final KeyPair<?,?,?> signer : this.signers.values())
+					this.atom.sign(signer);
+			}
+
+			// Signers passed as parameters
+			if (signers != null && signers.isEmpty() == false)
+			{
+				for (final KeyPair<?,?,?> signer : signers)
+					this.atom.sign(signer);
+			}
+			
+			return this.atom;
+		}
+		
+		private void discoverPOW(final Atom atom, final int difficulty)
+		{
+			Hash hash = atom.computeHash();
+			while(hash.leadingZeroBits() < difficulty)
+			{
+				atom.nonce++;
+				hash = atom.computeHash();
+			}
+		}
+	}
+
 	@JsonProperty("nonce")
 	@DsonOutput(Output.ALL)
 	private long nonce;
@@ -58,32 +212,24 @@ public final class Atom extends ExtendedObject implements Primitive
 	@JsonProperty("signatures")
 	@DsonOutput(value = {Output.API, Output.WIRE, Output.PERSIST})
 	@JsonDeserialize(as = HashMap.class)
-	private Map<Identity, EDSignature> signatures;
+	private Map<Identity, Signature> signatures;
 	
 	private volatile boolean immutable = false;
 	
-	public Atom()
+	private Atom()
 	{
 		super();
 		
 		this.nonce = ThreadLocalRandom.current().nextLong();
 		this.manifest = new ArrayList<String>(3);
-		this.signatures = new HashMap<Identity, EDSignature>(3);
-	}
-
-	@VisibleForTesting
-	// IMPORTANT: Use with care when setting the nonce manually.  Should only be used by system functions such as collaborative consensus
-	public Atom(long nonce)
-	{
-		super();
-		
-		this.nonce = nonce;
-		this.manifest = new ArrayList<String>(3);
-		this.signatures = new HashMap<Identity, EDSignature>(3);
+		this.signatures = new HashMap<Identity, Signature>(3);
 	}
 
 	/**
 	 * Create a copy of the supplied atom discarding the state snapshot.
+	 * 
+	 * TODO this probably isn't required anymore as Atoms done carry a state snapshot with them.  
+	 * This function is hooked into a number of critical places though, so not going to touch for now.
 	 * 
 	 * @param atom
 	 */
@@ -95,25 +241,10 @@ public final class Atom extends ExtendedObject implements Primitive
 		
 		this.nonce = atom.nonce;
 		this.manifest = new ArrayList<String>(atom.manifest);
-		this.signatures = new HashMap<Identity, EDSignature>(atom.signatures);
+		this.signatures = new HashMap<Identity, Signature>(atom.signatures);
 	}
 
-	public Atom(final String ... manifest)
-	{
-		super();
-		
-		Objects.requireNonNull(manifest, "Manifest is null");
-		Numbers.isZero(manifest.length, "Manifest is empty");
-		Numbers.greaterThan(manifest.length, Atom.MAX_MANIFEST_ITEMS, "Manifest exceeds maximum items of "+Atom.MAX_MANIFEST_ITEMS);
-		
-		this.nonce = ThreadLocalRandom.current().nextLong();
-		this.manifest = new ArrayList<String>(manifest.length);
-		for(int i = 0 ; i < manifest.length ; i++)
-			this.manifest.add(manifest[i]);
-		this.signatures = new HashMap<Identity, EDSignature>(3);
-	}
-
-	public Atom(final List<String> manifest)
+	private Atom(final long nonce, final List<String> manifest)
 	{
 		super();
 		
@@ -121,12 +252,12 @@ public final class Atom extends ExtendedObject implements Primitive
 		Numbers.isZero(manifest.size(), "Manifest is empty");
 		Numbers.greaterThan(manifest.size(), Atom.MAX_MANIFEST_ITEMS, "Manifest exceeds maximum items of "+Atom.MAX_MANIFEST_ITEMS);
 		
-		this.nonce = ThreadLocalRandom.current().nextLong();
+		this.nonce = nonce;
 		this.manifest = new ArrayList<String>(manifest.size());
 		for (int i = 0 ; i < manifest.size() ; i++)
 			this.manifest.add(manifest.get(i));
 			
-		this.signatures = new HashMap<Identity, EDSignature>(3);
+		this.signatures = new HashMap<Identity, Signature>(3);
 	}
 	
 	@Override
@@ -157,43 +288,6 @@ public final class Atom extends ExtendedObject implements Primitive
 			throw new IllegalStateException("Atom "+getHash()+" is sealed");
 	}
 
-	public void push(final String instruction) 
-	{
-		Objects.requireNonNull(instruction);
-		Numbers.isZero(instruction.length(), "Manifest instruction is empty");
-
-		throwIfSealed(); throwIfImmutable();
-		
-		if (this.manifest.size() == Atom.MAX_MANIFEST_ITEMS)
-			throw new IllegalStateException("Manifest contains maximum items of "+Atom.MAX_MANIFEST_ITEMS);
-		
-		this.manifest.add(instruction);
-	}
-
-	public void push(final Blob blob) 
-	{
-		Objects.requireNonNull(blob);
-		
-		throwIfSealed(); throwIfImmutable();
-		
-		if (this.manifest.size() == Atom.MAX_MANIFEST_ITEMS)
-			throw new IllegalStateException("Manifest contains maximum items of "+Atom.MAX_MANIFEST_ITEMS);
-
-		this.manifest.add(blob.asDataURL());
-	}
-
-	public void push(final Collection<String> manifest) 
-	{
-		Objects.requireNonNull(manifest);
-		
-		throwIfSealed(); throwIfImmutable();
-		
-		if (this.manifest.size() + manifest.size() > Atom.MAX_MANIFEST_ITEMS)
-			throw new IllegalStateException("Manifest would exceed maximum items of "+Atom.MAX_MANIFEST_ITEMS);
-		
-		this.manifest.addAll(manifest);
-	}
-
 	public Blob get(final Hash hash) 
 	{
 		Objects.requireNonNull(hash);
@@ -211,16 +305,20 @@ public final class Atom extends ExtendedObject implements Primitive
 		return null;
 	}
 	
-	public Signature sign(final KeyPair<?, ?, ?> key) throws CryptoException
+	public Signature sign(final KeyPair<?,?,?> key) throws CryptoException
 	{
 		throwIfImmutable();
 
-		final EDSignature signature = (EDSignature) key.getPrivateKey().sign(getHash());
-		this.signatures.put(key.getIdentity(), signature);
+		Signature signature = this.signatures.get(key.getIdentity());
+		if (signature == null)
+		{
+			signature = key.getPrivateKey().sign(getHash());
+			this.signatures.put(key.getIdentity(), signature);
+		}
 		return signature;
 	}
 
-	public Signature sign(final Key key, final EDSignature signature)
+	public Signature sign(final PublicKey<?> key, final Signature signature)
 	{
 		throwIfImmutable();
 		
@@ -251,7 +349,7 @@ public final class Atom extends ExtendedObject implements Primitive
 		if (this.signatures.isEmpty())
 			throw new CryptoException("Signatures is empty");
 		
-		for(final Entry<Identity, EDSignature> entry : this.signatures.entrySet())
+		for(final Entry<Identity, Signature> entry : this.signatures.entrySet())
 		{
 			try
 			{
