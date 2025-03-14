@@ -20,9 +20,11 @@ public class ProgressRound
 	
 	private State state;
 	private final long clock;
-	private final long drift;
 	private final Epoch epoch;
 	private final long startedAt;
+
+	private final long driftClock;
+	private volatile long driftMilli;
 
 	private final List<Hash> proposals;
 	private final Set<Identity> proposed;
@@ -45,14 +47,14 @@ public class ProgressRound
 	private volatile long voteStartAt;
 	private volatile long completedAt;
 	
-	ProgressRound(final long clock, final Set<Identity> proposers, final long proposersVotePower, final long totalVotePower, final long drift)
+	ProgressRound(final long clock, final Set<Identity> proposers, final long proposersVotePower, final long totalVotePower, final long driftClock)
 	{
 		this.startedAt = Time.getSystemTime();
 		this.completedAt = -1;
 
 		this.state = State.NONE;
 		this.clock = clock;
-		this.drift = drift;
+		this.driftClock = driftClock;
 		this.totalVotePower = totalVotePower;
 		this.epoch = Epoch.from(clock / Constants.BLOCKS_PER_EPOCH);
 
@@ -77,9 +79,17 @@ public class ProgressRound
 		return this.clock;
 	}
 
-	public long drift() 
+	public long driftClock() 
 	{
-		return this.drift;
+		return this.driftClock;
+	}
+
+	public long driftMilli() 
+	{
+		if (this.voteStartAt == 0)
+			return 0;
+		
+		return this.driftMilli - this.voteStartAt;
 	}
 
 	public Epoch epoch() 
@@ -108,11 +118,11 @@ public class ProgressRound
 		int adjustedTimeoutDuration = timeoutDuration;
 		
 		// Shard is ahead
-		if (this.drift > 0)
-			adjustedTimeoutDuration = (int) (timeoutDuration / (this.drift+1));
+		if (this.driftClock > 0)
+			adjustedTimeoutDuration = (int) (timeoutDuration / (this.driftClock+1));
 		// Shard is behind 
-		else if (this.drift < 0)
-			adjustedTimeoutDuration = (int) (timeoutDuration * (Math.log(Math.abs(this.drift))+1));
+		else if (this.driftClock < 0)
+			adjustedTimeoutDuration = (int) (timeoutDuration * (Math.log(Math.abs(this.driftClock))+1));
 		
 		return adjustedTimeoutDuration;
 	}
@@ -153,7 +163,16 @@ public class ProgressRound
 		if (this.voted.add(voter) == false)
 			return false;
 		
-		this.voteWeight += votePower; 
+		this.voteWeight += votePower;
+		
+		if (this.driftMilli != 0)
+		{
+			long delta = (System.currentTimeMillis() - this.driftMilli);
+			this.driftMilli += (delta / 2); 
+		}
+		else
+			this.driftMilli = System.currentTimeMillis();
+		
 		return true;
 	}
 	
@@ -327,7 +346,9 @@ public class ProgressRound
 	@Override 
 	public String toString()
 	{
-		String output = Long.toString(this.clock)+":"+this.drift;
+		String output = Long.toString(this.clock)+":"+this.driftClock;
+		if (this.state.equals(State.COMPLETED))
+			output += ":"+driftMilli();
 		if (this.completedAt > 0)
 			output += " "+this.completedAt+" "+getDuration()+"ms";
 		
