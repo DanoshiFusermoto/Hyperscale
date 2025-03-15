@@ -1,4 +1,3 @@
 package org.radix.hyperscale.common;
 
-public interface EphemeralPrimitive extends Primitive {
-}
+public interface EphemeralPrimitive extends Primitive {}

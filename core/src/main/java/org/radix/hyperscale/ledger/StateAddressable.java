@@ -1,6 +1,5 @@
 package org.radix.hyperscale.ledger;
 
-public interface StateAddressable 
-{
-	public StateAddress getAddress();
+public interface StateAddressable {
+  StateAddress getAddress();
 }

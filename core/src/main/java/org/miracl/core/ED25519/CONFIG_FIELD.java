@@ -20,24 +20,24 @@
 package org.miracl.core.ED25519;
 
 public class CONFIG_FIELD {
-    public static final int NOT_SPECIAL = 0;
-    public static final int PSEUDO_MERSENNE = 1;
-    public static final int MONTGOMERY_FRIENDLY = 2;
-    public static final int GENERALISED_MERSENNE = 3;
+  public static final int NOT_SPECIAL = 0;
+  public static final int PSEUDO_MERSENNE = 1;
+  public static final int MONTGOMERY_FRIENDLY = 2;
+  public static final int GENERALISED_MERSENNE = 3;
 
-    public static final int NEGATOWER = 0;
-    public static final int POSITOWER = 1;
+  public static final int NEGATOWER = 0;
+  public static final int POSITOWER = 1;
 
-    public static final int MODBITS = 255; /* Number of bits in Modulus */
-    public static final int PM1D2 = 2; /* Modulus mod 8 */
-    public static final int MODTYPE = PSEUDO_MERSENNE;
-    public static final int QNRI = 0;
-    public static final int RIADZ = 1;
-    public static final int RIADZG2A = 0;
-    public static final int RIADZG2B = 0;
-    public static final int TOWER = NEGATOWER;
+  public static final int MODBITS = 255; /* Number of bits in Modulus */
+  public static final int PM1D2 = 2; /* Modulus mod 8 */
+  public static final int MODTYPE = PSEUDO_MERSENNE;
+  public static final int QNRI = 0;
+  public static final int RIADZ = 1;
+  public static final int RIADZG2A = 0;
+  public static final int RIADZG2B = 0;
+  public static final int TOWER = NEGATOWER;
 
-    public static final boolean BIG_ENDIAN_SIGN = false;
+  public static final boolean BIG_ENDIAN_SIGN = false;
 
-    public static final int FEXCESS = (((int)1 << 25) - 1); // BASEBITS*NLEN-MODBITS or 2^30 max!
+  public static final int FEXCESS = (((int) 1 << 25) - 1); // BASEBITS*NLEN-MODBITS or 2^30 max!
 }

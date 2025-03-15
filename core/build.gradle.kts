@@ -1,5 +1,6 @@
 plugins {
     `java-library`
+    id("com.diffplug.spotless") version "7.0.2"
 }
 
 repositories {
@@ -28,6 +29,16 @@ tasks.jar {
         exclude("META-INF/MANIFEST.MF")
         exclude("META-INF/LICENSE")
         exclude("META-INF/NOTICE")
+    }
+}
+
+spotless {
+    java {
+        importOrder()
+        removeUnusedImports()
+        cleanthat()
+        googleJavaFormat()
+        formatAnnotations()  // fixes formatting of type annotations, see below
     }
 }
 
@@ -61,7 +72,7 @@ dependencies {
     implementation("com.sparkjava:spark-core:2.9.3")
     implementation("org.javassist:javassist:3.29.0-GA")
     implementation("com.google.guava:failureaccess:1.0.1")
-    
+
     implementation("com.fasterxml.jackson.dataformat:jackson-dataformat-cbor:2.13.5")
     implementation("com.fasterxml.jackson.datatype:jackson-datatype-json-org:2.13.5")
     implementation("com.fasterxml.jackson.datatype:jackson-datatype-guava:2.13.5")

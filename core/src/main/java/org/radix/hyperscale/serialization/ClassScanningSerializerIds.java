@@ -2,136 +2,135 @@ package org.radix.hyperscale.serialization;
 
 import static org.radix.hyperscale.serialization.SerializerConstants.SERIALIZER_ID_ANNOTATION;
 
+import com.google.common.collect.BiMap;
+import com.google.common.collect.HashBiMap;
+import com.google.common.collect.Maps;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-
 import org.radix.hyperscale.logging.Logger;
 import org.radix.hyperscale.logging.Logging;
 import org.radix.hyperscale.utils.UInt128;
 
-import com.google.common.collect.BiMap;
-import com.google.common.collect.HashBiMap;
-import com.google.common.collect.Maps;
-
 /**
- * Class that maintains a map of serializer IDs to {@code Class<?>} objects
- * and vice versa.
- * <p>
- * This {@link SerializerIds} operates by scanning a supplied list of classes.
+ * Class that maintains a map of serializer IDs to {@code Class<?>} objects and vice versa.
+ *
+ * <p>This {@link SerializerIds} operates by scanning a supplied list of classes.
  */
-public abstract class ClassScanningSerializerIds implements SerializerIds 
-{
-	private static final Logger serializerlog = Logging.getLogger("serializer");
+public abstract class ClassScanningSerializerIds implements SerializerIds {
+  private static final Logger serializerlog = Logging.getLogger("serializer");
 
-	// Assuming that lookups from class to ID will be more common
-	private final Map<Class<?>, String> classIdMap = Maps.newHashMap();
-	// Inverse view of same data
-	private final BiMap<String, Class<?>> idClassMap = HashBiMap.create();
+  // Assuming that lookups from class to ID will be more common
+  private final Map<Class<?>, String> classIdMap = Maps.newHashMap();
+  // Inverse view of same data
+  private final BiMap<String, Class<?>> idClassMap = HashBiMap.create();
 
-	private final HashSet<Class<?>> serializableSupertypes = new HashSet<>();
+  private final HashSet<Class<?>> serializableSupertypes = new HashSet<>();
 
-	/**
-	 * Scan for all classes with an {@code SerializerId} annotation
-	 * in the specified set of classes.
-	 *
-	 * @param classes The list of classes to scan for serialization annotations
-	 * @throws SerializerIdsException If two or more classes are
-	 *			found with the same {@code SerializerId}
-	 */
-	protected ClassScanningSerializerIds(Collection<Class<?>> classes) 
-	{
-		Map<String, List<Class<?>>> polymorphicMap = new HashMap<>();
+  /**
+   * Scan for all classes with an {@code SerializerId} annotation in the specified set of classes.
+   *
+   * @param classes The list of classes to scan for serialization annotations
+   * @throws SerializerIdsException If two or more classes are found with the same {@code
+   *     SerializerId}
+   */
+  protected ClassScanningSerializerIds(Collection<Class<?>> classes) {
+    Map<String, List<Class<?>>> polymorphicMap = new HashMap<>();
 
-		for (Class<?> cls : classes) 
-		{
-			SerializerId2 sid = cls.getDeclaredAnnotation(SERIALIZER_ID_ANNOTATION);
-			if (sid == null) 
-			{
-				// For some reason, Reflections returns classes without SerializerId, but
-				// that inherit from classes with the (non-inheritable) annotation.  Sad.
-				if (serializerlog.hasLevel(Logging.DEBUG))
-					serializerlog.debug("Skipping unannotated class " + cls.getName());
-				
-				continue;
-			}
+    for (Class<?> cls : classes) {
+      SerializerId2 sid = cls.getDeclaredAnnotation(SERIALIZER_ID_ANNOTATION);
+      if (sid == null) {
+        // For some reason, Reflections returns classes without SerializerId, but
+        // that inherit from classes with the (non-inheritable) annotation.  Sad.
+        if (serializerlog.hasLevel(Logging.DEBUG))
+          serializerlog.debug("Skipping unannotated class " + cls.getName());
 
-			if (cls.isInterface()) 
-			{
-				// Interfaces should not be marked with @SerializerId
-				serializerlog.warn(String.format("Skipping interface %s with unexpected %s annotation", cls.getName(), SERIALIZER_ID_ANNOTATION.getSimpleName()));
-				continue;
-			}
+        continue;
+      }
 
-			String id = sid.value();
+      if (cls.isInterface()) {
+        // Interfaces should not be marked with @SerializerId
+        serializerlog.warn(
+            String.format(
+                "Skipping interface %s with unexpected %s annotation",
+                cls.getName(), SERIALIZER_ID_ANNOTATION.getSimpleName()));
+        continue;
+      }
 
-			if (Polymorphic.class.isAssignableFrom(cls)) 
-			{
-				// Polymorphic class hierarchy checked later
-				if (serializerlog.hasLevel(Logging.DEBUG))
-					serializerlog.debug("Polymorphic class:" + cls.getName() + " with ID:" + id);
-				
-				polymorphicMap.computeIfAbsent(id, k -> new ArrayList<>()).add(cls);
-			} 
-			else 
-			{
-				// Check for duplicates
-				Class<?> dupClass = idClassMap.put(id, cls);
-				if (dupClass != null)
-					throw new SerializerIdsException(String.format("Aborting, duplicate ID %s discovered in classes: [%s, %s]", id, cls.getName(), dupClass.getName()));
-			}
-			
-			if (serializerlog.hasLevel(Logging.DEBUG))
-				serializerlog.debug("Putting Class:" + cls.getName() + " with ID:" + id);
+      String id = sid.value();
 
-			collectSupertypes(cls);
-		}
+      if (Polymorphic.class.isAssignableFrom(cls)) {
+        // Polymorphic class hierarchy checked later
+        if (serializerlog.hasLevel(Logging.DEBUG))
+          serializerlog.debug("Polymorphic class:" + cls.getName() + " with ID:" + id);
 
-		classIdMap.putAll(idClassMap.inverse());
-		Map<UInt128, String> idNumericMap = new HashMap<>();
-		// Check polymorphic hierarchy consistency
-		for (Map.Entry<String, List<Class<?>>> entry : polymorphicMap.entrySet()) 
-		{
-			String id = entry.getKey();
-			if (!idClassMap.containsKey(id)) 
-				throw new SerializerIdsException(String.format("No concrete class with ID '%s' for polymorphic classes %s", entry.getKey(), entry.getValue()));
+        polymorphicMap.computeIfAbsent(id, k -> new ArrayList<>()).add(cls);
+      } else {
+        // Check for duplicates
+        Class<?> dupClass = idClassMap.put(id, cls);
+        if (dupClass != null)
+          throw new SerializerIdsException(
+              String.format(
+                  "Aborting, duplicate ID %s discovered in classes: [%s, %s]",
+                  id, cls.getName(), dupClass.getName()));
+      }
 
-			UInt128 numericId = SerializationUtils.stringToNumericID(id);
-			String dupNumericId = idNumericMap.put(numericId, id);
-			if (dupNumericId != null) 
-				throw new SerializerIdsException(String.format("Aborting, numeric id %s of %s clashes with %s", numericId, id, dupNumericId));
+      if (serializerlog.hasLevel(Logging.DEBUG))
+        serializerlog.debug("Putting Class:" + cls.getName() + " with ID:" + id);
 
-			for (Class<?> cls : entry.getValue()) 
-			{
-				String dupId = classIdMap.put(cls, id);
-				if (dupId != null)
-					throw new SerializerIdsException(String.format("Aborting, class %s has duplicate IDs %s and %s", cls.getName(), id, dupId));
-			}
-		}
-	}
+      collectSupertypes(cls);
+    }
 
-	private void collectSupertypes(Class<?> cls) {
-		while (!Object.class.equals(cls)) {
-			serializableSupertypes.add(cls);
-			cls = cls.getSuperclass();
-		}
-	}
+    classIdMap.putAll(idClassMap.inverse());
+    Map<UInt128, String> idNumericMap = new HashMap<>();
+    // Check polymorphic hierarchy consistency
+    for (Map.Entry<String, List<Class<?>>> entry : polymorphicMap.entrySet()) {
+      String id = entry.getKey();
+      if (!idClassMap.containsKey(id))
+        throw new SerializerIdsException(
+            String.format(
+                "No concrete class with ID '%s' for polymorphic classes %s",
+                entry.getKey(), entry.getValue()));
 
-	@Override
-	public String getIdForClass(Class<?> cls) {
-		return classIdMap.get(cls);
-	}
+      UInt128 numericId = SerializationUtils.stringToNumericID(id);
+      String dupNumericId = idNumericMap.put(numericId, id);
+      if (dupNumericId != null)
+        throw new SerializerIdsException(
+            String.format(
+                "Aborting, numeric id %s of %s clashes with %s", numericId, id, dupNumericId));
 
-	@Override
-	public Class<?> getClassForId(String id) {
-		return idClassMap.get(id);
-	}
+      for (Class<?> cls : entry.getValue()) {
+        String dupId = classIdMap.put(cls, id);
+        if (dupId != null)
+          throw new SerializerIdsException(
+              String.format(
+                  "Aborting, class %s has duplicate IDs %s and %s", cls.getName(), id, dupId));
+      }
+    }
+  }
 
-	@Override
-	public boolean isSerializableSuper(Class<?> cls) {
-		return serializableSupertypes.contains(cls);
-	}
+  private void collectSupertypes(Class<?> cls) {
+    while (!Object.class.equals(cls)) {
+      serializableSupertypes.add(cls);
+      cls = cls.getSuperclass();
+    }
+  }
+
+  @Override
+  public String getIdForClass(Class<?> cls) {
+    return classIdMap.get(cls);
+  }
+
+  @Override
+  public Class<?> getClassForId(String id) {
+    return idClassMap.get(id);
+  }
+
+  @Override
+  public boolean isSerializableSuper(Class<?> cls) {
+    return serializableSupertypes.contains(cls);
+  }
 }

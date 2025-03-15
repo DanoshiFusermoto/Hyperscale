@@ -1,78 +1,73 @@
 package org.radix.hyperscale.network.messages;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonInclude.Include;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
-
 import org.radix.hyperscale.common.Primitive;
 import org.radix.hyperscale.crypto.Hash;
 import org.radix.hyperscale.serialization.DsonOutput;
+import org.radix.hyperscale.serialization.DsonOutput.Output;
 import org.radix.hyperscale.serialization.Serialization;
 import org.radix.hyperscale.serialization.SerializerId2;
-import org.radix.hyperscale.serialization.DsonOutput.Output;
-
-import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.annotation.JsonInclude.Include;
 
 @SerializerId2("gossip.item.request")
-public final class RequestItemMessage extends Message
-{
-	@JsonProperty("type")
-	@DsonOutput(Output.ALL)
-	private String type;
-	
-	@JsonProperty("item")
-	@DsonOutput(Output.ALL)
-	private Hash item;
+public final class RequestItemMessage extends Message {
+  @JsonProperty("type")
+  @DsonOutput(Output.ALL)
+  private String type;
 
-	@JsonProperty("references")
-	@JsonInclude(Include.NON_NULL)
-	@DsonOutput(Output.ALL)
-	private Map<String, Object> references;
+  @JsonProperty("item")
+  @DsonOutput(Output.ALL)
+  private Hash item;
 
-	RequestItemMessage()
-	{
-		// Serializer only
-	}
+  @JsonProperty("references")
+  @JsonInclude(Include.NON_NULL)
+  @DsonOutput(Output.ALL)
+  private Map<String, Object> references;
 
-	public RequestItemMessage(final Class<? extends Primitive> type, final Hash item)
-	{
-		super();
+  RequestItemMessage() {
+    // Serializer only
+  }
 
-		Objects.requireNonNull(type, "Type is null");
-		Objects.requireNonNull(item, "Item is null");
+  public RequestItemMessage(final Class<? extends Primitive> type, final Hash item) {
+    super();
 
-		this.type = Serialization.getInstance().getIdForClass(type);
-		this.item = item;
-	}
+    Objects.requireNonNull(type, "Type is null");
+    Objects.requireNonNull(item, "Item is null");
 
-	public RequestItemMessage(final Class<? extends Primitive> type, final Hash item, final Map<String, Object> references)
-	{
-		super();
+    this.type = Serialization.getInstance().getIdForClass(type);
+    this.item = item;
+  }
 
-		Objects.requireNonNull(type, "Type is null");
-		Objects.requireNonNull(item, "Item is null");
-		Objects.requireNonNull(references, "References is null");
+  public RequestItemMessage(
+      final Class<? extends Primitive> type,
+      final Hash item,
+      final Map<String, Object> references) {
+    super();
 
-		this.item = item;
-		this.type = Serialization.getInstance().getIdForClass(type);
-		this.references = references.isEmpty() ? Collections.emptyMap() : new HashMap<String, Object>(references);
-	}
+    Objects.requireNonNull(type, "Type is null");
+    Objects.requireNonNull(item, "Item is null");
+    Objects.requireNonNull(references, "References is null");
 
-	public String getType()
-	{
-		return this.type;
-	}
+    this.item = item;
+    this.type = Serialization.getInstance().getIdForClass(type);
+    this.references =
+        references.isEmpty() ? Collections.emptyMap() : new HashMap<String, Object>(references);
+  }
 
-	public Hash getItem()
-	{
-		return this.item;
-	}
+  public String getType() {
+    return this.type;
+  }
 
-	public Map<String, Object> getReferences()
-	{
-		return Collections.unmodifiableMap(this.references);
-	}
+  public Hash getItem() {
+    return this.item;
+  }
+
+  public Map<String, Object> getReferences() {
+    return Collections.unmodifiableMap(this.references);
+  }
 }

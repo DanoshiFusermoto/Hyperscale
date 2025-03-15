@@ -5,11 +5,10 @@ import org.radix.hyperscale.crypto.Hash;
 import org.radix.hyperscale.ledger.StateAddressable;
 import org.radix.hyperscale.ledger.sme.SubstateTransitions;
 
-public interface StateOutput extends EphemeralPrimitive, StateAddressable
-{
-	public Hash getAtom();
+public interface StateOutput extends EphemeralPrimitive, StateAddressable {
+  Hash getAtom();
 
-	public SubstateTransitions getStates();
-	
-	public Hash getExecution();
+  SubstateTransitions getStates();
+
+  Hash getExecution();
 }

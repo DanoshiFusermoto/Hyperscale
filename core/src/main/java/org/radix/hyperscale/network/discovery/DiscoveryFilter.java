@@ -1,4 +1,3 @@
 package org.radix.hyperscale.network.discovery;
 
-public interface DiscoveryFilter extends PeerFilter {
-}
+public interface DiscoveryFilter extends PeerFilter {}

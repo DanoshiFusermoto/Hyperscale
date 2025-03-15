@@ -1,20 +1,5 @@
 package org.radix.hyperscale.ledger;
 
-import java.io.IOException;
-import java.util.Objects;
-
-import org.radix.hyperscale.Context;
-import org.radix.hyperscale.database.DatabaseException;
-import org.radix.hyperscale.database.DatabaseStore;
-import org.radix.hyperscale.exceptions.ServiceException;
-import org.radix.hyperscale.exceptions.StartupException;
-import org.radix.hyperscale.exceptions.TerminationException;
-import org.radix.hyperscale.logging.Logger;
-import org.radix.hyperscale.logging.Logging;
-import org.radix.hyperscale.serialization.Serialization;
-import org.radix.hyperscale.serialization.DsonOutput.Output;
-import org.radix.hyperscale.utils.Longs;
-
 import com.sleepycat.je.Database;
 import com.sleepycat.je.DatabaseConfig;
 import com.sleepycat.je.DatabaseEntry;
@@ -23,146 +8,137 @@ import com.sleepycat.je.LockMode;
 import com.sleepycat.je.OperationStatus;
 import com.sleepycat.je.Transaction;
 import com.sleepycat.je.TransactionConfig;
+import java.io.IOException;
+import java.util.Objects;
+import org.radix.hyperscale.Context;
+import org.radix.hyperscale.database.DatabaseException;
+import org.radix.hyperscale.database.DatabaseStore;
+import org.radix.hyperscale.exceptions.ServiceException;
+import org.radix.hyperscale.exceptions.StartupException;
+import org.radix.hyperscale.exceptions.TerminationException;
+import org.radix.hyperscale.logging.Logger;
+import org.radix.hyperscale.logging.Logging;
+import org.radix.hyperscale.serialization.DsonOutput.Output;
+import org.radix.hyperscale.serialization.Serialization;
+import org.radix.hyperscale.utils.Longs;
 
-class ValidatorStore extends DatabaseStore
-{
-	private static final ThreadLocal<DatabaseEntry> keyBuffer = ThreadLocal.withInitial(DatabaseEntry::new);
-	private static final ThreadLocal<DatabaseEntry> valueBuffer = ThreadLocal.withInitial(DatabaseEntry::new);
+class ValidatorStore extends DatabaseStore {
+  private static final ThreadLocal<DatabaseEntry> keyBuffer =
+      ThreadLocal.withInitial(DatabaseEntry::new);
+  private static final ThreadLocal<DatabaseEntry> valueBuffer =
+      ThreadLocal.withInitial(DatabaseEntry::new);
 
-	private static final Logger powerLog = Logging.getLogger("power");
+  private static final Logger powerLog = Logging.getLogger("power");
 
-	private Context				context;
-	private Database 			votePowerDatabase;
+  private Context context;
+  private Database votePowerDatabase;
 
-	public ValidatorStore(Context context) 
-	{ 
-		super(Objects.requireNonNull(context).getDatabaseEnvironment());
-		
-		this.context = context;
-	}
+  public ValidatorStore(Context context) {
+    super(Objects.requireNonNull(context).getDatabaseEnvironment());
 
-	@Override
-	public void start() throws StartupException
-	{
-		try
-		{
-			if (Boolean.TRUE.equals(this.context.getConfiguration().getCommandLine("clean", false)))
-				clean();
+    this.context = context;
+  }
 
-			DatabaseConfig config = new DatabaseConfig();
-			config.setAllowCreate(true);
-			config.setTransactional(true);
-			this.votePowerDatabase = getEnvironment().openDatabase(null, "vote_powers", config);
-		}
-		catch (Exception ex)
-		{
-			throw new RuntimeException(ex);
-		}
-	}
+  @Override
+  public void start() throws StartupException {
+    try {
+      if (Boolean.TRUE.equals(this.context.getConfiguration().getCommandLine("clean", false)))
+        clean();
 
-	@Override
-	public void stop() throws TerminationException
-	{
-		try
-		{
-			close();
-		}
-		catch (IOException ioex)
-		{
-			throw new TerminationException(ioex);
-		}
-	}
+      DatabaseConfig config = new DatabaseConfig();
+      config.setAllowCreate(true);
+      config.setTransactional(true);
+      this.votePowerDatabase = getEnvironment().openDatabase(null, "vote_powers", config);
+    } catch (Exception ex) {
+      throw new RuntimeException(ex);
+    }
+  }
 
-	@Override
-	public void clean() throws ServiceException
-	{
-		Transaction transaction = null;
+  @Override
+  public void stop() throws TerminationException {
+    try {
+      close();
+    } catch (IOException ioex) {
+      throw new TerminationException(ioex);
+    }
+  }
 
-		try
-		{
-			transaction = getEnvironment().beginTransaction(null, new TransactionConfig().setReadUncommitted(true));
-			getEnvironment().truncateDatabase(transaction, "vote_powers", false);
-			transaction.commit();
-		}
-		catch (DatabaseNotFoundException dsnfex)
-		{
-			if (transaction != null)
-				transaction.abort();
+  @Override
+  public void clean() throws ServiceException {
+    Transaction transaction = null;
 
-			log.warn(dsnfex.getMessage());
-		}
-		catch (Exception ex)
-		{
-			if (transaction != null)
-				transaction.abort();
+    try {
+      transaction =
+          getEnvironment().beginTransaction(null, new TransactionConfig().setReadUncommitted(true));
+      getEnvironment().truncateDatabase(transaction, "vote_powers", false);
+      transaction.commit();
+    } catch (DatabaseNotFoundException dsnfex) {
+      if (transaction != null) transaction.abort();
 
-			throw new ServiceException(ex, getClass());
-		}
-	}
+      log.warn(dsnfex.getMessage());
+    } catch (Exception ex) {
+      if (transaction != null) transaction.abort();
 
-	@Override
-	public void close() throws IOException
-	{
-		super.close();
+      throw new ServiceException(ex, getClass());
+    }
+  }
 
-		if (this.votePowerDatabase != null) 
-			this.votePowerDatabase.close();
-	}
+  @Override
+  public void close() throws IOException {
+    super.close();
 
-	@Override
-	public void flush() throws DatabaseException  { /* Not used */ }
+    if (this.votePowerDatabase != null) this.votePowerDatabase.close();
+  }
 
-	public VotePowers get(final Epoch epoch) throws IOException
-	{
-		final DatabaseEntry key = keyBuffer.get();
-		final DatabaseEntry value = valueBuffer.get();
+  @Override
+  public void flush() throws DatabaseException {
+    /* Not used */
+  }
 
-		final Transaction transaction = this.votePowerDatabase.getEnvironment().beginTransaction(null, null);
-		try
-		{
-			final VotePowers votePowers;
-			key.setData(Longs.toByteArray(epoch.getClock()));
-			final OperationStatus status = this.votePowerDatabase.get(transaction, key, value, LockMode.DEFAULT);
-			if (status.equals(OperationStatus.SUCCESS))
-				votePowers = Serialization.getInstance().fromDson(value.getData(), VotePowers.class);
-			else
-				votePowers = null;
-		
-			transaction.commit();
-			return votePowers;
-		}
-		catch (Exception e)
-		{
-			transaction.abort();
-			throw e;
-		}
-	}
-	
-	void store(final VotePowers votePowers) throws DatabaseException
-	{
-		Objects.requireNonNull(votePowers, "Vote powers is null");
+  public VotePowers get(final Epoch epoch) throws IOException {
+    final DatabaseEntry key = keyBuffer.get();
+    final DatabaseEntry value = valueBuffer.get();
 
-		final DatabaseEntry key = keyBuffer.get();
-		final DatabaseEntry value = valueBuffer.get();
-		final Transaction transaction = this.votePowerDatabase.getEnvironment().beginTransaction(null, null);
-		try
-		{
-			OperationStatus status;
-			
-			key.setData(Longs.toByteArray(votePowers.getEpoch()));
-			value.setData(Serialization.getInstance().toDson(votePowers, Output.WIRE));
+    final Transaction transaction =
+        this.votePowerDatabase.getEnvironment().beginTransaction(null, null);
+    try {
+      final VotePowers votePowers;
+      key.setData(Longs.toByteArray(epoch.getClock()));
+      final OperationStatus status =
+          this.votePowerDatabase.get(transaction, key, value, LockMode.DEFAULT);
+      if (status.equals(OperationStatus.SUCCESS))
+        votePowers = Serialization.getInstance().fromDson(value.getData(), VotePowers.class);
+      else votePowers = null;
 
-		    status = this.votePowerDatabase.put(transaction, key, value);
-			if (status.equals(OperationStatus.SUCCESS) == false)
-				throw new DatabaseException("Failed to set vote powers for epoch "+votePowers.getEpoch());
+      transaction.commit();
+      return votePowers;
+    } catch (Exception e) {
+      transaction.abort();
+      throw e;
+    }
+  }
 
-			transaction.commit();
-		}
-		catch (Exception e)
-		{
-			transaction.abort();
-			throw new DatabaseException(e);
-		}
-	}
+  void store(final VotePowers votePowers) throws DatabaseException {
+    Objects.requireNonNull(votePowers, "Vote powers is null");
+
+    final DatabaseEntry key = keyBuffer.get();
+    final DatabaseEntry value = valueBuffer.get();
+    final Transaction transaction =
+        this.votePowerDatabase.getEnvironment().beginTransaction(null, null);
+    try {
+      OperationStatus status;
+
+      key.setData(Longs.toByteArray(votePowers.getEpoch()));
+      value.setData(Serialization.getInstance().toDson(votePowers, Output.WIRE));
+
+      status = this.votePowerDatabase.put(transaction, key, value);
+      if (status.equals(OperationStatus.SUCCESS) == false)
+        throw new DatabaseException("Failed to set vote powers for epoch " + votePowers.getEpoch());
+
+      transaction.commit();
+    } catch (Exception e) {
+      transaction.abort();
+      throw new DatabaseException(e);
+    }
+  }
 }
-

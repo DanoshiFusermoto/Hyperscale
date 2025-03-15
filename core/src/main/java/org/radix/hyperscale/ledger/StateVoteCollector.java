@@ -1,5 +1,6 @@
 package org.radix.hyperscale.ledger;
 
+import com.google.common.primitives.UnsignedBytes;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -7,7 +8,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
-
 import org.eclipse.collections.api.factory.Maps;
 import org.eclipse.collections.api.map.MutableMap;
 import org.radix.hyperscale.Constants;
@@ -15,8 +15,8 @@ import org.radix.hyperscale.Context;
 import org.radix.hyperscale.crypto.CryptoException;
 import org.radix.hyperscale.crypto.Hash;
 import org.radix.hyperscale.crypto.MerkleProof;
-import org.radix.hyperscale.crypto.MerkleTree;
 import org.radix.hyperscale.crypto.MerkleProof.Branch;
+import org.radix.hyperscale.crypto.MerkleTree;
 import org.radix.hyperscale.crypto.bls12381.BLSKeyPair;
 import org.radix.hyperscale.crypto.bls12381.BLSSignature;
 import org.radix.hyperscale.logging.Logger;
@@ -25,346 +25,412 @@ import org.radix.hyperscale.time.Time;
 import org.radix.hyperscale.utils.Base58;
 import org.radix.hyperscale.utils.Numbers;
 
-import com.google.common.primitives.UnsignedBytes;
+public final class StateVoteCollector {
+  static final boolean DEBUG_SIMPLE_UNGROUPED = true;
 
-public final class StateVoteCollector
-{
-	static final boolean DEBUG_SIMPLE_UNGROUPED = true;
-	
-	public static final boolean MERKLE_AUDITS_DISABLED = Boolean.getBoolean("merkle.audit.disabled");
-	static 
-	{
-		if (MERKLE_AUDITS_DISABLED)
-			System.err.println("Info: Merkle audits are disabled");
-	}
-	
-	private static final Logger statePoolLog = Logging.getLogger("statepool");
-	
-	private final Context context;
-	private final Hash ID;
-	private final Hash block;
-	private final long timestamp;
-	private final long votePower;
-	private final long voteThreshold;
-	private final MutableMap<Hash, PendingState> states;
-	private final MutableMap<Hash, StateVote> votes;
-	
-	private final boolean isLatent;
-	private volatile boolean isCompleted = false;
-	
-	StateVoteCollector(final Context context, final Hash block, final PendingState state, final long votePower, final long voteThreshold)
-	{
-		Objects.requireNonNull(state, "Pending state is null");
-		Objects.requireNonNull(block, "Block is null");
-		Hash.notZero(block, "Block is ZERO");
+  public static final boolean MERKLE_AUDITS_DISABLED = Boolean.getBoolean("merkle.audit.disabled");
 
-		this.context = Objects.requireNonNull(context, "Context is null");
-		this.block = block;
-		this.timestamp = Time.getSystemTime();
-		this.votes = Maps.mutable.ofInitialCapacity(4);
-		this.states = Maps.mutable.of(state.getHash(), state);
-		this.isLatent = true;
+  static {
+    if (MERKLE_AUDITS_DISABLED) System.err.println("Info: Merkle audits are disabled");
+  }
 
-		this.votePower = votePower;
-		this.voteThreshold = voteThreshold;
+  private static final Logger statePoolLog = Logging.getLogger("statepool");
 
-		this.ID = Hash.hash(block, state.getHash());
-		
-		if (statePoolLog.hasLevel(Logging.INFO))
-			statePoolLog.info(context.getName()+": Created state vote collector "+toString());
-	}
+  private final Context context;
+  private final Hash ID;
+  private final Hash block;
+  private final long timestamp;
+  private final long votePower;
+  private final long voteThreshold;
+  private final MutableMap<Hash, PendingState> states;
+  private final MutableMap<Hash, StateVote> votes;
 
-	StateVoteCollector(final Context context, final Hash block, final Collection<PendingState> states, long votePower, long voteThreshold)
-	{
-		Objects.requireNonNull(states, "Pending states is null");
-		Numbers.isZero(states.size(), "Pending states is empty");
-		Objects.requireNonNull(block, "Block is null");
-		Hash.notZero(block, "Block is ZERO");
+  private final boolean isLatent;
+  private volatile boolean isCompleted = false;
 
-		this.context = Objects.requireNonNull(context, "Context is null");
-		this.block = block;
-		this.timestamp = Time.getSystemTime();
-		this.votes = Maps.mutable.ofInitialCapacity(states.size());
-		this.states = Maps.mutable.ofInitialCapacity(states.size());
-		this.isLatent = false;
+  StateVoteCollector(
+      final Context context,
+      final Hash block,
+      final PendingState state,
+      final long votePower,
+      final long voteThreshold) {
+    Objects.requireNonNull(state, "Pending state is null");
+    Objects.requireNonNull(block, "Block is null");
+    Hash.notZero(block, "Block is ZERO");
 
-		// Order of states is important!
-		final List<PendingState> sortedStates = new ArrayList<PendingState>(states);
-		sortedStates.sort((ps1, ps2) -> ps1.getAddress().compareTo(ps2.getAddress()));
-		sortedStates.forEach(ps -> this.states.put(ps.getHash(), ps));
-		
-		this.votePower = votePower;
-		this.voteThreshold = voteThreshold;
+    this.context = Objects.requireNonNull(context, "Context is null");
+    this.block = block;
+    this.timestamp = Time.getSystemTime();
+    this.votes = Maps.mutable.ofInitialCapacity(4);
+    this.states = Maps.mutable.of(state.getHash(), state);
+    this.isLatent = true;
 
-		Hash stateHash = Hash.valueOf(sortedStates, s -> s.getHash().toByteArray());
-		this.ID = Hash.hash(block, stateHash);
-		
-		if (statePoolLog.hasLevel(Logging.DEBUG))
-			statePoolLog.info(context.getName()+": Created state vote collector "+toString());
-	}
-	
-	Hash getID()
-	{
-		return this.ID;
-	}
-	
-	@Override
-	public int hashCode()
-	{
-		return this.ID.hashCode();
-	}
-	
-	@Override
-	public boolean equals(Object other)
-	{
-		if (other == null)
-			return false;
-		
-		if (other == this)
-			return true;
-		
-		if (other instanceof StateVoteCollector stateVoteCollector)
-		{
-			if (stateVoteCollector.block.equals(this.block) == false)
-				return false;
-			
-			if (stateVoteCollector.ID.equals(this.ID) == false)
-				return false;
+    this.votePower = votePower;
+    this.voteThreshold = voteThreshold;
 
-			return true;
-		}
-		
-		return false;
-	}
-	
-	Hash getBlock()
-	{
-		return this.block;
-	}
-	
-	boolean contains(final Hash pendingState) 
-	{
-		Objects.requireNonNull(pendingState, "Pending state hash is null");
-		Hash.notZero(pendingState, "Pending state hash is ZERO");
+    this.ID = Hash.hash(block, state.getHash());
 
-		synchronized(this)
-		{
-			return this.states.containsKey(pendingState);
-		}
-	}
+    if (statePoolLog.hasLevel(Logging.INFO))
+      statePoolLog.info(context.getName() + ": Created state vote collector " + toString());
+  }
 
-	Collection<PendingState> getStates() 
-	{
-		synchronized(this)
-		{
-			return this.states.toList();
-		}
-	}
+  StateVoteCollector(
+      final Context context,
+      final Hash block,
+      final Collection<PendingState> states,
+      long votePower,
+      long voteThreshold) {
+    Objects.requireNonNull(states, "Pending states is null");
+    Numbers.isZero(states.size(), "Pending states is empty");
+    Objects.requireNonNull(block, "Block is null");
+    Hash.notZero(block, "Block is ZERO");
 
-	boolean isCompleted()
-	{
-		return this.isCompleted;
-	}
+    this.context = Objects.requireNonNull(context, "Context is null");
+    this.block = block;
+    this.timestamp = Time.getSystemTime();
+    this.votes = Maps.mutable.ofInitialCapacity(states.size());
+    this.states = Maps.mutable.ofInitialCapacity(states.size());
+    this.isLatent = false;
 
-	boolean isEmpty()
-	{
-		synchronized(this)
-		{
-			return this.states.isEmpty();
-		}
-	}
+    // Order of states is important!
+    final List<PendingState> sortedStates = new ArrayList<PendingState>(states);
+    sortedStates.sort((ps1, ps2) -> ps1.getAddress().compareTo(ps2.getAddress()));
+    sortedStates.forEach(ps -> this.states.put(ps.getHash(), ps));
 
-	boolean isLatent() 
-	{
-		return this.isLatent;
-	}
+    this.votePower = votePower;
+    this.voteThreshold = voteThreshold;
 
-	boolean isStale()
-	{
-		synchronized(this)
-		{
-			if (isCompleted())
-				return false;
-			
-			if (this.states.isEmpty())
-				return true;
-		}
-		
-		if (Time.getSystemTime() - this.timestamp < TimeUnit.SECONDS.toMillis(Constants.PRIMITIVE_STALE))
-			return false;
-			
-		return true;
-	}
-	
-	boolean isCompletable()
-	{
-		synchronized(this)
-		{
-			if (this.isCompleted)
-				throw new IllegalStateException("State vote collector is already completed "+toString()+" with states "+this.states.values().toString());
-			
-			if (this.states.isEmpty())
-				throw new IllegalStateException("State vote collector is empty "+toString());
-		
-			if (this.states.size() != this.votes.size())
-				return false;
-			
-			return true;
-		}
-	}
-	
-	StateVoteBlock tryComplete(final BLSKeyPair key) throws IOException, CryptoException
-	{
-		Objects.requireNonNull(key, "BLSKeyPair is null");
+    Hash stateHash = Hash.valueOf(sortedStates, s -> s.getHash().toByteArray());
+    this.ID = Hash.hash(block, stateHash);
 
-		synchronized(this)
-		{
-			if (this.isCompleted)
-				throw new IllegalStateException("State vote collector is already completed "+toString()+" with states "+this.states.values().toString());
-			
-			if (this.states.isEmpty())
-				throw new IllegalStateException("State vote collector is empty "+toString());
-		
-			if (this.states.size() != this.votes.size())
-				return null;
+    if (statePoolLog.hasLevel(Logging.DEBUG))
+      statePoolLog.info(context.getName() + ": Created state vote collector " + toString());
+  }
 
-			// IMPORTANT Strict order is important for state & vote merkles as validators may execute in different sequence!
-			final Hash voteMerkleHash;
-			final MerkleTree voteMerkleTree;
-			final List<MerkleProof> rootMerkleProofAudit;
-			final List<Hash> sortedStateKeys = new ArrayList<Hash>(this.states.keySet());
-			sortedStateKeys.sort((h1, h2) -> UnsignedBytes.lexicographicalComparator().compare(h1.toByteArray(), h2.toByteArray()));
-			if (MERKLE_AUDITS_DISABLED == false)
-			{
-				voteMerkleTree = new MerkleTree(this.states.size());
-				for (Hash stateKey : sortedStateKeys)
-				{
-					StateVote stateVote = this.votes.get(stateKey);
-					voteMerkleTree.appendLeaf(stateVote.getObject());
-				}
-				
-				voteMerkleHash = voteMerkleTree.buildTree();
-				rootMerkleProofAudit = Collections.singletonList(MerkleProof.from(voteMerkleHash, Branch.ROOT));
-			}
-			else
-			{
-				voteMerkleTree = null;
-				voteMerkleHash = Hash.ZERO;
-				rootMerkleProofAudit = Collections.singletonList(MerkleProof.from(voteMerkleHash, Branch.ROOT));
-			}
-			
-			BLSSignature signature = key.getPrivateKey().sign(voteMerkleHash);
-			if (statePoolLog.hasLevel(Logging.TRACE))
-				statePoolLog.trace(this.context.getName()+": Signed "+voteMerkleHash+" "+key.getPublicKey().toString()+":"+Base58.toBase58(signature.toByteArray()));
-			
-			List<StateVote> completedStateVotes = new ArrayList<StateVote>(this.states.size());
-			for (Hash stateKey : sortedStateKeys)
-			{
-				StateVote stateVote = this.votes.get(stateKey);
-				List<MerkleProof> voteMerkleAudit = MERKLE_AUDITS_DISABLED == false && this.states.size() > 1 ? voteMerkleTree.auditProof(stateVote.getObject()) : rootMerkleProofAudit;
-				StateVote completedStateVote = new StateVote(stateVote.getAddress(), stateVote.getAtom(), stateVote.getBlock(), stateVote.getExecution(),
-															 voteMerkleHash, voteMerkleAudit, key.getPublicKey(), stateVote.getVotePower(), signature);
-				completedStateVotes.add(completedStateVote);
-			}
-			
-			this.isCompleted = true;
-			
-			if (statePoolLog.hasLevel(Logging.INFO))
-			{
-				if (this.isLatent)
-					statePoolLog.info(this.context.getName()+": Latent state vote collector completed "+toString()+" "+this.votePower+"/"+this.voteThreshold);
-				else
-					statePoolLog.info(this.context.getName()+": State vote collector completed "+toString()+" "+this.votePower+"/"+this.voteThreshold);
-			}
-			
-			if (this.states.size() > 1)
-				this.context.getMetaData().increment("ledger.pool.state.vote.collectors.latency", (System.currentTimeMillis() - this.timestamp));
+  Hash getID() {
+    return this.ID;
+  }
 
-			StateVoteBlock stateVoteBlock = new StateVoteBlock(this.ID, completedStateVotes);
+  @Override
+  public int hashCode() {
+    return this.ID.hashCode();
+  }
 
-			if (statePoolLog.hasLevel(Logging.INFO))
-			{
-				statePoolLog.info(this.context.getName()+": Created state vote block "+stateVoteBlock);
-				statePoolLog.info(this.context.getName()+": 						 "+completedStateVotes);
-			}
-				
-			return stateVoteBlock;
-		}
-	}
-	
-	boolean hasVoted(PendingState state)
-	{
-		Objects.requireNonNull(state, "Pending state is null");
+  @Override
+  public boolean equals(Object other) {
+    if (other == null) return false;
 
-		if (state.getBlockHeader().getHash().equals(this.block) == false)
-			throw new IllegalArgumentException("State does not reference block in "+toString());
+    if (other == this) return true;
 
-		synchronized(this)
-		{
-			if (this.states.containsKey(state.getHash()) == false)
-				throw new IllegalArgumentException("State "+state+" is not referenced in this state vote collector "+toString());
+    if (other instanceof StateVoteCollector stateVoteCollector) {
+      if (stateVoteCollector.block.equals(this.block) == false) return false;
 
-			return this.votes.containsKey(state.getHash());
-		}
-	}
-	
-	void vote(final PendingState pendingState, final long votePower)
-	{
-		Objects.requireNonNull(pendingState, "Pending state is null");
+      if (stateVoteCollector.ID.equals(this.ID) == false) return false;
 
-		if (pendingState.getBlockHeader().getHash().equals(this.block) == false)
-			throw new IllegalArgumentException("Pending state does not reference block in state vote collector "+toString());
+      return true;
+    }
 
-		synchronized(this)
-		{
-			if (this.states.containsKey(pendingState.getHash()) == false)
-				throw new IllegalArgumentException("Pending state "+pendingState.getAddress()+" is not referenced in state vote collector "+toString());
+    return false;
+  }
 
-			this.votes.compute(pendingState.getHash(), (h, v) -> {
-				if (v != null)
-					throw new IllegalArgumentException("Already have a state vote for "+pendingState.getAddress()+" in "+StateVoteCollector.this.toString());
-				
-				return new StateVote(pendingState.getAddress(), pendingState.getAtom().getHash(), pendingState.getBlockHeader().getHash(),
-							  		 pendingState.getAtom().getExecutionDigest(), this.context.getNode().getKeyPair().getPublicKey(), votePower);
-			});
-			
-			if (this.isLatent && statePoolLog.hasLevel(Logging.INFO))
-				statePoolLog.info(this.context.getName()+": Voted on latent state vote collector "+pendingState.getAddress()+" in "+toString());
-		}
+  Hash getBlock() {
+    return this.block;
+  }
 
-		if (statePoolLog.hasLevel(Logging.INFO))
-			statePoolLog.info(this.context.getName()+": Voted "+this.votes.get(pendingState.getHash())+" in state vote collector "+toString());
-	}
-	
-	boolean remove(final PendingState state)
-	{
-		Objects.requireNonNull(state, "Pending state is null");
+  boolean contains(final Hash pendingState) {
+    Objects.requireNonNull(pendingState, "Pending state hash is null");
+    Hash.notZero(pendingState, "Pending state hash is ZERO");
 
-		synchronized(this)
-		{
-			if (this.isCompleted)
-				throw new IllegalStateException("State vote collector is already completed when attempting removal of "+state.getAddress()+" in "+toString());
+    synchronized (this) {
+      return this.states.containsKey(pendingState);
+    }
+  }
 
-			Hash pendingStateHash = state.getHash();
-			if (this.states.containsKey(pendingStateHash) == false)
-				throw new IllegalArgumentException("State "+state.getAddress()+" is not referenced in this state vote collector "+toString());
+  Collection<PendingState> getStates() {
+    synchronized (this) {
+      return this.states.toList();
+    }
+  }
 
-			if (this.votes.containsKey(pendingStateHash))
-				return false;
+  boolean isCompleted() {
+    return this.isCompleted;
+  }
 
-			if (this.states.remove(pendingStateHash) == null)
-				throw new IllegalArgumentException("State "+state.getAddress()+" could not be removed from state vote collector "+toString());
-		}
+  boolean isEmpty() {
+    synchronized (this) {
+      return this.states.isEmpty();
+    }
+  }
 
-		if (statePoolLog.hasLevel(Logging.INFO))
-			statePoolLog.info(this.context.getName()+": State is removed "+state.getAddress()+" in state vote collector "+toString());
-		
-		return true;
-	}
-	
-	@Override
-	public String toString()
-	{
-		return this.ID+" "+this.states.size()+"/"+this.votes.size()+" "+(this.isLatent ? "LATENT ":"")+Block.toHeight(this.block)+"@"+this.block;
-	}
+  boolean isLatent() {
+    return this.isLatent;
+  }
+
+  boolean isStale() {
+    synchronized (this) {
+      if (isCompleted()) return false;
+
+      if (this.states.isEmpty()) return true;
+    }
+
+    if (Time.getSystemTime() - this.timestamp
+        < TimeUnit.SECONDS.toMillis(Constants.PRIMITIVE_STALE)) return false;
+
+    return true;
+  }
+
+  boolean isCompletable() {
+    synchronized (this) {
+      if (this.isCompleted)
+        throw new IllegalStateException(
+            "State vote collector is already completed "
+                + toString()
+                + " with states "
+                + this.states.values().toString());
+
+      if (this.states.isEmpty())
+        throw new IllegalStateException("State vote collector is empty " + toString());
+
+      if (this.states.size() != this.votes.size()) return false;
+
+      return true;
+    }
+  }
+
+  StateVoteBlock tryComplete(final BLSKeyPair key) throws IOException, CryptoException {
+    Objects.requireNonNull(key, "BLSKeyPair is null");
+
+    synchronized (this) {
+      if (this.isCompleted)
+        throw new IllegalStateException(
+            "State vote collector is already completed "
+                + toString()
+                + " with states "
+                + this.states.values().toString());
+
+      if (this.states.isEmpty())
+        throw new IllegalStateException("State vote collector is empty " + toString());
+
+      if (this.states.size() != this.votes.size()) return null;
+
+      // IMPORTANT Strict order is important for state & vote merkles as validators may execute in
+      // different sequence!
+      final Hash voteMerkleHash;
+      final MerkleTree voteMerkleTree;
+      final List<MerkleProof> rootMerkleProofAudit;
+      final List<Hash> sortedStateKeys = new ArrayList<Hash>(this.states.keySet());
+      sortedStateKeys.sort(
+          (h1, h2) ->
+              UnsignedBytes.lexicographicalComparator()
+                  .compare(h1.toByteArray(), h2.toByteArray()));
+      if (MERKLE_AUDITS_DISABLED == false) {
+        voteMerkleTree = new MerkleTree(this.states.size());
+        for (Hash stateKey : sortedStateKeys) {
+          StateVote stateVote = this.votes.get(stateKey);
+          voteMerkleTree.appendLeaf(stateVote.getObject());
+        }
+
+        voteMerkleHash = voteMerkleTree.buildTree();
+        rootMerkleProofAudit =
+            Collections.singletonList(MerkleProof.from(voteMerkleHash, Branch.ROOT));
+      } else {
+        voteMerkleTree = null;
+        voteMerkleHash = Hash.ZERO;
+        rootMerkleProofAudit =
+            Collections.singletonList(MerkleProof.from(voteMerkleHash, Branch.ROOT));
+      }
+
+      BLSSignature signature = key.getPrivateKey().sign(voteMerkleHash);
+      if (statePoolLog.hasLevel(Logging.TRACE))
+        statePoolLog.trace(
+            this.context.getName()
+                + ": Signed "
+                + voteMerkleHash
+                + " "
+                + key.getPublicKey().toString()
+                + ":"
+                + Base58.toBase58(signature.toByteArray()));
+
+      List<StateVote> completedStateVotes = new ArrayList<StateVote>(this.states.size());
+      for (Hash stateKey : sortedStateKeys) {
+        StateVote stateVote = this.votes.get(stateKey);
+        List<MerkleProof> voteMerkleAudit =
+            MERKLE_AUDITS_DISABLED == false && this.states.size() > 1
+                ? voteMerkleTree.auditProof(stateVote.getObject())
+                : rootMerkleProofAudit;
+        StateVote completedStateVote =
+            new StateVote(
+                stateVote.getAddress(),
+                stateVote.getAtom(),
+                stateVote.getBlock(),
+                stateVote.getExecution(),
+                voteMerkleHash,
+                voteMerkleAudit,
+                key.getPublicKey(),
+                stateVote.getVotePower(),
+                signature);
+        completedStateVotes.add(completedStateVote);
+      }
+
+      this.isCompleted = true;
+
+      if (statePoolLog.hasLevel(Logging.INFO)) {
+        if (this.isLatent)
+          statePoolLog.info(
+              this.context.getName()
+                  + ": Latent state vote collector completed "
+                  + toString()
+                  + " "
+                  + this.votePower
+                  + "/"
+                  + this.voteThreshold);
+        else
+          statePoolLog.info(
+              this.context.getName()
+                  + ": State vote collector completed "
+                  + toString()
+                  + " "
+                  + this.votePower
+                  + "/"
+                  + this.voteThreshold);
+      }
+
+      if (this.states.size() > 1)
+        this.context
+            .getMetaData()
+            .increment(
+                "ledger.pool.state.vote.collectors.latency",
+                (System.currentTimeMillis() - this.timestamp));
+
+      StateVoteBlock stateVoteBlock = new StateVoteBlock(this.ID, completedStateVotes);
+
+      if (statePoolLog.hasLevel(Logging.INFO)) {
+        statePoolLog.info(this.context.getName() + ": Created state vote block " + stateVoteBlock);
+        statePoolLog.info(this.context.getName() + ": 						 " + completedStateVotes);
+      }
+
+      return stateVoteBlock;
+    }
+  }
+
+  boolean hasVoted(PendingState state) {
+    Objects.requireNonNull(state, "Pending state is null");
+
+    if (state.getBlockHeader().getHash().equals(this.block) == false)
+      throw new IllegalArgumentException("State does not reference block in " + toString());
+
+    synchronized (this) {
+      if (this.states.containsKey(state.getHash()) == false)
+        throw new IllegalArgumentException(
+            "State " + state + " is not referenced in this state vote collector " + toString());
+
+      return this.votes.containsKey(state.getHash());
+    }
+  }
+
+  void vote(final PendingState pendingState, final long votePower) {
+    Objects.requireNonNull(pendingState, "Pending state is null");
+
+    if (pendingState.getBlockHeader().getHash().equals(this.block) == false)
+      throw new IllegalArgumentException(
+          "Pending state does not reference block in state vote collector " + toString());
+
+    synchronized (this) {
+      if (this.states.containsKey(pendingState.getHash()) == false)
+        throw new IllegalArgumentException(
+            "Pending state "
+                + pendingState.getAddress()
+                + " is not referenced in state vote collector "
+                + toString());
+
+      this.votes.compute(
+          pendingState.getHash(),
+          (h, v) -> {
+            if (v != null)
+              throw new IllegalArgumentException(
+                  "Already have a state vote for "
+                      + pendingState.getAddress()
+                      + " in "
+                      + StateVoteCollector.this.toString());
+
+            return new StateVote(
+                pendingState.getAddress(),
+                pendingState.getAtom().getHash(),
+                pendingState.getBlockHeader().getHash(),
+                pendingState.getAtom().getExecutionDigest(),
+                this.context.getNode().getKeyPair().getPublicKey(),
+                votePower);
+          });
+
+      if (this.isLatent && statePoolLog.hasLevel(Logging.INFO))
+        statePoolLog.info(
+            this.context.getName()
+                + ": Voted on latent state vote collector "
+                + pendingState.getAddress()
+                + " in "
+                + toString());
+    }
+
+    if (statePoolLog.hasLevel(Logging.INFO))
+      statePoolLog.info(
+          this.context.getName()
+              + ": Voted "
+              + this.votes.get(pendingState.getHash())
+              + " in state vote collector "
+              + toString());
+  }
+
+  boolean remove(final PendingState state) {
+    Objects.requireNonNull(state, "Pending state is null");
+
+    synchronized (this) {
+      if (this.isCompleted)
+        throw new IllegalStateException(
+            "State vote collector is already completed when attempting removal of "
+                + state.getAddress()
+                + " in "
+                + toString());
+
+      Hash pendingStateHash = state.getHash();
+      if (this.states.containsKey(pendingStateHash) == false)
+        throw new IllegalArgumentException(
+            "State "
+                + state.getAddress()
+                + " is not referenced in this state vote collector "
+                + toString());
+
+      if (this.votes.containsKey(pendingStateHash)) return false;
+
+      if (this.states.remove(pendingStateHash) == null)
+        throw new IllegalArgumentException(
+            "State "
+                + state.getAddress()
+                + " could not be removed from state vote collector "
+                + toString());
+    }
+
+    if (statePoolLog.hasLevel(Logging.INFO))
+      statePoolLog.info(
+          this.context.getName()
+              + ": State is removed "
+              + state.getAddress()
+              + " in state vote collector "
+              + toString());
+
+    return true;
+  }
+
+  @Override
+  public String toString() {
+    return this.ID
+        + " "
+        + this.states.size()
+        + "/"
+        + this.votes.size()
+        + " "
+        + (this.isLatent ? "LATENT " : "")
+        + Block.toHeight(this.block)
+        + "@"
+        + this.block;
+  }
 }

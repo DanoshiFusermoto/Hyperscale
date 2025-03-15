@@ -6,20 +6,16 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-public interface MonitoredLock
-{
-	final static Set<MonitoredLock> locks = Collections.synchronizedSet(new HashSet<MonitoredLock>());
-	
-	public static List<MonitoredLock> getLocks()
-	{
-		synchronized(locks)
-		{
-			return Collections.unmodifiableList(new ArrayList<MonitoredLock>(MonitoredLock.locks));
-		}
-	}
-	
-	static boolean add(final MonitoredLock lock)
-	{
-		return locks.add(lock);
-	}
+public interface MonitoredLock {
+  Set<MonitoredLock> locks = Collections.synchronizedSet(new HashSet<MonitoredLock>());
+
+  static List<MonitoredLock> getLocks() {
+    synchronized (locks) {
+      return Collections.unmodifiableList(new ArrayList<MonitoredLock>(MonitoredLock.locks));
+    }
+  }
+
+  static boolean add(final MonitoredLock lock) {
+    return locks.add(lock);
+  }
 }
