@@ -949,8 +949,10 @@ public final class Ledger implements Service, LedgerInterface
     				return;
     			
     			// Reasons NOT to ask for all the pool inventories
-    			if (Ledger.this.context.getNode().isSynced() == false || 
-    				Ledger.this.getHead().getHash().equals(Universe.getDefault().getGenesis().getHash()) == false || 
+    			if (Ledger.this.context.getNode().isSynced() == false)
+    				return;
+    			
+    			if (Ledger.this.getHead().getHash().equals(Universe.getDefault().getGenesis().getHash()) == false && 
     				Ledger.this.getHead().getHeight() >= event.getConnection().getNode().getHead().getHeight() - Constants.OOS_TRIGGER_LIMIT_BLOCKS)
     				return;
 
