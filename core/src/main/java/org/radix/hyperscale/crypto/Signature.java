@@ -2,7 +2,9 @@ package org.radix.hyperscale.crypto;
 
 import java.util.Arrays;
 
-public abstract class Signature
+import org.radix.hyperscale.serialization.Polymorphic;
+
+public abstract class Signature implements Polymorphic
 {
 	public enum VerificationResult 
 	{

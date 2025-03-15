@@ -12,6 +12,7 @@ import java.util.function.Function;
 import org.radix.hyperscale.crypto.Hash;
 import org.radix.hyperscale.crypto.Identity;
 import org.radix.hyperscale.crypto.MerkleProof;
+import org.radix.hyperscale.crypto.Signature;
 import org.radix.hyperscale.crypto.bls12381.BLSSignature;
 import org.radix.hyperscale.crypto.ed25519.EDKeyPair;
 import org.radix.hyperscale.crypto.ed25519.EDPublicKey;
@@ -23,6 +24,7 @@ import org.radix.hyperscale.logging.Logger;
 import org.radix.hyperscale.logging.Logging;
 import org.radix.hyperscale.serialization.ByteBufferOutputStream;
 import org.radix.hyperscale.serialization.DsonOutput;
+import org.radix.hyperscale.serialization.Polymorphic;
 import org.radix.hyperscale.serialization.Serializable;
 import org.radix.hyperscale.serialization.Serialization;
 import org.radix.hyperscale.serialization.SerializerConstants;
@@ -33,6 +35,7 @@ import org.radix.hyperscale.utils.UInt256;
 
 import com.fasterxml.jackson.annotation.JsonAutoDetect;
 import com.fasterxml.jackson.annotation.JsonInclude.Include;
+import com.fasterxml.jackson.core.JacksonException;
 import com.fasterxml.jackson.core.JsonEncoding;
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonGenerator;
@@ -57,7 +60,9 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.SerializerProvider;
 import com.fasterxml.jackson.databind.deser.BeanDeserializerModifier;
 import com.fasterxml.jackson.databind.deser.std.DelegatingDeserializer;
+import com.fasterxml.jackson.databind.deser.std.StdDeserializer;
 import com.fasterxml.jackson.databind.deser.std.UntypedObjectDeserializer;
+import com.fasterxml.jackson.databind.exc.InvalidFormatException;
 import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.fasterxml.jackson.databind.node.BinaryNode;
 import com.fasterxml.jackson.databind.ser.BeanSerializerModifier;
@@ -319,6 +324,25 @@ public class JacksonCborMapper extends ObjectMapper
 			BLSSignature::from
 		));
 
+		// Special case for abstract signature references
+		cborModule.addDeserializer(Signature.class, new StdDeserializer<>(Signature.class) 
+		{
+			@Override
+			public Signature deserialize(JsonParser p, DeserializationContext ctxt) throws IOException, JacksonException
+			{
+				byte[] bytes = p.getBinaryValue();
+				if (bytes == null || bytes.length == 0)
+					throw new InvalidFormatException(p, "Expecting signature bytes but null or empty", bytes, handledType());
+				
+				if (bytes[0] == JacksonCodecConstants.EC_SIGNATURE_VALUE)
+					return EDSignature.from(Arrays.copyOfRange(bytes, 1, bytes.length));
+				else if (bytes[0] == JacksonCodecConstants.BLS_SIGNATURE_VALUE)
+					return BLSSignature.from(Arrays.copyOfRange(bytes, 1, bytes.length));
+				else
+					throw new InvalidFormatException(p, "Unexpected prefix "+bytes[0], bytes, handledType());
+			}
+		});
+
 		cborModule.addKeyDeserializer(Hash.class, new StandardKeyDeserializer());
 		cborModule.addKeyDeserializer(String.class, new StandardKeyDeserializer());
 		cborModule.addKeyDeserializer(ShardID.class, new StandardKeyDeserializer());
@@ -326,11 +350,12 @@ public class JacksonCborMapper extends ObjectMapper
 		cborModule.addKeyDeserializer(Identity.class, new StandardKeyDeserializer());
 		cborModule.addKeyDeserializer(UInt256.class, new StandardKeyDeserializer());
 		
-		// Special modifier for Enum values to remove :str: leadin from front
+		// Modifier for untyped objects
 		cborModule.setDeserializerModifier(new BeanDeserializerModifier() 
 		{
 			@Override
 			@SuppressWarnings("rawtypes")
+			// Special modifier for Enum values to remove :str: leadin from front
 			public JsonDeserializer<Enum> modifyEnumDeserializer(DeserializationConfig config, final JavaType type, BeanDescription beanDesc, final JsonDeserializer<?> deserializer) 
 			{
 				return new JsonDeserializer<Enum>() 
@@ -344,11 +369,7 @@ public class JacksonCborMapper extends ObjectMapper
 					}
 				};
 			}
-		});
-		
-		// Modifier for untyped objects
-		cborModule.setDeserializerModifier(new BeanDeserializerModifier() 
-		{
+
 			@Override
 			public JsonDeserializer<?> modifyDeserializer(DeserializationConfig config, BeanDescription beanDesc, JsonDeserializer<?> deserializer) 
 			{
@@ -357,6 +378,9 @@ public class JacksonCborMapper extends ObjectMapper
 					if (beanDesc.getType().isPrimitive())
 						return deserializer;
 
+					if (Polymorphic.class.isAssignableFrom(beanDesc.getBeanClass()))
+						return deserializer;
+					
 					if (beanDesc.getType().isInterface() == false && beanDesc.getType().isAbstract() == false)
 						return new DeserializerWithTrigger(deserializer);
 				}
