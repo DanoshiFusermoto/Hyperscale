@@ -41,7 +41,7 @@ public abstract class ArgumentedInstruction implements Instruction
 				if (other.arguments != null)
 					return false;
 			} 
-			else if (arguments.equals(other.arguments) == false)
+			else if (!Arrays.equals(arguments, other.arguments))
 				return false;
 			
 			return true;

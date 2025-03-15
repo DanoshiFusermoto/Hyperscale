@@ -406,10 +406,10 @@ public final class PendingState implements Hashable, StateAddressable
 	{
 		if (obj == null)
 			return false;
-		
-		if (obj != this)
-			return false;
-		
+
+		if (obj == this)
+			return true;
+
 		if (obj instanceof PendingState pendingState && pendingState.hash.equals(this.hash))
 			return true;
 		

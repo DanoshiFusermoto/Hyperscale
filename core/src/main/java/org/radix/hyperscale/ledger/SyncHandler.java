@@ -239,7 +239,7 @@ public class SyncHandler implements Service
 			SyncHandler.this.lock.lock();
 			try
 			{
-				SyncHandler.this.requestTasks.remove(getConnection(), this);
+				SyncHandler.this.inventoryTasks.remove(getConnection(), this);
 			}
 			finally
 			{

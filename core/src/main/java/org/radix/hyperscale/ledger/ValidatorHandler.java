@@ -623,7 +623,7 @@ public final class ValidatorHandler implements Service
 					}
 					
 					// Was for local shard, clear the pending as now completed
-					if (localShardGroupID == epochInstructions.get(0).getShardGroupID())
+					if (localShardGroupID.equals(epochInstructions.get(0).getShardGroupID()))
 						ValidatorHandler.this.pendingLocalEpochPowers.clear();
 				}
 			}
