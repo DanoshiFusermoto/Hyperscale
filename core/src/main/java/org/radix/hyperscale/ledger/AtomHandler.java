@@ -403,15 +403,16 @@ public class AtomHandler implements Service, LedgerInterface
 						atomsLog.warn(this.context.getName()+": Atom "+atom.getHash()+" is already loaded & prepared with status "+pendingAtom.getStatus());
 						continue;
 					}
+
+					// TODO not ideal to do this BEFORE validation as it will create a state-machine
+					//		potential DDOS-like vector if attacker simply floods invalid transactions
+					pendingAtom.setAtom(atom);
 				
 					if (atom.getHash().leadingZeroBits() < Constants.MIN_PRIMITIVE_POW_DIFFICULTY && atom.hasAuthority(Universe.getDefault().getCreator()) == false)
 						throw new ValidationException("Atom POW does not meet leading bits requirement of "+Constants.MIN_PRIMITIVE_POW_DIFFICULTY);
 					
 					if (atom.verify() == false)
 						throw new ValidationException("Atom failed signature verification");
-						
-					if (pendingAtom.getAtom() == null)
-						pendingAtom.setAtom(atom);
 
 					if (this.context.getLedger().getLedgerStore().store(pendingAtom.getAtom()).equals(OperationStatus.SUCCESS))
 						this.atomsToPrepareQueue.put(pendingAtom.getHash(), pendingAtom);
@@ -1461,7 +1462,7 @@ public class AtomHandler implements Service, LedgerInterface
 		@Subscribe
 		public void on(final AtomExceptionEvent event)
 		{
-			atomsLog.error(AtomHandler.this.context.getName()+": Atom "+event.getAtom().getHash()+" threw exception", event.getException());
+			atomsLog.error(AtomHandler.this.context.getName()+": Atom "+event.getPendingAtom().getAtom().getHash()+" threw exception", event.getException());
 			event.getPendingAtom().getStatus().thrown(event.getException());
 			
 			if (event.getPendingAtom().getStatus().current(State.FINALIZING))

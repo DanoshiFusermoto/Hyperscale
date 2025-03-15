@@ -166,7 +166,7 @@ public final class WebSocketService extends WebSocketServer
 			else
 				throw new UnsupportedOperationException("State decision of type "+event.getDecision()+" is not supported");
 			
-			eventJSON.put("atom", Serialization.getInstance().toJsonObject(event.getAtom(), Output.API));
+			eventJSON.put("atom", Serialization.getInstance().toJsonObject(event.getPendingAtom().getAtom(), Output.API));
 			eventJSON.put("certificate", Serialization.getInstance().toJsonObject(event.getPendingAtom().getCertificate(), Output.API));
 			WebSocketService.this.broadcast(eventJSON.toString());
 		}
@@ -179,7 +179,7 @@ public final class WebSocketService extends WebSocketServer
 
 			JSONObject eventJSON = new JSONObject();
 			eventJSON.put("type", "exception");
-			eventJSON.put("atom", Serialization.getInstance().toJsonObject(event.getAtom(), Output.API));
+			eventJSON.put("atom", Serialization.getInstance().toJsonObject(event.getPendingAtom().getAtom(), Output.API));
 			eventJSON.put("error", event.getException().toString());
 			WebSocketService.this.broadcast(eventJSON.toString());
 		}
