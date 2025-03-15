@@ -65,7 +65,6 @@ import org.radix.hyperscale.logging.Logging;
 import org.radix.hyperscale.network.AbstractConnection;
 import org.radix.hyperscale.network.GossipFetcher;
 import org.radix.hyperscale.network.GossipFilter;
-import org.radix.hyperscale.network.GossipHandler;
 import org.radix.hyperscale.network.GossipInventory;
 import org.radix.hyperscale.network.GossipReceiver;
 import org.radix.hyperscale.network.MessageProcessor;
@@ -1261,7 +1260,7 @@ public class BlockHandler implements Service
 
 			// Progress interval & delay
 			final long targetRoundDuration = Math.max(Constants.MINIMUM_ROUND_DURATION_MILLISECONDS, Configuration.getDefault().get("ledger.liveness.delay", 0));
-			final long roundDelayDuration = (targetRoundDuration-progressRound.getDuration())+Math.max(progressRound.driftMilli(), 0);
+			final long roundDelayDuration = (targetRoundDuration-progressRound.getDuration())+Math.min(progressRound.driftMilli()/2, 0);
 			
 			// Too fast
 			if (roundDelayDuration > 0 && progressRound.driftClock() == 0)
