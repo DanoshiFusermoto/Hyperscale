@@ -261,8 +261,6 @@ public final class PendingAtom implements Hashable, StateAddressable
 			this.atom = atom;
 			this.witnessedAt = Time.getSystemTime();
 			
-			this.stateMachine = new StateMachine(this.context, this, this.pendingStates);
-			
 			// Accept timeout is a baseline constant scaled log(quantity of instructions).
 			// More instructions generally means more shards are touched, therefore more latency for 
 			// all required shard groups to be ready to accept if there is some state contention.
@@ -447,7 +445,7 @@ public final class PendingAtom implements Hashable, StateAddressable
 		return this.forcePrepareTimeout;
 	}
 	
-	void prepare() throws IOException, StateMachinePreparationException
+	void prepare() throws IOException, StateMachinePreparationException, ManifestException
 	{
 		if (this.forcePrepareTimeout)
 			return;
@@ -460,6 +458,7 @@ public final class PendingAtom implements Hashable, StateAddressable
 			if (this.status.after(State.NONE))
 				throw new IllegalStateException("Atom is already PREPARED");
 
+			this.stateMachine = new StateMachine(this.context, this, this.pendingStates);
 			this.stateMachine.prepare();
 			
 			this.prepareTimeoutAt = -1;

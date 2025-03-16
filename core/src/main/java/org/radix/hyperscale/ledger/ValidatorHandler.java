@@ -21,7 +21,7 @@ import org.radix.hyperscale.collections.LRUCacheMap;
 import org.radix.hyperscale.concurrency.MonitoredReadWriteLock;
 import org.radix.hyperscale.crypto.Hash;
 import org.radix.hyperscale.crypto.Identity;
-import org.radix.hyperscale.crypto.Key;
+import org.radix.hyperscale.crypto.PublicKey;
 import org.radix.hyperscale.database.DatabaseException;
 import org.radix.hyperscale.events.EventListener;
 import org.radix.hyperscale.events.SynchronousEventListener;
@@ -283,7 +283,7 @@ public final class ValidatorHandler implements Service
 		}
 	}
 	
-	public <T extends Key> List<T> getKeys(final Bloom identityBloom) throws IOException
+	public <T extends PublicKey<?>> List<T> getKeys(final Bloom identityBloom) throws IOException
 	{
 		Objects.requireNonNull(identityBloom, "Identity bloom is null");
 

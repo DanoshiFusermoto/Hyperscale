@@ -34,7 +34,6 @@ import org.radix.hyperscale.serialization.DsonOutput.Output;
 import org.radix.hyperscale.utils.Numbers;
 
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
-import com.google.common.annotations.VisibleForTesting;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 @SerializerId2("ledger.atom")
@@ -216,6 +215,7 @@ public final class Atom extends ExtendedObject implements Primitive
 	
 	private volatile boolean immutable = false;
 	
+	@SuppressWarnings("unused")
 	private Atom()
 	{
 		super();
