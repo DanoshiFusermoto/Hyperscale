@@ -264,9 +264,9 @@ public final class Context implements Service
 		return contexts.get(name.toLowerCase());
 	}
 	
-	public static final Collection<Context> getAll()
+	public static final List<Context> getAll()
 	{
-		return Collections.unmodifiableCollection(new ArrayList<Context>(contexts.values()));
+		return Collections.unmodifiableList(new ArrayList<Context>(contexts.values()));
 	}
 	
 	public static void clear()
