@@ -39,7 +39,7 @@ public abstract class Spammer extends Executable
 	private final Range<Integer> saturation;
 	private final AtomicInteger processed;
 	
-	protected Spammer(final Spamathon spamathon, final int iterations, final int rate, final Range<Integer> saturation, final ShardGroupID targetShardGroup, final double shardFactor)
+	protected Spammer(final Spamathon spamathon, final int iterations, final int rate, final Range<Integer> saturation, final double shardFactor, final ShardGroupID targetShardGroup)
 	{
 		super();
 		

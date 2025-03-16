@@ -13,4 +13,16 @@ import java.lang.annotation.Target;
 public @interface SpamConfig
 {
 	String name();
+	Option[] options() default {};
+    
+    @Retention(RUNTIME)
+    @Target({})
+    @interface Option 
+    {
+        String opt();
+        String longOpt() default "";
+        String description() default "";
+        boolean hasArg() default false;
+        boolean required() default false;
+    }
 }

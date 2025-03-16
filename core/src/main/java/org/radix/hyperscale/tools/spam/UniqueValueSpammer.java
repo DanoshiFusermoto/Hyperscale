@@ -1,7 +1,5 @@
 package org.radix.hyperscale.tools.spam;
 
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -35,16 +33,16 @@ final class UniqueValueSpammer extends Spammer
 {
 	private static final Logger spammerLog = Logging.getLogger("spammer");
 	
-	protected UniqueValueSpammer(Spamathon spamathon, int iterations, int rate, Range<Integer> saturation, ShardGroupID targetShardGroup, double shardFactor)
+	protected UniqueValueSpammer(final Spamathon spamathon, final int iterations, final int rate, final Range<Integer> saturation, final double shardFactor, final ShardGroupID targetShardGroup)
 	{
-		super(spamathon, iterations, rate, saturation, targetShardGroup, shardFactor);
+		super(spamathon, iterations, rate, saturation, shardFactor, targetShardGroup);
 	}
 	
 	@Override
 	public void execute()
 	{
+		final List<Context> contexts = Context.getAll();
 		final long spamStart = System.currentTimeMillis();
-
 		try
 		{
 			int nextBurstInterval = 32;
@@ -55,7 +53,6 @@ final class UniqueValueSpammer extends Spammer
 			final String atomContext = Atom.class.getAnnotation(StateContext.class).value();
 			final String uniqueValueComponentContext = UniqueValueComponent.class.getAnnotation(StateContext.class).value();
 			
-			final List<Context> contexts = Collections.unmodifiableList(new ArrayList<Context>(Context.getAll()));
 			while(getProcessed().get() < getIterations() && isCancelled() == false)
 			{
 				Atom atom = null;
