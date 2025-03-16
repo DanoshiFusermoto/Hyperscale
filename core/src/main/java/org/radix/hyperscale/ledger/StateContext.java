@@ -12,7 +12,6 @@ import java.lang.annotation.Target;
 @Inherited
 @Retention(RUNTIME)
 @Target(TYPE)
-public @interface StateContext 
-{
-	String value();
+public @interface StateContext {
+  String value();
 }

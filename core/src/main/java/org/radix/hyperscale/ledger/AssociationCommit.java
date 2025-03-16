@@ -1,78 +1,69 @@
 package org.radix.hyperscale.ledger;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.Objects;
-
 import org.radix.hyperscale.common.BasicObject;
 import org.radix.hyperscale.crypto.Hash;
 import org.radix.hyperscale.serialization.DsonOutput;
-import org.radix.hyperscale.serialization.SerializerId2;
 import org.radix.hyperscale.serialization.DsonOutput.Output;
+import org.radix.hyperscale.serialization.SerializerId2;
 import org.radix.hyperscale.utils.Numbers;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
-
 @SerializerId2("ledger.association.commit")
-public final class AssociationCommit extends BasicObject
-{
-	@JsonProperty("referrer")
-	@DsonOutput(Output.ALL)
-	private Hash referrer;
+public final class AssociationCommit extends BasicObject {
+  @JsonProperty("referrer")
+  @DsonOutput(Output.ALL)
+  private Hash referrer;
 
-	@JsonProperty("address")
-	@DsonOutput(Output.ALL)
-	private StateAddress address;
+  @JsonProperty("address")
+  @DsonOutput(Output.ALL)
+  private StateAddress address;
 
-	@JsonProperty("index")
-	@DsonOutput(Output.ALL)
-	private long index;
+  @JsonProperty("index")
+  @DsonOutput(Output.ALL)
+  private long index;
 
-	@JsonProperty("timestamp")
-	@DsonOutput(Output.ALL)
-	private long timestamp;
+  @JsonProperty("timestamp")
+  @DsonOutput(Output.ALL)
+  private long timestamp;
 
-	@SuppressWarnings("unused")
-	private AssociationCommit()
-	{
-		// FOR SERIALIZER
-	}
+  @SuppressWarnings("unused")
+  private AssociationCommit() {
+    // FOR SERIALIZER
+  }
 
-	AssociationCommit(final Hash referrer, final StateAddress address, final long index, final long timestamp)
-	{
-		Objects.requireNonNull(referrer, "Referrer hash is null");
-		Hash.notZero(referrer, "Referrer hash is null");
-		Objects.requireNonNull(address, "Key hash is null");
-		Numbers.isNegative(index , "Index is negative");
-		Numbers.isNegative(timestamp, "Timestamp is negative");
-		
-		this.index = index;
-		this.timestamp = timestamp;
-		this.referrer = referrer;
-		this.address = address;
-	}
+  AssociationCommit(
+      final Hash referrer, final StateAddress address, final long index, final long timestamp) {
+    Objects.requireNonNull(referrer, "Referrer hash is null");
+    Hash.notZero(referrer, "Referrer hash is null");
+    Objects.requireNonNull(address, "Key hash is null");
+    Numbers.isNegative(index, "Index is negative");
+    Numbers.isNegative(timestamp, "Timestamp is negative");
 
-	public long getIndex()
-	{
-		return this.index;
-	}
-	
-	public Hash getReferrer()
-	{
-		return this.referrer;
-	}
+    this.index = index;
+    this.timestamp = timestamp;
+    this.referrer = referrer;
+    this.address = address;
+  }
 
-	public StateAddress getAddress()
-	{
-		return this.address;
-	}
+  public long getIndex() {
+    return this.index;
+  }
 
-	public long getTimestamp()
-	{
-		return this.timestamp;
-	}
+  public Hash getReferrer() {
+    return this.referrer;
+  }
 
-	@Override
-	public String toString()
-	{
-		return this.referrer+" "+this.address+" "+this.index+" "+this.timestamp;
-	}
+  public StateAddress getAddress() {
+    return this.address;
+  }
+
+  public long getTimestamp() {
+    return this.timestamp;
+  }
+
+  @Override
+  public String toString() {
+    return this.referrer + " " + this.address + " " + this.index + " " + this.timestamp;
+  }
 }

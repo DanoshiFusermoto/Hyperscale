@@ -17,64 +17,54 @@
 package org.radix.hyperscale.crypto.blake2;
 
 /**
- * Static utility methods to check whether preconditions required for the
- * execution of a method are met.
+ * Static utility methods to check whether preconditions required for the execution of a method are
+ * met.
  *
  * @author Osman Koçak
  */
-final class Preconditions
-{
-	/**
-	 * Checks the truth of the given condition checking arguments validity.
-	 *
-	 * @param condition the boolean condition to test.
-	 *
-	 * @throws IllegalArgumentException if the condition is {@code false}.
-	 */
-	static void checkArgument(boolean condition)
-	{
-		if (!condition) {
-			throw new IllegalArgumentException();
-		}
-	}
+final class Preconditions {
+  /**
+   * Checks the truth of the given condition checking arguments validity.
+   *
+   * @param condition the boolean condition to test.
+   * @throws IllegalArgumentException if the condition is {@code false}.
+   */
+  static void checkArgument(boolean condition) {
+    if (!condition) {
+      throw new IllegalArgumentException();
+    }
+  }
 
-	/**
-	 * Checks that the specified range is valid and within the given array's
-	 * bounds.
-	 *
-	 * @param buf the array.
-	 * @param off the offset of the range in the array, inclusive.
-	 * @param len the length of the range, starting at {@code off}.
-	 *
-	 * @throws IllegalArgumentException if {@code off < 0 || len < 0}.
-	 * @throws IndexOutOfBoundsException if {@code off + len > buf.length}.
-	 */
-	static void checkBounds(byte[] buf, int off, int len)
-	{
-		checkArgument(off >= 0 && len >= 0);
-		if (off + len > buf.length) {
-			throw new IndexOutOfBoundsException();
-		}
-	}
+  /**
+   * Checks that the specified range is valid and within the given array's bounds.
+   *
+   * @param buf the array.
+   * @param off the offset of the range in the array, inclusive.
+   * @param len the length of the range, starting at {@code off}.
+   * @throws IllegalArgumentException if {@code off < 0 || len < 0}.
+   * @throws IndexOutOfBoundsException if {@code off + len > buf.length}.
+   */
+  static void checkBounds(byte[] buf, int off, int len) {
+    checkArgument(off >= 0 && len >= 0);
+    if (off + len > buf.length) {
+      throw new IndexOutOfBoundsException();
+    }
+  }
 
-	/**
-	 * Checks the truth of the given condition checking the state of the
-	 * calling instance.
-	 *
-	 * @param condition the boolean condition to test.
-	 *
-	 * @throws IllegalStateException if the condition is {@code false}.
-	 */
-	static void checkState(boolean condition)
-	{
-		if (!condition) {
-			throw new IllegalStateException();
-		}
-	}
+  /**
+   * Checks the truth of the given condition checking the state of the calling instance.
+   *
+   * @param condition the boolean condition to test.
+   * @throws IllegalStateException if the condition is {@code false}.
+   */
+  static void checkState(boolean condition) {
+    if (!condition) {
+      throw new IllegalStateException();
+    }
+  }
 
-	private Preconditions()
-	{
-		// See "Effective Java" (Item 4)
-		throw new AssertionError("Not meant to be instantiated");
-	}
+  private Preconditions() {
+    // See "Effective Java" (Item 4)
+    throw new AssertionError("Not meant to be instantiated");
+  }
 }

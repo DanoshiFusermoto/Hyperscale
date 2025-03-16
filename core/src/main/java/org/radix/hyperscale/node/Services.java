@@ -1,6 +1,6 @@
 package org.radix.hyperscale.node;
 
-public enum Services
-{
-	BOOTSTRAP, GATEWAY
+public enum Services {
+  BOOTSTRAP,
+  GATEWAY
 }

@@ -1,110 +1,86 @@
 package org.radix.hyperscale.common;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.Objects;
-
 import org.radix.hyperscale.crypto.Hash;
 import org.radix.hyperscale.crypto.Hashable;
 import org.radix.hyperscale.serialization.DsonOutput;
+import org.radix.hyperscale.serialization.DsonOutput.Output;
 import org.radix.hyperscale.serialization.Serializable;
 import org.radix.hyperscale.serialization.Serialization;
-import org.radix.hyperscale.serialization.DsonOutput.Output;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
+public abstract class BasicObject extends Serializable
+    implements Cloneable, Comparable<Object>, Hashable {
+  private transient volatile Hash hash = Hash.ZERO;
 
-public abstract class BasicObject extends Serializable implements Cloneable, Comparable<Object>, Hashable
-{
-	private	volatile transient Hash	hash = Hash.ZERO;
-	
-	protected BasicObject()
-	{
-		super();
-	}
+  protected BasicObject() {
+    super();
+  }
 
-	protected BasicObject(final BasicObject other)
-	{
-		super();
-		
-		if (this.hash != null && this.hash.equals(Hash.ZERO) == false)
-			this.hash = other.hash;
-	}
+  protected BasicObject(final BasicObject other) {
+    super();
 
-	@Override
-	protected Object clone() throws CloneNotSupportedException 
-	{
-		BasicObject object = (BasicObject) super.clone();
-		object.hash = null;
-		return object;
-	}
-	
-	@Override
-	public boolean equals(final Object obj)
-	{
-		if (obj == null) 
-			return false;
-		
-		if (obj == this) 
-			return true;
+    if (this.hash != null && this.hash.equals(Hash.ZERO) == false) this.hash = other.hash;
+  }
 
-		if (obj instanceof BasicObject other) 
-		{
-			if (getHash().equals(other.getHash()))
-				return true;
-		}
+  @Override
+  protected Object clone() throws CloneNotSupportedException {
+    BasicObject object = (BasicObject) super.clone();
+    object.hash = null;
+    return object;
+  }
 
-		return super.equals(obj);
-	}
+  @Override
+  public boolean equals(final Object obj) {
+    if (obj == null) return false;
 
-	@Override
-	public int hashCode()
-	{
-		return getHash().hashCode();
-	}
+    if (obj == this) return true;
 
-	// HASHABLE //
-	@Override
-	@JsonProperty("hash")
-	@DsonOutput(value = {Output.API})
-	public final synchronized Hash getHash()
-	{
-		try
-		{
-			if (this.hash == null || this.hash.equals(Hash.ZERO))
-				this.hash = computeHash();
+    if (obj instanceof BasicObject other) {
+      if (getHash().equals(other.getHash())) return true;
+    }
 
-			return this.hash;
-		}
-		catch (Exception e)
-		{
-			throw new RuntimeException("Error generating hash: " + e, e);
-		}
-	}
+    return super.equals(obj);
+  }
 
-	protected synchronized Hash computeHash()
-	{
-		try
-		{
-			return Serialization.getInstance().toHash(this);
-		}
-		catch (Exception e)
-		{
-			throw new RuntimeException("Error generating hash: " + e, e);
-		}
-	}
-	
-	@Override
-	public String toString()
-	{
-		return this.getClass().getSimpleName()+" hash="+getHash().toString();
-	}
+  @Override
+  public int hashCode() {
+    return getHash().hashCode();
+  }
 
-	@Override
-	public int compareTo(final Object obj)
-	{
-		Objects.requireNonNull(obj, "Object to compare to is null");
-		
-		if (obj instanceof BasicObject other)
-			return getHash().compareTo(other.getHash());
+  // HASHABLE //
+  @Override
+  @JsonProperty("hash")
+  @DsonOutput(value = {Output.API})
+  public final synchronized Hash getHash() {
+    try {
+      if (this.hash == null || this.hash.equals(Hash.ZERO)) this.hash = computeHash();
 
-		return 0;
-	}
+      return this.hash;
+    } catch (Exception e) {
+      throw new RuntimeException("Error generating hash: " + e, e);
+    }
+  }
+
+  protected synchronized Hash computeHash() {
+    try {
+      return Serialization.getInstance().toHash(this);
+    } catch (Exception e) {
+      throw new RuntimeException("Error generating hash: " + e, e);
+    }
+  }
+
+  @Override
+  public String toString() {
+    return this.getClass().getSimpleName() + " hash=" + getHash().toString();
+  }
+
+  @Override
+  public int compareTo(final Object obj) {
+    Objects.requireNonNull(obj, "Object to compare to is null");
+
+    if (obj instanceof BasicObject other) return getHash().compareTo(other.getHash());
+
+    return 0;
+  }
 }

@@ -1,6 +1,3 @@
 package org.radix.hyperscale.ledger.sme;
 
-public interface GlobalInstruction extends Instruction
-{
-
-}
+public interface GlobalInstruction extends Instruction {}

@@ -1,24 +1,18 @@
 package org.radix.hyperscale.ledger.sme;
 
-public class ManifestException extends Exception 
-{
-	/**
-	 * 
-	 */
-	private static final long serialVersionUID = 1L;
+public class ManifestException extends Exception {
+  /** */
+  private static final long serialVersionUID = 1L;
 
-	ManifestException(String message)
-	{
-		super(message);
-	}
- 
-	ManifestException(String message, Throwable ex)
-	{
-		super(message, ex);
-	}
+  ManifestException(String message) {
+    super(message);
+  }
 
-	ManifestException(Throwable ex)
-	{
-		super(ex);
-	}
+  ManifestException(String message, Throwable ex) {
+    super(message, ex);
+  }
+
+  ManifestException(Throwable ex) {
+    super(ex);
+  }
 }

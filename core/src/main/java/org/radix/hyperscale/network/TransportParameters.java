@@ -12,11 +12,14 @@ import java.lang.annotation.Target;
 @Inherited
 @Retention(RUNTIME)
 @Target(TYPE)
-public @interface TransportParameters 
-{
-	int priority() default 0;
-	int weight() default 1;
-	boolean urgent() default false;
-	boolean async() default false;
-	boolean cache() default false;
+public @interface TransportParameters {
+  int priority() default 0;
+
+  int weight() default 1;
+
+  boolean urgent() default false;
+
+  boolean async() default false;
+
+  boolean cache() default false;
 }

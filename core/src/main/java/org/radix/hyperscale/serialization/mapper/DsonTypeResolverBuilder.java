@@ -1,10 +1,5 @@
 package org.radix.hyperscale.serialization.mapper;
 
-import java.util.Collection;
-
-import org.radix.hyperscale.serialization.SerializerConstants;
-import org.radix.hyperscale.serialization.SerializerIds;
-
 import com.fasterxml.jackson.annotation.JsonTypeInfo.As;
 import com.fasterxml.jackson.annotation.JsonTypeInfo.Id;
 import com.fasterxml.jackson.databind.DeserializationConfig;
@@ -17,42 +12,54 @@ import com.fasterxml.jackson.databind.jsontype.PolymorphicTypeValidator;
 import com.fasterxml.jackson.databind.jsontype.TypeDeserializer;
 import com.fasterxml.jackson.databind.jsontype.TypeIdResolver;
 import com.fasterxml.jackson.databind.jsontype.TypeSerializer;
+import java.util.Collection;
+import org.radix.hyperscale.serialization.SerializerConstants;
+import org.radix.hyperscale.serialization.SerializerIds;
 
 /**
- * TypeResolverBuilder that outputs type information for all classes that
- * are part of the serializable class set.  This set consists of all classes
- * annotated with {@link SerializerId2} and their
- * superclasses.
+ * TypeResolverBuilder that outputs type information for all classes that are part of the
+ * serializable class set. This set consists of all classes annotated with {@link SerializerId2} and
+ * their superclasses.
  */
 class DsonTypeResolverBuilder extends ObjectMapper.DefaultTypeResolverBuilder {
-	private static final long serialVersionUID = 29L;
+  private static final long serialVersionUID = 29L;
 
-	private final SerializerIds idLookup;
+  private final SerializerIds idLookup;
 
-	DsonTypeResolverBuilder(SerializerIds idLookup) {
-		super(ObjectMapper.DefaultTyping.NON_FINAL);
-		init(Id.CUSTOM, null).inclusion(As.EXISTING_PROPERTY).typeProperty(SerializerConstants.SERIALIZER_TYPE_NAME);
-		this.idLookup = idLookup;
-	}
+  DsonTypeResolverBuilder(SerializerIds idLookup) {
+    super(ObjectMapper.DefaultTyping.NON_FINAL);
+    init(Id.CUSTOM, null)
+        .inclusion(As.EXISTING_PROPERTY)
+        .typeProperty(SerializerConstants.SERIALIZER_TYPE_NAME);
+    this.idLookup = idLookup;
+  }
 
-    @Override
-    public TypeSerializer buildTypeSerializer(SerializationConfig config, JavaType baseType, Collection<NamedType> subtypes) {
-    	// Serialization handled already
-    	return null;
-    }
+  @Override
+  public TypeSerializer buildTypeSerializer(
+      SerializationConfig config, JavaType baseType, Collection<NamedType> subtypes) {
+    // Serialization handled already
+    return null;
+  }
 
-    @Override
-	public TypeDeserializer buildTypeDeserializer(DeserializationConfig config, JavaType baseType, Collection<NamedType> subtypes) {
-    	return super.buildTypeDeserializer(config, baseType, subtypes);
-    }
+  @Override
+  public TypeDeserializer buildTypeDeserializer(
+      DeserializationConfig config, JavaType baseType, Collection<NamedType> subtypes) {
+    return super.buildTypeDeserializer(config, baseType, subtypes);
+  }
 
-	@Override
-	public boolean useForType(JavaType t) {
-		return idLookup.isSerializableSuper(t.getRawClass());
-	}
+  @Override
+  public boolean useForType(JavaType t) {
+    return idLookup.isSerializableSuper(t.getRawClass());
+  }
 
-    @Override
-	protected TypeIdResolver idResolver(MapperConfig<?> config, JavaType baseType, PolymorphicTypeValidator subtypeValidator, Collection<NamedType> subtypes, boolean forSer, boolean forDeser) {
-		return new DsonTypeIdResolver(baseType, config.getTypeFactory(), idLookup);
-	}
+  @Override
+  protected TypeIdResolver idResolver(
+      MapperConfig<?> config,
+      JavaType baseType,
+      PolymorphicTypeValidator subtypeValidator,
+      Collection<NamedType> subtypes,
+      boolean forSer,
+      boolean forDeser) {
+    return new DsonTypeIdResolver(baseType, config.getTypeFactory(), idLookup);
+  }
 }

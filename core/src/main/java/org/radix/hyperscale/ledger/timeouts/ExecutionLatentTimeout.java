@@ -6,18 +6,15 @@ import org.radix.hyperscale.serialization.SerializerId2;
 
 @SerializerId2("ledger.atom.timeout.execution.latent")
 @StateContext("atom.timeout.execution.latent")
-public final class ExecutionLatentTimeout extends AtomTimeout
-{
-	@SuppressWarnings("unused")
-	private ExecutionLatentTimeout()
-	{
-		super();
-			
-		// FOR SERIALIZER
-	}
+public final class ExecutionLatentTimeout extends AtomTimeout {
+  @SuppressWarnings("unused")
+  private ExecutionLatentTimeout() {
+    super();
 
-	public ExecutionLatentTimeout(final Hash atom) 
-	{
-		super(atom);
-	}
+    // FOR SERIALIZER
+  }
+
+  public ExecutionLatentTimeout(final Hash atom) {
+    super(atom);
+  }
 }

@@ -1,34 +1,26 @@
 package org.radix.hyperscale.serialization.mapper;
 
-import java.io.IOException;
-
-import org.radix.hyperscale.crypto.Hash;
-
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.SerializerProvider;
 import com.fasterxml.jackson.databind.ser.std.StdSerializer;
+import java.io.IOException;
+import org.radix.hyperscale.crypto.Hash;
 
-/**
- * Serializer for conversion from {@code Hash} data
- * to the appropriate JSON encoding.
- */
-class JacksonJsonHashSerializer extends StdSerializer<Hash> 
-{
-	private static final long serialVersionUID = -2472482347700365657L;
+/** Serializer for conversion from {@code Hash} data to the appropriate JSON encoding. */
+class JacksonJsonHashSerializer extends StdSerializer<Hash> {
+  private static final long serialVersionUID = -2472482347700365657L;
 
-	JacksonJsonHashSerializer() 
-	{
-		this(null);
-	}
+  JacksonJsonHashSerializer() {
+    this(null);
+  }
 
-	JacksonJsonHashSerializer(Class<Hash> t) 
-	{
-		super(t);
-	}
+  JacksonJsonHashSerializer(Class<Hash> t) {
+    super(t);
+  }
 
-	@Override
-	public void serialize(Hash value, JsonGenerator jgen, SerializerProvider provider) throws IOException 
-	{
-		jgen.writeString(JacksonCodecConstants.HASH_STR_VALUE + value.toString());
-	}
+  @Override
+  public void serialize(Hash value, JsonGenerator jgen, SerializerProvider provider)
+      throws IOException {
+    jgen.writeString(JacksonCodecConstants.HASH_STR_VALUE + value.toString());
+  }
 }

@@ -6,18 +6,15 @@ import org.radix.hyperscale.serialization.SerializerId2;
 
 @SerializerId2("ledger.atom.timeout.prepare")
 @StateContext("atom.timeout.prepare")
-public final class PrepareTimeout extends AtomTimeout
-{
-	@SuppressWarnings("unused")
-	private PrepareTimeout()
-	{
-		super();
-			
-		// FOR SERIALIZER
-	}
+public final class PrepareTimeout extends AtomTimeout {
+  @SuppressWarnings("unused")
+  private PrepareTimeout() {
+    super();
 
-	public PrepareTimeout(final Hash atom) 
-	{
-		super(atom);
-	}
+    // FOR SERIALIZER
+  }
+
+  public PrepareTimeout(final Hash atom) {
+    super(atom);
+  }
 }

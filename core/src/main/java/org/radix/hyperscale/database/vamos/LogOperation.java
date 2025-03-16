@@ -4,315 +4,322 @@ import java.io.IOException;
 import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
 import java.util.Objects;
-
 import org.radix.hyperscale.utils.Numbers;
 import org.xerial.snappy.Snappy;
 
-class LogOperation 
-{
-	static final byte[] extractData(final ByteBuffer input) throws IOException
-	{
-		Objects.requireNonNull(input, "Input buffer is null");
-		
-		try
-		{
-			final long ID = input.getLong();
-			final long logPosition = input.getLong();
+class LogOperation {
+  static final byte[] extractData(final ByteBuffer input) throws IOException {
+    Objects.requireNonNull(input, "Input buffer is null");
 
-			final long txID = input.getLong();
-			final Operation operation = Operation.get(input.get());
-			
-			// EXTENSION //
-			if (operation.equals(Operation.START_TX) == false && operation.equals(Operation.END_TX) == false)
-				input.getLong();
+    try {
+      final long ID = input.getLong();
+      final long logPosition = input.getLong();
 
-			// KEY //
-			if (operation.equals(Operation.START_TX) == false && operation.equals(Operation.END_TX) == false)
-			{
-				input.getInt();
-				input.getLong();
-			}
-			
-			// ANCESTOR //
-			if (operation.equals(Operation.START_TX) == false && operation.equals(Operation.END_TX) == false && operation.equals(Operation.EXT_NODE) == false)
-				input.getLong();
+      final long txID = input.getLong();
+      final Operation operation = Operation.get(input.get());
 
-			// DATA //
-			if (operation.equals(Operation.PUT) == true || operation.equals(Operation.PUT_NO_OVERWRITE) == true)
-			{
-				final boolean compressed = input.get() != 0 ? true : false;
-				final int numDataBytes = input.getInt();
-				final byte[] data = new byte[numDataBytes];
-				input.get(data);
-				if (compressed)
-					return Snappy.uncompress(data);
+      // EXTENSION //
+      if (operation.equals(Operation.START_TX) == false
+          && operation.equals(Operation.END_TX) == false) input.getLong();
 
-				return data;
-			}
-			else
-				throw new IOException("No data is present in log operation "+operation+" "+ID+":"+txID+" at position "+logPosition);
-		}
-		catch(BufferOverflowException ex)
-		{
-			throw new IOException(ex);
-		}
-	}
-	
-	private final long 		ID;
-	private final long 		txID;
-	private final long      logPosition; 
-	private final long      extPosition; 
+      // KEY //
+      if (operation.equals(Operation.START_TX) == false
+          && operation.equals(Operation.END_TX) == false) {
+        input.getInt();
+        input.getLong();
+      }
 
-	private final InternalKey key;
-	private final long 		ancestor;
-	private final byte[] 	data;
-	private final boolean 	compressed;
-	private final Operation operation;
+      // ANCESTOR //
+      if (operation.equals(Operation.START_TX) == false
+          && operation.equals(Operation.END_TX) == false
+          && operation.equals(Operation.EXT_NODE) == false) input.getLong();
 
-	private transient byte[] uncompressed;
-	
-	LogOperation(final Environment environment, final long ID, final long logPosition, final long txID, Operation operation)
-	{
-		Objects.requireNonNull(operation, "Operation is null");
-		Numbers.isNegative(ID, "Log ID is negative");
-		Numbers.isNegative(txID, "TX ID is negative");
-		Numbers.isNegative(logPosition, "Log position is negative");
-		
-		if (operation.equals(Operation.START_TX) == false && operation.equals(Operation.END_TX) == false)
-			throw new IllegalArgumentException("Invalid log operation "+operation+"; Must be "+Operation.START_TX+" or "+Operation.END_TX);
+      // DATA //
+      if (operation.equals(Operation.PUT) == true
+          || operation.equals(Operation.PUT_NO_OVERWRITE) == true) {
+        final boolean compressed = input.get() != 0 ? true : false;
+        final int numDataBytes = input.getInt();
+        final byte[] data = new byte[numDataBytes];
+        input.get(data);
+        if (compressed) return Snappy.uncompress(data);
 
-		this.ID = ID;
-		this.txID = txID;
-		this.logPosition = logPosition;
-		this.extPosition = -1;
-		this.compressed = false;
-		this.key = null;
-		this.data = null;
-		this.ancestor = -1;
-		this.operation = operation;
-	}
-	
-	LogOperation(final Environment environment, final long ID, final long logPosition, final long txID, final InternalKey key, final long extPosition, final Operation operation)
-	{
-		Objects.requireNonNull(operation, "Operation is null");
-		Objects.requireNonNull(key, "Key is null");
-		Numbers.isNegative(ID, "Log ID is negative");
-		Numbers.isNegative(txID, "TX ID is negative");
-		Numbers.isNegative(logPosition, "Log position is negative");
-		Numbers.lessThan(extPosition, -1, "Ext position is negative");
+        return data;
+      } else
+        throw new IOException(
+            "No data is present in log operation "
+                + operation
+                + " "
+                + ID
+                + ":"
+                + txID
+                + " at position "
+                + logPosition);
+    } catch (BufferOverflowException ex) {
+      throw new IOException(ex);
+    }
+  }
 
-		if (operation.equals(Operation.EXT_NODE) == false)
-			throw new IllegalArgumentException("Invalid log operation "+operation+"; Must be "+Operation.EXT_NODE);
+  private final long ID;
+  private final long txID;
+  private final long logPosition;
+  private final long extPosition;
 
-		this.ID = ID;
-		this.txID = txID;
-		this.logPosition = logPosition;
-		this.extPosition = extPosition;
-		this.key = key;
-		this.compressed = false;
-		this.data = null;
-		this.ancestor = -1;
-		this.operation = operation;
-	}
+  private final InternalKey key;
+  private final long ancestor;
+  private final byte[] data;
+  private final boolean compressed;
+  private final Operation operation;
 
-	LogOperation(final Environment environment, final long ID, final long logPosition, final long txID, final TransactionOperation txOperation, long extPosition, final long ancestor) throws IOException
-	{
-		Objects.requireNonNull(txOperation, "Operation is null");
-		Numbers.isNegative(ID, "Log ID is negative");
-		Numbers.isNegative(txID, "TX ID is negative");
-		Numbers.isNegative(logPosition, "Log position is negative");
-		Numbers.lessThan(extPosition, -1, "Ext position is negative");
-		
-		if (txOperation.getData() == null && txOperation.getOperation().equals(Operation.DELETE) == false)
-			throw new IllegalArgumentException("Unsupported database operation "+txOperation.getOperation());
+  private transient byte[] uncompressed;
 
-		if (txOperation.getData() != null && txOperation.getOperation().equals(Operation.PUT) == false && txOperation.getOperation().equals(Operation.PUT_NO_OVERWRITE) == false)
-			throw new IllegalArgumentException("Unsupported database operation "+txOperation.getOperation());
+  LogOperation(
+      final Environment environment,
+      final long ID,
+      final long logPosition,
+      final long txID,
+      Operation operation) {
+    Objects.requireNonNull(operation, "Operation is null");
+    Numbers.isNegative(ID, "Log ID is negative");
+    Numbers.isNegative(txID, "TX ID is negative");
+    Numbers.isNegative(logPosition, "Log position is negative");
 
-		this.ID = ID;
-		this.key = txOperation.getKey();
-		this.txID = txID;
-		this.logPosition = logPosition;
-		this.extPosition = extPosition;
+    if (operation.equals(Operation.START_TX) == false
+        && operation.equals(Operation.END_TX) == false)
+      throw new IllegalArgumentException(
+          "Invalid log operation "
+              + operation
+              + "; Must be "
+              + Operation.START_TX
+              + " or "
+              + Operation.END_TX);
 
-		if (txOperation.getData().length > environment.getConfig().getLogCompressionThreshold())
-		{
-			this.data = Snappy.compress(txOperation.getData());
-			this.compressed = true;
-		}
-		else
-		{
-			this.data = txOperation.getData();
-			this.compressed = false;
-		}
-		
-		this.operation = txOperation.getOperation();
-		this.ancestor = ancestor;
-		
-		if (this.ancestor == 0)
-			return;
-	}
+    this.ID = ID;
+    this.txID = txID;
+    this.logPosition = logPosition;
+    this.extPosition = -1;
+    this.compressed = false;
+    this.key = null;
+    this.data = null;
+    this.ancestor = -1;
+    this.operation = operation;
+  }
 
-	LogOperation(final ByteBuffer input) throws IOException
-	{
-		Objects.requireNonNull(input, "Input buffer is null");
-		
-		try
-		{
-			this.ID = input.getLong();
-			this.logPosition = input.getLong();
+  LogOperation(
+      final Environment environment,
+      final long ID,
+      final long logPosition,
+      final long txID,
+      final InternalKey key,
+      final long extPosition,
+      final Operation operation) {
+    Objects.requireNonNull(operation, "Operation is null");
+    Objects.requireNonNull(key, "Key is null");
+    Numbers.isNegative(ID, "Log ID is negative");
+    Numbers.isNegative(txID, "TX ID is negative");
+    Numbers.isNegative(logPosition, "Log position is negative");
+    Numbers.lessThan(extPosition, -1, "Ext position is negative");
 
-			this.txID = input.getLong();
-			this.operation = Operation.get(input.get());
-			
-			// EXTENSION //
-			if (this.operation.equals(Operation.START_TX) == false && this.operation.equals(Operation.END_TX) == false)
-				this.extPosition = input.getLong();
-			else
-				this.extPosition = -1;
+    if (operation.equals(Operation.EXT_NODE) == false)
+      throw new IllegalArgumentException(
+          "Invalid log operation " + operation + "; Must be " + Operation.EXT_NODE);
 
-			// KEY //
-			if (this.operation.equals(Operation.START_TX) == false && this.operation.equals(Operation.END_TX) == false)
-				this.key = InternalKey.from(input.getInt(), input.getLong());
-			else
-				this.key = null;
-			
-			// ANCESTOR //
-			if (this.operation.equals(Operation.START_TX) == false && this.operation.equals(Operation.END_TX) == false && this.operation.equals(Operation.EXT_NODE) == false)
-				this.ancestor = input.getLong();
-			else
-				this.ancestor = -1;
+    this.ID = ID;
+    this.txID = txID;
+    this.logPosition = logPosition;
+    this.extPosition = extPosition;
+    this.key = key;
+    this.compressed = false;
+    this.data = null;
+    this.ancestor = -1;
+    this.operation = operation;
+  }
 
-			// DATA //
-			if (this.operation.equals(Operation.PUT) == true || this.operation.equals(Operation.PUT_NO_OVERWRITE) == true)
-			{
-				this.compressed = input.get() != 0 ? true : false;
-				int numDataBytes = input.getInt();
-				this.data = new byte[numDataBytes];
-				input.get(this.data);
-			}
-			else
-			{
-				this.data = null;
-				this.compressed = false;
-			}
-			
-			if (ancestor == 0)
-				return;
-		}
-		catch(BufferOverflowException ex)
-		{
-			throw new IOException(ex);
-		}
-	}
-	
-	long getID()
-	{
-		return this.ID;
-	}
-	
-	long getLogPosition()
-	{
-		return this.logPosition;
-	}
+  LogOperation(
+      final Environment environment,
+      final long ID,
+      final long logPosition,
+      final long txID,
+      final TransactionOperation txOperation,
+      long extPosition,
+      final long ancestor)
+      throws IOException {
+    Objects.requireNonNull(txOperation, "Operation is null");
+    Numbers.isNegative(ID, "Log ID is negative");
+    Numbers.isNegative(txID, "TX ID is negative");
+    Numbers.isNegative(logPosition, "Log position is negative");
+    Numbers.lessThan(extPosition, -1, "Ext position is negative");
 
-	long getTXID()
-	{
-		return this.txID;
-	}
+    if (txOperation.getData() == null
+        && txOperation.getOperation().equals(Operation.DELETE) == false)
+      throw new IllegalArgumentException(
+          "Unsupported database operation " + txOperation.getOperation());
 
-	InternalKey getKey()
-	{
-		return this.key;
-	}
-	
-	long getAncestorPointer()
-	{
-		return this.ancestor;
-	}
-	
-	Operation getOperation()
-	{
-		return this.operation;
-	}
-	
-	boolean isExtension()
-	{
-		return this.extPosition > -1;
-	}
-	
-	long getExtensionPosition()
-	{
-		return this.extPosition;
-	}
+    if (txOperation.getData() != null
+        && txOperation.getOperation().equals(Operation.PUT) == false
+        && txOperation.getOperation().equals(Operation.PUT_NO_OVERWRITE) == false)
+      throw new IllegalArgumentException(
+          "Unsupported database operation " + txOperation.getOperation());
 
-	int length()
-	{
-		int length = Byte.BYTES + Long.BYTES + Long.BYTES + Long.BYTES;
-		
-		// EXTENSION //
-		if (this.operation.equals(Operation.START_TX) == false && this.operation.equals(Operation.END_TX) == false)
-			length += Long.BYTES;
+    this.ID = ID;
+    this.key = txOperation.getKey();
+    this.txID = txID;
+    this.logPosition = logPosition;
+    this.extPosition = extPosition;
 
-		// KEY //
-		if (this.operation.equals(Operation.START_TX) == false && this.operation.equals(Operation.END_TX) == false)
-			length += InternalKey.BYTES;
-		
-		// ANCESTOR //
-		if (this.operation.equals(Operation.START_TX) == false && this.operation.equals(Operation.END_TX) == false && this.operation.equals(Operation.EXT_NODE) == false)
-			length += Long.BYTES;
-		
-		// DATA //
-		if (this.operation.equals(Operation.PUT) == true || this.operation.equals(Operation.PUT_NO_OVERWRITE) == true)
-			length += Byte.BYTES + Integer.BYTES + this.data.length;
+    if (txOperation.getData().length > environment.getConfig().getLogCompressionThreshold()) {
+      this.data = Snappy.compress(txOperation.getData());
+      this.compressed = true;
+    } else {
+      this.data = txOperation.getData();
+      this.compressed = false;
+    }
 
-		return length;
-	}
-	
-	synchronized byte[] getData() throws IOException
-	{
-		if (this.data == null)
-			return null;
+    this.operation = txOperation.getOperation();
+    this.ancestor = ancestor;
 
-		if (this.uncompressed == null)
-		{
-			if (this.compressed)
-				this.uncompressed = Snappy.uncompress(this.data);
-			else
-				this.uncompressed = this.data;
-		}
-		
-		return this.uncompressed;
-	}
-	
-	void write(final ByteBuffer output) throws IOException
-	{
-		output.putLong(this.ID);
-		output.putLong(this.logPosition);
-		output.putLong(this.txID);
-		output.put((byte) this.operation.type());
-		
-		// EXTENSION //
-		if (this.operation.equals(Operation.START_TX) == false && this.operation.equals(Operation.END_TX) == false)
-			output.putLong(this.extPosition);
+    if (this.ancestor == 0) return;
+  }
 
-		// KEY //
-		if (this.operation.equals(Operation.START_TX) == false && this.operation.equals(Operation.END_TX) == false)
-		{
-			output.putInt(this.key.getDatabaseID());
-			output.putLong(this.key.value());
-		}
-		
-		// ANCESTOR //
-		if (this.operation.equals(Operation.START_TX) == false && this.operation.equals(Operation.END_TX) == false && this.operation.equals(Operation.EXT_NODE) == false)
-			output.putLong(this.ancestor);
+  LogOperation(final ByteBuffer input) throws IOException {
+    Objects.requireNonNull(input, "Input buffer is null");
 
-		// DATA //
-		if (this.operation.equals(Operation.PUT) == true || this.operation.equals(Operation.PUT_NO_OVERWRITE) == true)
-		{
-			output.put(this.compressed ? (byte) 1 : (byte) 0);
-			output.putInt(this.data.length);
-			output.put(this.data);
-		}
-	}
+    try {
+      this.ID = input.getLong();
+      this.logPosition = input.getLong();
+
+      this.txID = input.getLong();
+      this.operation = Operation.get(input.get());
+
+      // EXTENSION //
+      if (this.operation.equals(Operation.START_TX) == false
+          && this.operation.equals(Operation.END_TX) == false) this.extPosition = input.getLong();
+      else this.extPosition = -1;
+
+      // KEY //
+      if (this.operation.equals(Operation.START_TX) == false
+          && this.operation.equals(Operation.END_TX) == false)
+        this.key = InternalKey.from(input.getInt(), input.getLong());
+      else this.key = null;
+
+      // ANCESTOR //
+      if (this.operation.equals(Operation.START_TX) == false
+          && this.operation.equals(Operation.END_TX) == false
+          && this.operation.equals(Operation.EXT_NODE) == false) this.ancestor = input.getLong();
+      else this.ancestor = -1;
+
+      // DATA //
+      if (this.operation.equals(Operation.PUT) == true
+          || this.operation.equals(Operation.PUT_NO_OVERWRITE) == true) {
+        this.compressed = input.get() != 0 ? true : false;
+        int numDataBytes = input.getInt();
+        this.data = new byte[numDataBytes];
+        input.get(this.data);
+      } else {
+        this.data = null;
+        this.compressed = false;
+      }
+
+      if (ancestor == 0) return;
+    } catch (BufferOverflowException ex) {
+      throw new IOException(ex);
+    }
+  }
+
+  long getID() {
+    return this.ID;
+  }
+
+  long getLogPosition() {
+    return this.logPosition;
+  }
+
+  long getTXID() {
+    return this.txID;
+  }
+
+  InternalKey getKey() {
+    return this.key;
+  }
+
+  long getAncestorPointer() {
+    return this.ancestor;
+  }
+
+  Operation getOperation() {
+    return this.operation;
+  }
+
+  boolean isExtension() {
+    return this.extPosition > -1;
+  }
+
+  long getExtensionPosition() {
+    return this.extPosition;
+  }
+
+  int length() {
+    int length = Byte.BYTES + Long.BYTES + Long.BYTES + Long.BYTES;
+
+    // EXTENSION //
+    if (this.operation.equals(Operation.START_TX) == false
+        && this.operation.equals(Operation.END_TX) == false) length += Long.BYTES;
+
+    // KEY //
+    if (this.operation.equals(Operation.START_TX) == false
+        && this.operation.equals(Operation.END_TX) == false) length += InternalKey.BYTES;
+
+    // ANCESTOR //
+    if (this.operation.equals(Operation.START_TX) == false
+        && this.operation.equals(Operation.END_TX) == false
+        && this.operation.equals(Operation.EXT_NODE) == false) length += Long.BYTES;
+
+    // DATA //
+    if (this.operation.equals(Operation.PUT) == true
+        || this.operation.equals(Operation.PUT_NO_OVERWRITE) == true)
+      length += Byte.BYTES + Integer.BYTES + this.data.length;
+
+    return length;
+  }
+
+  synchronized byte[] getData() throws IOException {
+    if (this.data == null) return null;
+
+    if (this.uncompressed == null) {
+      if (this.compressed) this.uncompressed = Snappy.uncompress(this.data);
+      else this.uncompressed = this.data;
+    }
+
+    return this.uncompressed;
+  }
+
+  void write(final ByteBuffer output) throws IOException {
+    output.putLong(this.ID);
+    output.putLong(this.logPosition);
+    output.putLong(this.txID);
+    output.put((byte) this.operation.type());
+
+    // EXTENSION //
+    if (this.operation.equals(Operation.START_TX) == false
+        && this.operation.equals(Operation.END_TX) == false) output.putLong(this.extPosition);
+
+    // KEY //
+    if (this.operation.equals(Operation.START_TX) == false
+        && this.operation.equals(Operation.END_TX) == false) {
+      output.putInt(this.key.getDatabaseID());
+      output.putLong(this.key.value());
+    }
+
+    // ANCESTOR //
+    if (this.operation.equals(Operation.START_TX) == false
+        && this.operation.equals(Operation.END_TX) == false
+        && this.operation.equals(Operation.EXT_NODE) == false) output.putLong(this.ancestor);
+
+    // DATA //
+    if (this.operation.equals(Operation.PUT) == true
+        || this.operation.equals(Operation.PUT_NO_OVERWRITE) == true) {
+      output.put(this.compressed ? (byte) 1 : (byte) 0);
+      output.putInt(this.data.length);
+      output.put(this.data);
+    }
+  }
 }

@@ -1,7 +1,7 @@
 package org.radix.hyperscale.ledger;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.Objects;
-
 import org.radix.hyperscale.common.ExtendedObject;
 import org.radix.hyperscale.crypto.CryptoException;
 import org.radix.hyperscale.crypto.Hash;
@@ -11,158 +11,134 @@ import org.radix.hyperscale.crypto.Signature;
 import org.radix.hyperscale.serialization.DsonOutput;
 import org.radix.hyperscale.serialization.DsonOutput.Output;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
+abstract class Vote<KP extends KeyPair<?, K, S>, K extends PublicKey<S>, S extends Signature>
+    extends ExtendedObject {
+  @JsonProperty("object")
+  @DsonOutput(Output.ALL)
+  private Hash object;
 
-abstract class Vote<KP extends KeyPair<?, K, S>, K extends PublicKey<S>, S extends Signature> extends ExtendedObject 
-{
-	@JsonProperty("object")
-	@DsonOutput(Output.ALL)
-	private Hash object;
+  @JsonProperty("decision")
+  @DsonOutput(Output.ALL)
+  private CommitDecision decision;
 
-	@JsonProperty("decision")
-	@DsonOutput(Output.ALL)
-	private CommitDecision decision;
+  @JsonProperty("owner")
+  @DsonOutput(Output.ALL)
+  private K owner;
 
-	@JsonProperty("owner")
-	@DsonOutput(Output.ALL)
-	private K owner;
+  @JsonProperty("signature")
+  @DsonOutput(value = {Output.API, Output.WIRE, Output.PERSIST})
+  private S signature;
 
-	@JsonProperty("signature")
-	@DsonOutput(value = {Output.API, Output.WIRE, Output.PERSIST})
-	private S signature;
-	
-	Vote()
-	{
-		// For serializer
-	}
-	
-	Vote(final Hash object, final CommitDecision decision)
-	{
-		this.object = Objects.requireNonNull(object, "Object is null");
-		Hash.notZero(object, "Object hash is ZERO");
-		
-		// TODO check object is serializable
-		
-		this.decision = Objects.requireNonNull(decision, "Decision is null");
-	}
+  Vote() {
+    // For serializer
+  }
 
-	protected Vote(final Hash object, final CommitDecision decision, final K owner)
-	{
-		this.object = Objects.requireNonNull(object, "Object is null");
-		Hash.notZero(object, "Object hash is ZERO");
-		
-		// TODO check object is serializable
-		
-		this.owner = Objects.requireNonNull(owner, "Owner is null");
-		this.decision = Objects.requireNonNull(decision, "Decision is null");
-	}
+  Vote(final Hash object, final CommitDecision decision) {
+    this.object = Objects.requireNonNull(object, "Object is null");
+    Hash.notZero(object, "Object hash is ZERO");
 
-	protected Vote(final Hash object, final CommitDecision decision, final K owner, final S signature)
-	{
-		this.object = Objects.requireNonNull(object, "Object is null");
-		Hash.notZero(object, "Object hash is ZERO");
-		this.owner = Objects.requireNonNull(owner, "Owner is null");
-		this.signature = Objects.requireNonNull(signature, "Signature is null");
-		this.decision = Objects.requireNonNull(decision, "Decision is null");
-		
-		// TODO check object is serializable
-	}
-	
-	@Override
-	public int hashCode() 
-	{
-		final int prime = 31;
-		int result = 1;
-		result = prime * result + this.object.hashCode();
-		result = prime * result + this.decision.hashCode();
-		result = prime * result + this.owner.hashCode();
-		return result;
-	}
+    // TODO check object is serializable
 
-	@Override
-	public boolean equals(Object object)
-	{
-		if (object == null)
-			return false;
+    this.decision = Objects.requireNonNull(decision, "Decision is null");
+  }
 
-		if (object == this)
-			return true;
+  protected Vote(final Hash object, final CommitDecision decision, final K owner) {
+    this.object = Objects.requireNonNull(object, "Object is null");
+    Hash.notZero(object, "Object hash is ZERO");
 
-		if (object instanceof Vote vote)
-		{
-			if (vote.decision.equals(this.decision) == false)
-				return false;
+    // TODO check object is serializable
 
-			if (vote.object.equals(this.object) == false)
-				return false;
-			
-			if (vote.owner.equals(this.owner) == false)
-				return false;
+    this.owner = Objects.requireNonNull(owner, "Owner is null");
+    this.decision = Objects.requireNonNull(decision, "Decision is null");
+  }
 
-			return true;
-		}
-		
-		return false;
-	}
+  protected Vote(
+      final Hash object, final CommitDecision decision, final K owner, final S signature) {
+    this.object = Objects.requireNonNull(object, "Object is null");
+    Hash.notZero(object, "Object hash is ZERO");
+    this.owner = Objects.requireNonNull(owner, "Owner is null");
+    this.signature = Objects.requireNonNull(signature, "Signature is null");
+    this.decision = Objects.requireNonNull(decision, "Decision is null");
 
-	final Hash getObject()
-	{
-		return this.object;
-	}
+    // TODO check object is serializable
+  }
 
-	public final CommitDecision getDecision()
-	{
-		return this.decision;
-	}
+  @Override
+  public int hashCode() {
+    final int prime = 31;
+    int result = 1;
+    result = prime * result + this.object.hashCode();
+    result = prime * result + this.decision.hashCode();
+    result = prime * result + this.owner.hashCode();
+    return result;
+  }
 
-	public final K getOwner()
-	{
-		return this.owner;
-	}
-	
-	public final synchronized void sign(final KP key) throws CryptoException
-	{
-		Objects.requireNonNull(key, "Key pair is null");
-		
-		if (this.signature != null)
-			throw new IllegalStateException("Vote "+getClass()+" is already signed "+this);
+  @Override
+  public boolean equals(Object object) {
+    if (object == null) return false;
 
-		if (key.getPublicKey().equals(getOwner()) == false)
-			throw new CryptoException("Attempting to sign with key that doesn't match owner");
-		
-		this.signature = key.getPrivateKey().sign(getObject());
-	}
+    if (object == this) return true;
 
-	public final synchronized boolean verify(final K key) throws CryptoException
-	{
-		Objects.requireNonNull(key, "Public key is null");
-		
-		if (this.signature == null)
-			throw new CryptoException("Signature is not present");
-		
-		if (getOwner() == null)
-			return false;
+    if (object instanceof Vote vote) {
+      if (vote.decision.equals(this.decision) == false) return false;
 
-		if (key.equals(getOwner()) == false)
-			return false;
-		
-		return key.verify(getObject(), this.signature);
-	}
-	
-	boolean requiresSignature()
-	{
-		return true;
-	}
-	
-	public final synchronized S getSignature()
-	{
-		return this.signature;
-	}
-	
-	// TODO put back to final
-	@Override
-	public String toString()
-	{
-		return super.toString()+" "+this.getObject()+" <- "+this.owner;
-	}
+      if (vote.object.equals(this.object) == false) return false;
+
+      if (vote.owner.equals(this.owner) == false) return false;
+
+      return true;
+    }
+
+    return false;
+  }
+
+  final Hash getObject() {
+    return this.object;
+  }
+
+  public final CommitDecision getDecision() {
+    return this.decision;
+  }
+
+  public final K getOwner() {
+    return this.owner;
+  }
+
+  public final synchronized void sign(final KP key) throws CryptoException {
+    Objects.requireNonNull(key, "Key pair is null");
+
+    if (this.signature != null)
+      throw new IllegalStateException("Vote " + getClass() + " is already signed " + this);
+
+    if (key.getPublicKey().equals(getOwner()) == false)
+      throw new CryptoException("Attempting to sign with key that doesn't match owner");
+
+    this.signature = key.getPrivateKey().sign(getObject());
+  }
+
+  public final synchronized boolean verify(final K key) throws CryptoException {
+    Objects.requireNonNull(key, "Public key is null");
+
+    if (this.signature == null) throw new CryptoException("Signature is not present");
+
+    if (getOwner() == null) return false;
+
+    if (key.equals(getOwner()) == false) return false;
+
+    return key.verify(getObject(), this.signature);
+  }
+
+  boolean requiresSignature() {
+    return true;
+  }
+
+  public final synchronized S getSignature() {
+    return this.signature;
+  }
+
+  // TODO put back to final
+  @Override
+  public String toString() {
+    return super.toString() + " " + this.getObject() + " <- " + this.owner;
+  }
 }

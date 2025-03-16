@@ -10,7 +10,6 @@ import java.lang.annotation.Target;
 @Documented
 @Retention(RUNTIME)
 @Target(TYPE)
-public @interface ArgumentContext 
-{
-	String value();
+public @interface ArgumentContext {
+  String value();
 }

@@ -12,26 +12,22 @@ import org.radix.hyperscale.serialization.SerializerId2;
 @SerializerId2("ledger.block.vote")
 @TransportParameters(urgent = true)
 @DsonCached
-public final class BlockVote extends Vote<BLSKeyPair, BLSPublicKey, BLSSignature> implements EphemeralPrimitive
-{
-	@SuppressWarnings("unused")
-	private BlockVote()
-	{
-		// SERIALIZER
-	}
-	
-	public BlockVote(final Hash header, BLSPublicKey owner)
-	{
-		super(header, CommitDecision.ACCEPT, owner);
-	}
+public final class BlockVote extends Vote<BLSKeyPair, BLSPublicKey, BLSSignature>
+    implements EphemeralPrimitive {
+  @SuppressWarnings("unused")
+  private BlockVote() {
+    // SERIALIZER
+  }
 
-	public Hash getBlock()
-	{
-		return getObject();
-	}
+  public BlockVote(final Hash header, BLSPublicKey owner) {
+    super(header, CommitDecision.ACCEPT, owner);
+  }
 
-	public long getHeight()
-	{
-		return Block.toHeight(getBlock());
-	}
+  public Hash getBlock() {
+    return getObject();
+  }
+
+  public long getHeight() {
+    return Block.toHeight(getBlock());
+  }
 }
