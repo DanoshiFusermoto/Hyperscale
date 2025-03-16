@@ -404,8 +404,6 @@ public class AtomHandler implements Service, LedgerInterface
 						continue;
 					}
 
-					// TODO not ideal to do this BEFORE validation as it will create a state-machine
-					//		potential DDOS-like vector if attacker simply floods invalid transactions
 					pendingAtom.setAtom(atom);
 				
 					if (atom.getHash().leadingZeroBits() < Constants.MIN_PRIMITIVE_POW_DIFFICULTY && atom.hasAuthority(Universe.getDefault().getCreator()) == false)
