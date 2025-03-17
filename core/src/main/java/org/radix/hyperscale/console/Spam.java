@@ -1,5 +1,6 @@
 package org.radix.hyperscale.console;
 
+import java.io.File;
 import java.io.PrintStream;
 import java.lang.System;
 import java.util.ArrayList;
@@ -14,6 +15,8 @@ import org.apache.commons.cli.Option;
 import org.apache.commons.cli.Options;
 import org.apache.commons.lang3.Range;
 import org.radix.hyperscale.Context;
+import org.radix.hyperscale.crypto.KeyPair;
+import org.radix.hyperscale.crypto.ed25519.EDKeyPair;
 import org.radix.hyperscale.ledger.BlockHeader.InventoryType;
 import org.radix.hyperscale.ledger.ShardGroupID;
 import org.radix.hyperscale.tools.spam.SpamConfig;
@@ -24,6 +27,7 @@ public class Spam extends Function
 {
 	private static final Options options = new Options().addOption("i", "iterations", true, "Quantity of spam iterations").
 														 addOption("r", "rate", true, "Rate at which to produce events").
+														 addOption("powkey", true, "POW signing key path (POW bypass)").
 														 addOption("spammer", true, "Which spammer to run").
 														 addOption("saturation", true, "Saturation range per atom").
 														 addOption("shardtarget", true, "The shard group to target for all atoms").
@@ -77,14 +81,23 @@ public class Spam extends Function
 
 		final CommandLine commandLine = Function.parser.parse(extendedOptions, arguments, false);
 		final String[] extendedArguments = getExtendedArguments(commandLine, spamConfig);
-				
 		final Spammer spammer = Spamathon.getInstance().spam(name, 
 															 Integer.parseInt(commandLine.getOptionValue("iterations")), 
 															 Integer.parseInt(commandLine.getOptionValue("rate")), 
 															 parseRange(commandLine.getOptionValue("saturation", "1")),
-												   			 Double.parseDouble(commandLine.getOptionValue("shardfactor", "0")), 
-												   			 commandLine.hasOption("shardTarget") ? ShardGroupID.from(Integer.parseInt(commandLine.getOptionValue("shardtarget"))) : null, 
-												   			 extendedArguments);
+															 Double.parseDouble(commandLine.getOptionValue("shardfactor", "0")), 
+															 commandLine.hasOption("shardTarget") ? ShardGroupID.from(Integer.parseInt(commandLine.getOptionValue("shardtarget"))) : null,
+															 extendedArguments);
+				
+		// POW key
+		if (commandLine.hasOption("powkey"))
+		{
+			final File POWKeyPairPath = new File(commandLine.getOptionValue("powkey"));
+			
+			// TODO key type detection via standard formatting rather than binary parse
+			KeyPair<?,?,?> POWKeyPair = EDKeyPair.fromFile(POWKeyPairPath, false);
+			spammer.addSigner(POWKeyPair);
+		}
 
 		printStream.println("Starting spam "+name+" of "+commandLine.getOptionValue("iterations")+" iterations at rate of "+commandLine.getOptionValue("rate")+" ... ");
 
