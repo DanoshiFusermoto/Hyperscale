@@ -2,6 +2,7 @@ package org.radix.hyperscale.tools.spam;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -17,7 +18,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.commons.lang3.Range;
 import org.radix.hyperscale.Constants;
 import org.radix.hyperscale.Context;
+import org.radix.hyperscale.Universe;
 import org.radix.hyperscale.crypto.Hash;
+import org.radix.hyperscale.crypto.Identity;
+import org.radix.hyperscale.crypto.KeyPair;
 import org.radix.hyperscale.executors.Executable;
 import org.radix.hyperscale.executors.Executor;
 import org.radix.hyperscale.ledger.ShardGroupID;
@@ -37,9 +41,12 @@ public abstract class Spammer extends Executable
 	private final ShardGroupID  targetShardGroup;
 	private final double 		shardFactor;
 	private final Range<Integer> saturation;
+	private final Map<Identity, KeyPair<?,?,?>> signers;
+	
 	private final AtomicInteger processed;
 	
-	protected Spammer(final Spamathon spamathon, final int iterations, final int rate, final Range<Integer> saturation, final double shardFactor, final ShardGroupID targetShardGroup)
+	protected Spammer(final Spamathon spamathon, final int iterations, final int rate, final Range<Integer> saturation, 
+				      final double shardFactor, final ShardGroupID targetShardGroup)
 	{
 		super();
 		
@@ -55,6 +62,8 @@ public abstract class Spammer extends Executable
 		this.saturation = saturation;
 		this.shardFactor = shardFactor;
 		this.targetShardGroup = targetShardGroup;
+		this.signers = new HashMap<Identity, KeyPair<?,?,?>>(4);
+		
 		this.processed = new AtomicInteger(0);
 	}
 
@@ -82,6 +91,25 @@ public abstract class Spammer extends Executable
 	{
 		return this.shardFactor;
 	}
+	
+	public boolean addSigner(final KeyPair<?,?,?> signer)
+	{
+		Objects.requireNonNull(signer, "Signer is null");
+		return this.signers.putIfAbsent(signer.getIdentity(), signer) == null ? true : false;
+	}
+	
+	public Collection<KeyPair<?,?,?>> getSigners()
+	{
+		return Collections.unmodifiableCollection(this.signers.values());
+	}
+	
+	public int getPOWDifficulty()
+	{
+		if (this.signers.containsKey(Universe.getDefault().getCreator().getIdentity()))
+			return 0;
+		
+		return Constants.MIN_PRIMITIVE_POW_DIFFICULTY;
+	}
 
 	public boolean nextIsIsolatedShard()
 	{
@@ -99,15 +127,21 @@ public abstract class Spammer extends Executable
 	}
 	
 	private final List<Atom> atoms = new ArrayList<Atom>();
-	void submitAtom(final Context submitTo, final Atom atom) throws Exception	
+	void submit(final Context context, final Atom atom) throws Exception	
 	{
-		if (submitTo.getLedger().submit(atom) == false)
-			throw new Exception("Atom "+atom.getHash()+" not submitted");
+		for (final Identity identity : this.signers.keySet())
+		{
+			if (atom.hasAuthority(identity) == false)
+				atom.sign(this.signers.get(identity));
+		}
+		
+		if (context.getLedger().submit(atom) == false)
+			throw new Exception("Atom "+atom.getHash()+" not submitted to context "+context.getName());
 		
 		this.atoms.add(atom);
 	}
 	
-	public void submitOverInterval(final Context submitTo, final Collection<Atom> atoms, final long interval, final TimeUnit unit)
+	public void submitOverInterval(final Context context, final Collection<Atom> atoms, final long interval, final TimeUnit unit) throws Exception
 	{
 		Objects.requireNonNull(atoms, "Atoms is null");
 		Numbers.isZero(atoms.size(), "Atoms is empty");
@@ -137,7 +171,13 @@ public abstract class Spammer extends Executable
 			while(scheduledAtomSubmissions < intervalSubmitCount && atomIterator.hasNext())
 			{
 				final Atom atom = atomIterator.next();
-				Executor.getInstance().schedule(() -> submitTo.getLedger().submit(atom), scheduledDelay, unit);
+				for (final Identity identity : this.signers.keySet())
+				{
+					if (atom.hasAuthority(identity) == false)
+						atom.sign(this.signers.get(identity));
+				}
+
+				Executor.getInstance().schedule(() -> context.getLedger().submit(atom), scheduledDelay, unit);
 				this.atoms.add(atom);
 			}
 			
@@ -145,22 +185,19 @@ public abstract class Spammer extends Executable
 		}
 	}
 
-	void submitAtomAndWait(final Context submitTo, final Atom atom) throws Exception	
+	void submitAtomAndWait(final Context context, final Atom atom) throws Exception	
 	{
-		submitAtomAndWaitAtPendingThreshold(submitTo, atom, 0);
+		submitAtomAndWaitAtPendingThreshold(context, atom, 0);
 	}
 
-	void submitAtomAndWaitAtPendingThreshold(final Context submitTo, final Atom atom, final int maxAtomsWaitThreshold) throws Exception	
+	void submitAtomAndWaitAtPendingThreshold(final Context context, final Atom atom, final int maxAtomsWaitThreshold) throws Exception	
 	{
-		submitAtomAndWaitAtPendingThreshold(submitTo, atom, maxAtomsWaitThreshold, null);
+		submitAtomAndWaitAtPendingThreshold(context, atom, maxAtomsWaitThreshold, null);
 	}
 
-	void submitAtomAndWaitAtPendingThreshold(final Context submitTo, final Atom atom, final int maxAtomsWaitThreshold, final Runnable completionCallback) throws Exception	
+	void submitAtomAndWaitAtPendingThreshold(final Context context, final Atom atom, final int maxAtomsWaitThreshold, final Runnable completionCallback) throws Exception	
 	{
-		if (submitTo.getLedger().submit(atom) == false)
-			throw new Exception("Atom "+atom.getHash()+" not submitted");
-
-		this.atoms.add(atom);
+		submit(context, atom);
 		
 		if (this.atoms.size() >= maxAtomsWaitThreshold)
 		{
