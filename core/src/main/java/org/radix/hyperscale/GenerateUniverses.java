@@ -248,14 +248,13 @@ public final class GenerateUniverses
 		genesisAtomBuilder.push("token::create(token('USD', WRITE), 'USD token', account('"+this.universeKey.getIdentity()+"'))");
 		genesisAtomBuilder.push("token::mint(token('USD', WRITE), "+UInt256.from(UInt128.HIGH_BIT).toString()+", vault('"+this.universeKey.getIdentity()+"'), identity('"+this.universeKey.getIdentity()+"'))");
 
+		// Test the manifest integrity and parsing
+		ManifestParser.parse(genesisAtomBuilder.getManifest());
+
 		// Can build with zero difficulty as signed by universe key
+		genesisAtomBuilder.signer(this.universeKey);
 		final Atom genesisAtom = genesisAtomBuilder.build(0);
 		
-		// Test the manifest integrity and parsing
-		ManifestParser.parse(genesisAtom.getManifest());
-
-		genesisAtom.sign(this.universeKey);
-
 		Block genesisBlock = new Block(0l, Hash.ZERO, 0l, UInt256.ZERO, 0, 0, timestamp, ephemeralValidator.getPublicKey().getIdentity(), 
 									   Collections.singletonList(genesisAtom), Collections.emptyList(), 
 									   Collections.emptyList(), Collections.emptyList(), 
