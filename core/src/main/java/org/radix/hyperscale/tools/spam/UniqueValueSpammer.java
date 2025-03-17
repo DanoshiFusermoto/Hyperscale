@@ -12,8 +12,6 @@ import org.radix.hyperscale.Context;
 import org.radix.hyperscale.Universe;
 import org.radix.hyperscale.crypto.Hash;
 import org.radix.hyperscale.crypto.ed25519.EDKeyPair;
-import org.radix.hyperscale.crypto.ed25519.EDPublicKey;
-import org.radix.hyperscale.crypto.ed25519.EDSignature;
 import org.radix.hyperscale.ledger.ShardGroupID;
 import org.radix.hyperscale.ledger.ShardMapper;
 import org.radix.hyperscale.ledger.StateAddress;
@@ -33,7 +31,8 @@ final class UniqueValueSpammer extends Spammer
 {
 	private static final Logger spammerLog = Logging.getLogger("spammer");
 	
-	protected UniqueValueSpammer(final Spamathon spamathon, final int iterations, final int rate, final Range<Integer> saturation, final double shardFactor, final ShardGroupID targetShardGroup)
+	protected UniqueValueSpammer(final Spamathon spamathon, final int iterations, final int rate, final Range<Integer> saturation, 
+			 					 final double shardFactor, final ShardGroupID targetShardGroup)
 	{
 		super(spamathon, iterations, rate, saturation, shardFactor, targetShardGroup);
 	}
@@ -53,37 +52,22 @@ final class UniqueValueSpammer extends Spammer
 			final String atomContext = Atom.class.getAnnotation(StateContext.class).value();
 			final String uniqueValueComponentContext = UniqueValueComponent.class.getAnnotation(StateContext.class).value();
 			
+			final Set<ShardGroupID> atomShardGroups = new HashSet<>(4);
 			while(getProcessed().get() < getIterations() && isCancelled() == false)
 			{
-				Atom atom = null;
-				final Set<ShardGroupID> atomShardGroups = new HashSet<>(4);
+				final Atom.Builder atomBuilder = new Atom.Builder();
+				atomShardGroups.clear();
 
 				try
 				{
-					final EDKeyPair signer;
-					if (EDKeyPair.SKIP_SIGNING == false || EDKeyPair.SKIP_VERIFICATION == false)
-						signer = new EDKeyPair();
-					else 
-						signer = null;
-
-					final EDPublicKey pubkey;
-					if (signer != null)
-						pubkey = signer.getPublicKey();
-					else
-					{
-						byte[] pubbytes = new byte[33];
-						ThreadLocalRandom.current().nextBytes(pubbytes);
-						pubbytes[0] = 2;
-						pubkey = EDPublicKey.from(pubbytes);
-					}
-					
+					final EDKeyPair signer = new EDKeyPair();
 					final String instruction;
 					final boolean isIsolatedShard = nextIsIsolatedShard();
 					final ShardGroupID targetShardGroupID;
 					if (getTargetShardGroup() == null)
 					{
 						long value = ThreadLocalRandom.current().nextLong();
-						instruction = uniqueValueComponentContext+"::set(uint256("+value+"), identity('"+pubkey.getIdentity()+"'))";
+						instruction = uniqueValueComponentContext+"::set(uint256("+value+"), identity('"+signer.getIdentity()+"'))";
 						targetShardGroupID = ShardMapper.toShardGroup(StateAddress.from(uniqueValueComponentContext, Hash.valueOf(UInt256.from(value))), numShardGroups);
 					}
 					else
@@ -97,38 +81,41 @@ final class UniqueValueSpammer extends Spammer
 						}
 						while(shardGroupID.equals(getTargetShardGroup()) == false);
 							
-						instruction = uniqueValueComponentContext+"::set(uint256("+value+"), identity('"+pubkey.getIdentity()+"'))";
+						instruction = uniqueValueComponentContext+"::set(uint256("+value+"), identity('"+signer.getIdentity()+"'))";
 						targetShardGroupID = shardGroupID;
 					}
 					
-					do
+					atomBuilder.push(instruction);
+					atomShardGroups.add(targetShardGroupID);
+						
+					final int saturation = pluckSaturationInRange();
+					if (isIsolatedShard == false && saturation > 1)
 					{
-						Atom.Builder atomBuilder = new Atom.Builder();
-						atomShardGroups.clear();
-
-						atomBuilder.push(instruction);
-						atomShardGroups.add(targetShardGroupID);
-						
-						final int saturation = pluckSaturationInRange();
-						if (isIsolatedShard == false && saturation > 1)
+						for (int u = 1 ; u < saturation ; u++)
 						{
-							for (int u = 1 ; u < saturation ; u++)
-							{
-								final long extraValue = ThreadLocalRandom.current().nextLong();
-								final String extraInstruction = uniqueValueComponentContext+"::set(uint256("+extraValue+"), identity('"+pubkey.getIdentity()+"'))";
-								atomBuilder.push(extraInstruction);
-								atomShardGroups.add(ShardMapper.toShardGroup(StateAddress.from(uniqueValueComponentContext, Hash.valueOf(UInt256.from(extraValue))), numShardGroups));
-							}
+							final long extraValue = ThreadLocalRandom.current().nextLong();
+							final String extraInstruction = uniqueValueComponentContext+"::set(uint256("+extraValue+"), identity('"+signer.getIdentity()+"'))";
+							atomBuilder.push(extraInstruction);
+							atomShardGroups.add(ShardMapper.toShardGroup(StateAddress.from(uniqueValueComponentContext, Hash.valueOf(UInt256.from(extraValue))), numShardGroups));
 						}
-						
-						atom = atomBuilder.build();
 					}
-					while(isIsolatedShard && ShardMapper.toShardGroup(StateAddress.from(atomContext, atom.getHash()), numShardGroups).equals(targetShardGroupID) == false);
 					
-					if (signer != null)
-						atom.sign(signer);
-					else
-						atom.sign(pubkey, EDSignature.NULL);
+					if (isIsolatedShard)
+					{
+						int isolationAttempts = 1000;
+						while(isolationAttempts > 0)
+						{
+							final StateAddress atomStateAddress = StateAddress.from(atomContext, atomBuilder.discoverHash(getPOWDifficulty(), true));
+							final ShardGroupID atomShardGroup = ShardMapper.toShardGroup(atomStateAddress, numShardGroups);
+							if (atomShardGroups.contains(atomShardGroup))
+								break;
+							
+							isolationAttempts--;
+						}
+					}
+					
+					atomBuilder.signer(signer);
+					atomBuilder.build(getPOWDifficulty());
 				}
 				catch (Throwable t)
 				{
@@ -147,7 +134,7 @@ final class UniqueValueSpammer extends Spammer
 						final ShardGroupID contextShardGroupID = ShardMapper.toShardGroup(context.getNode().getIdentity(), numShardGroups);
 						if (atomShardGroups.contains(contextShardGroupID))
 						{
-							context.getLedger().submit(atom);
+							submit(context, atomBuilder.get());
 							submitted = true;
 							break;
 						}
@@ -158,7 +145,7 @@ final class UniqueValueSpammer extends Spammer
 						for (ShardGroupID shardGroupID : atomShardGroups)
 						{
 							final Context submissionContext = contexts.get(ThreadLocalRandom.current().nextInt(contexts.size()));
-							final SubmitAtomsMessage submitAtomsMessage = new SubmitAtomsMessage(atom);
+							final SubmitAtomsMessage submitAtomsMessage = new SubmitAtomsMessage(atomBuilder.get());
 							final StandardConnectionFilter submissionConnectionFilter = StandardConnectionFilter.build(submissionContext).setStates(ConnectionState.CONNECTED).setShardGroupID(shardGroupID).setSynced(true).setStale(false);
 							final List<AbstractConnection> connections = submissionContext.getNetwork().get(submissionConnectionFilter);
 							if (connections.isEmpty() == false)
