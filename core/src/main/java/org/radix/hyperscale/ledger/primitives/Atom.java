@@ -253,22 +253,6 @@ public final class Atom extends ExtendedObject implements Primitive
 		this.signatures = new HashMap<Identity, Signature>(atom.signatures);
 	}
 
-	private Atom(final long nonce, final List<String> manifest)
-	{
-		super();
-		
-		Objects.requireNonNull(manifest, "Manifest is null");
-		Numbers.isZero(manifest.size(), "Manifest is empty");
-		Numbers.greaterThan(manifest.size(), Atom.MAX_MANIFEST_ITEMS, "Manifest exceeds maximum items of "+Atom.MAX_MANIFEST_ITEMS);
-		
-		this.nonce = nonce;
-		this.manifest = new ArrayList<String>(manifest.size());
-		for (int i = 0 ; i < manifest.size() ; i++)
-			this.manifest.add(manifest.get(i));
-			
-		this.signatures = new HashMap<Identity, Signature>(3);
-	}
-	
 	@Override
 	public boolean isDeferredPersist()
 	{
@@ -283,12 +267,6 @@ public final class Atom extends ExtendedObject implements Primitive
 	public boolean isSealed()
 	{
 		return this.signatures.isEmpty() == false;
-	}
-	
-	private void throwIfSealed()
-	{
-		if (isSealed())
-			throw new IllegalStateException("Atom "+getHash()+" is sealed");
 	}
 	
 	private void throwIfImmutable()
@@ -327,7 +305,7 @@ public final class Atom extends ExtendedObject implements Primitive
 		return signature;
 	}
 
-	public Signature sign(final PublicKey<?> key, final Signature signature)
+	public Signature signature(final PublicKey<?> key, final Signature signature)
 	{
 		throwIfImmutable();
 		
