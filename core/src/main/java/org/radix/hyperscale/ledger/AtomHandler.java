@@ -30,6 +30,7 @@ import org.radix.hyperscale.collections.MappedBlockingQueue;
 import org.radix.hyperscale.common.Primitive;
 import org.radix.hyperscale.crypto.Hash;
 import org.radix.hyperscale.crypto.Hashable;
+import org.radix.hyperscale.crypto.Identity;
 import org.radix.hyperscale.events.EventListener;
 import org.radix.hyperscale.events.SyncLostEvent;
 import org.radix.hyperscale.events.SynchronousEventListener;
@@ -407,7 +408,7 @@ public class AtomHandler implements Service, LedgerInterface
 					pendingAtom.setAtom(atom);
 				
 					if (atom.getHash().leadingZeroBits() < Constants.MIN_PRIMITIVE_POW_DIFFICULTY && atom.hasAuthority(Universe.getDefault().getCreator()) == false)
-						throw new ValidationException("Atom POW does not meet leading bits requirement of "+Constants.MIN_PRIMITIVE_POW_DIFFICULTY);
+						throw new ValidationException("Atom POW of "+atom.getHash().leadingZeroBits()+" does not meet leading bits requirement of "+Constants.MIN_PRIMITIVE_POW_DIFFICULTY);
 					
 					if (atom.verify() == false)
 						throw new ValidationException("Atom failed signature verification");
@@ -1461,6 +1462,11 @@ public class AtomHandler implements Service, LedgerInterface
 		public void on(final AtomExceptionEvent event)
 		{
 			atomsLog.error(AtomHandler.this.context.getName()+": Atom "+event.getPendingAtom().getAtom().getHash()+" threw exception", event.getException());
+			for(String instruction : event.getPendingAtom().getAtom().getManifest())
+				atomsLog.error(AtomHandler.this.context.getName()+":      "+instruction);
+			for(Identity signer : event.getPendingAtom().getAtom().getAuthorities())
+				atomsLog.error(AtomHandler.this.context.getName()+":      "+signer);
+			atomsLog.error(AtomHandler.this.context.getName()+": ", event.getException());
 			event.getPendingAtom().getStatus().thrown(event.getException());
 			
 			if (event.getPendingAtom().getStatus().current(State.FINALIZING))

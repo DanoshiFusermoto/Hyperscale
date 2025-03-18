@@ -1,12 +1,16 @@
 package org.radix.hyperscale.tools.spam;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadLocalRandom;
@@ -17,7 +21,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.commons.lang3.Range;
 import org.radix.hyperscale.Constants;
 import org.radix.hyperscale.Context;
+import org.radix.hyperscale.Universe;
+import org.radix.hyperscale.crypto.CryptoException;
 import org.radix.hyperscale.crypto.Hash;
+import org.radix.hyperscale.crypto.Identity;
+import org.radix.hyperscale.crypto.KeyPair;
 import org.radix.hyperscale.executors.Executable;
 import org.radix.hyperscale.executors.Executor;
 import org.radix.hyperscale.ledger.ShardGroupID;
@@ -26,7 +34,11 @@ import org.radix.hyperscale.ledger.SubstateCommit;
 import org.radix.hyperscale.ledger.SubstateSearchQuery;
 import org.radix.hyperscale.ledger.SubstateSearchResponse;
 import org.radix.hyperscale.ledger.Substate.NativeField;
+import org.radix.hyperscale.ledger.messages.SubmitAtomsMessage;
 import org.radix.hyperscale.ledger.primitives.Atom;
+import org.radix.hyperscale.network.AbstractConnection;
+import org.radix.hyperscale.network.ConnectionState;
+import org.radix.hyperscale.network.StandardConnectionFilter;
 import org.radix.hyperscale.utils.Numbers;
 
 public abstract class Spammer extends Executable
@@ -38,8 +50,19 @@ public abstract class Spammer extends Executable
 	private final double 		shardFactor;
 	private final Range<Integer> saturation;
 	private final AtomicInteger processed;
+
+	/**
+	 * Serves as a cache of submitted atoms in case the spam implementation wants to check completion status.
+	 */
+	private final Set<Atom> submittedAtoms;
+
+	/**
+	 * A collection of supernumerary keys which should also sign atoms prior to submission 
+	 */
+	private final Map<Identity, KeyPair<?,?,?>> signers;
 	
-	protected Spammer(final Spamathon spamathon, final int iterations, final int rate, final Range<Integer> saturation, final ShardGroupID targetShardGroup, final double shardFactor)
+	protected Spammer(final Spamathon spamathon, final int iterations, final int rate, final Range<Integer> saturation, 
+				      final double shardFactor, final ShardGroupID targetShardGroup)
 	{
 		super();
 		
@@ -55,10 +78,14 @@ public abstract class Spammer extends Executable
 		this.saturation = saturation;
 		this.shardFactor = shardFactor;
 		this.targetShardGroup = targetShardGroup;
+		
+		this.signers = Collections.synchronizedMap(new HashMap<Identity, KeyPair<?,?,?>>(4));
+		this.submittedAtoms = Collections.synchronizedSet(new LinkedHashSet<Atom>());
+		
 		this.processed = new AtomicInteger(0);
 	}
 
-	protected Spamathon getSpamathon() 
+	Spamathon getSpamathon() 
 	{
 		return this.spamathon;
 	}
@@ -82,15 +109,66 @@ public abstract class Spammer extends Executable
 	{
 		return this.shardFactor;
 	}
-
-	public boolean nextIsIsolatedShard()
-	{
-		return ThreadLocalRandom.current().nextInt(this.iterations) < (this.iterations * this.shardFactor);
-	}
 	
 	public AtomicInteger getProcessed() 
 	{
 		return this.processed;
+	}
+	
+	public Range<Integer> getSaturation()
+	{
+		return this.saturation;
+	}
+	
+	public boolean addSigner(final KeyPair<?,?,?> signer)
+	{
+		Objects.requireNonNull(signer, "Signer is null");
+		return this.signers.putIfAbsent(signer.getIdentity(), signer) == null ? true : false;
+	}
+	
+	public Collection<KeyPair<?,?,?>> getSigners()
+	{
+		synchronized(this.signers)
+		{
+			return Collections.unmodifiableCollection(this.signers.values());
+		}
+	}
+	
+	private void signExtended(final Atom atom) throws CryptoException
+	{
+		synchronized(this.signers)
+		{
+			for (final Identity identity : this.signers.keySet())
+			{
+				if (atom.hasAuthority(identity) == false)
+					atom.sign(this.signers.get(identity));
+			}
+		}
+	}
+	
+	int getPOWDifficulty()
+	{
+		if (this.signers.containsKey(Universe.getDefault().getCreator().getIdentity()))
+			return 0;
+		
+		return Constants.MIN_PRIMITIVE_POW_DIFFICULTY;
+	}
+
+	boolean nextIsIsolatedShard()
+	{
+		return ThreadLocalRandom.current().nextInt(this.iterations) < (this.iterations * this.shardFactor);
+	}
+	
+	int pluckSaturationInRange()
+	{
+		if (this.saturation.getMinimum().equals(this.saturation.getMaximum()))
+			return this.saturation.getMinimum();
+		else
+		{
+			double r = ThreadLocalRandom.current().nextDouble();
+	        double x = -Math.log(1 - r) / Math.E;
+	        return (int) Math.floor(this.saturation.getMinimum() + (this.saturation.getMaximum() - this.saturation.getMinimum()) * (1 - Math.exp(-x)));
+		}
 	}
 	
 	private enum AtomCompletionStatus
@@ -98,25 +176,60 @@ public abstract class Spammer extends Executable
 		COMPLETED, TIMEDOUT
 	}
 	
-	private final List<Atom> atoms = new ArrayList<Atom>();
-	void submitAtom(final Context submitTo, final Atom atom) throws Exception	
+	void submit(final Context context, final Atom atom) throws Exception	
 	{
-		if (submitTo.getLedger().submit(atom) == false)
-			throw new Exception("Atom "+atom.getHash()+" not submitted");
+		signExtended(atom);
 		
-		this.atoms.add(atom);
+		if (context.getLedger().submit(atom) == false)
+			throw new Exception("Atom "+atom.getHash()+" not submitted to context "+context.getName());
+		
+		this.submittedAtoms.add(atom);
+		clearStaleSubmitted();
 	}
 	
-	public void submitOverInterval(final Context submitTo, final Collection<Atom> atoms, final long interval, final TimeUnit unit)
+	void submit(final ShardGroupID shardGroup, final Atom atom) throws Exception	
+	{
+		signExtended(atom);
+		
+		final List<Context> submissionContexts = Context.getAll();
+		Collections.shuffle(submissionContexts);
+
+		Context submissionContext  = submissionContexts.get(ThreadLocalRandom.current().nextInt(submissionContexts.size()));
+		if (submissionContext.getNode().isSynced() == false)
+		{
+			submissionContext = null;
+			for (int c = 0 ; c < submissionContexts.size() ; c++)
+			{
+				if (submissionContexts.get(c).getNode().isSynced() == false)
+					continue;
+					
+				submissionContext = submissionContexts.get(c);
+				break;
+			}
+			
+			if (submissionContext == null)
+				throw new IOException("No context in sync for submission of atom "+atom.getHash());
+		}
+
+		final SubmitAtomsMessage submitAtomsMessage = new SubmitAtomsMessage(atom);
+		final StandardConnectionFilter submissionConnectionFilter = StandardConnectionFilter.build(submissionContext).setStates(ConnectionState.CONNECTED).setShardGroupID(shardGroup).setSynced(true).setStale(false);
+		final List<AbstractConnection> connections = submissionContext.getNetwork().get(submissionConnectionFilter);
+		if (connections.isEmpty() == false)
+			submissionContext.getNetwork().getMessaging().send(submitAtomsMessage, connections.getFirst());
+		else
+			throw new IOException("No connections found for shard group "+shardGroup+" to submit atom "+atom.getHash());
+	}
+
+	public void submitOverInterval(final Context context, final Collection<Atom> atoms, final long interval, final TimeUnit unit) throws Exception
 	{
 		Objects.requireNonNull(atoms, "Atoms is null");
 		Numbers.isZero(atoms.size(), "Atoms is empty");
 		Objects.requireNonNull(unit, "Time unit for interval is null");
 		Numbers.lessThan(interval, 1, "Interval of "+interval+" is invalid");
 
-		long intervalMillis = unit.toMillis(interval);
-		long intervalMillisStep;
-		int intervalSubmitCount;
+		final long intervalMillis = unit.toMillis(interval);
+		final long intervalMillisStep;
+		final int intervalSubmitCount;
 		int scheduledDelay = 0;
 
 		if (intervalMillis < atoms.size())
@@ -137,84 +250,66 @@ public abstract class Spammer extends Executable
 			while(scheduledAtomSubmissions < intervalSubmitCount && atomIterator.hasNext())
 			{
 				final Atom atom = atomIterator.next();
-				Executor.getInstance().schedule(() -> submitTo.getLedger().submit(atom), scheduledDelay, unit);
-				this.atoms.add(atom);
+				signExtended(atom);
+
+				Executor.getInstance().schedule(() -> context.getLedger().submit(atom), scheduledDelay, unit);
+				this.submittedAtoms.add(atom);
 			}
 			
 			scheduledDelay += intervalMillisStep;
 		}
-	}
-
-	void submitAtomAndWait(final Context submitTo, final Atom atom) throws Exception	
-	{
-		submitAtomAndWaitAtPendingThreshold(submitTo, atom, 0);
-	}
-
-	void submitAtomAndWaitAtPendingThreshold(final Context submitTo, final Atom atom, final int maxAtomsWaitThreshold) throws Exception	
-	{
-		submitAtomAndWaitAtPendingThreshold(submitTo, atom, maxAtomsWaitThreshold, null);
-	}
-
-	void submitAtomAndWaitAtPendingThreshold(final Context submitTo, final Atom atom, final int maxAtomsWaitThreshold, final Runnable completionCallback) throws Exception	
-	{
-		if (submitTo.getLedger().submit(atom) == false)
-			throw new Exception("Atom "+atom.getHash()+" not submitted");
-
-		this.atoms.add(atom);
 		
-		if (this.atoms.size() >= maxAtomsWaitThreshold)
+		clearStaleSubmitted();
+	}
+
+	void submitAtomAndWait(final Context context, final Atom atom) throws Exception	
+	{
+		submitAtomAndWaitAtPendingThreshold(context, atom, 0);
+	}
+
+	void submitAtomAndWaitAtPendingThreshold(final Context context, final Atom atom, final int maxAtomsWaitThreshold) throws Exception	
+	{
+		submitAtomAndWaitAtPendingThreshold(context, atom, maxAtomsWaitThreshold, null);
+	}
+
+	void submitAtomAndWaitAtPendingThreshold(final Context context, final Atom atom, final int maxAtomsWaitThreshold, final Runnable completionCallback) throws Exception	
+	{
+		submit(context, atom);
+		
+		if (this.submittedAtoms.size() >= maxAtomsWaitThreshold)
 		{
-			waitUntilAtomsAreCompleted(this.atoms);
-			this.atoms.clear();
+			waitUntilAtomsAreCompleted();
 			
 			if (completionCallback != null)
 				completionCallback.run();
 		}
 	}
 	
-	int numAtomsPendingCompletion()
-	{
-		return this.atoms.size();
-	}
-	
 	void waitUntilAtomsAreCompleted() throws InterruptedException, ExecutionException, TimeoutException
 	{
-		if (this.atoms.isEmpty())
-			return;
-		
-		waitUntilAtomsAreCompleted(this.atoms);
-		this.atoms.clear();
+		waitUntilAtomsAreCompleted(null);
  	}
 
 	void waitUntilAtomsAreCompleted(final Runnable completionCallback) throws InterruptedException, ExecutionException, TimeoutException
 	{
-		if (this.atoms.isEmpty())
+		if (this.submittedAtoms.isEmpty())
 			return;
-		
-		waitUntilAtomsAreCompleted(this.atoms, completionCallback);
-		this.atoms.clear();
- 	}
 
-	void waitUntilAtomsAreCompleted(final Collection<Atom> atoms) throws InterruptedException, ExecutionException, TimeoutException
-	{
-		waitUntilAtomsAreCompleted(atoms, null);
-	}
-	
-	void waitUntilAtomsAreCompleted(final Collection<Atom> atoms, final Runnable completionCallback) throws InterruptedException, ExecutionException, TimeoutException
-	{
 		final long start = System.currentTimeMillis();
+		final List<Atom> pendingAtoms = new ArrayList<Atom>(this.submittedAtoms);
 		final Map<Hash, AtomCompletionStatus> statuses = new HashMap<>();
 		final List<Future<SubstateSearchResponse>> searchFutures = new ArrayList<>();
 		
-		while(this.atoms.isEmpty() == false)
+		while(pendingAtoms.isEmpty() == false)
 		{
 			long iteration = System.currentTimeMillis();
 			
 			searchFutures.clear();
 			
-			for (final Atom atom : this.atoms)
+			for (final Atom atom : pendingAtoms)
 			{
-				Future<SubstateSearchResponse> response = Context.get().getLedger().get(new SubstateSearchQuery(StateAddress.from(Atom.class, atom.getHash())));
+				final SubstateSearchQuery query = new SubstateSearchQuery(StateAddress.from(Atom.class, atom.getHash()));
+				final Future<SubstateSearchResponse> response = Context.get().getLedger().get(query);
 				searchFutures.add(response);
 			}
 			
@@ -227,7 +322,7 @@ public abstract class Spammer extends Executable
 					statuses.put(searchFuture.get().getQuery().getAddress().scope(), AtomCompletionStatus.TIMEDOUT);
 			}
 			
-			final Iterator<Atom> atomIterator = this.atoms.iterator();
+			final Iterator<Atom> atomIterator = pendingAtoms.iterator();
 			while(atomIterator.hasNext())
 			{
 				final Atom atom = atomIterator.next();
@@ -238,7 +333,7 @@ public abstract class Spammer extends Executable
 					throw new TimeoutException("Completion timeout for atom "+atom.getHash());
 			}
 			
-			if (this.atoms.isEmpty() == false)
+			if (pendingAtoms.isEmpty() == false)
 			{
 				long iterationInterval = System.currentTimeMillis() - iteration;
 				if (iterationInterval > 0)
@@ -248,6 +343,8 @@ public abstract class Spammer extends Executable
 		
 		if (completionCallback != null)
 			completionCallback.run();
+		
+		this.submittedAtoms.removeAll(pendingAtoms);
 	}
 
 	void waitUntilAtomIsCompleted(final Atom atom, final long timeout, final TimeUnit unit) throws InterruptedException, ExecutionException, TimeoutException
@@ -281,28 +378,29 @@ public abstract class Spammer extends Executable
 	
 	private boolean isAtomCompleted(final Atom atom) throws InterruptedException, ExecutionException
 	{
-		Future<SubstateSearchResponse> response = Context.get().getLedger().get(new SubstateSearchQuery(StateAddress.from(Atom.class, atom.getHash())));
-		SubstateCommit result = response.get().getResult();
+		final SubstateSearchQuery query = new SubstateSearchQuery(StateAddress.from(Atom.class, atom.getHash()));
+		final Future<SubstateSearchResponse> response = Context.get().getLedger().get(query);
+		final SubstateCommit result = response.get().getResult();
 		if (result != null && result.getSubstate().get(NativeField.CERTIFICATE) != null)
 			return true;
 		
 		return false;
 	}
 	
-	Range<Integer> getSaturation()
+	private void clearStaleSubmitted()
 	{
-		return this.saturation;
-	}
-	
-	int pluckSaturationInRange()
-	{
-		if (this.saturation.getMinimum().equals(this.saturation.getMaximum()))
-			return this.saturation.getMinimum();
-		else
+		synchronized(this.submittedAtoms)
 		{
-			double r = ThreadLocalRandom.current().nextDouble();
-	        double x = -Math.log(1 - r) / Math.E;
-	        return (int) Math.floor(this.saturation.getMinimum() + (this.saturation.getMaximum() - this.saturation.getMinimum()) * (1 - Math.exp(-x)));
+			final long timestamp = System.currentTimeMillis();
+			final Iterator<Atom> submittedAtomsIterator = this.submittedAtoms.iterator();
+			while(submittedAtomsIterator.hasNext())
+			{
+				final Atom atom = submittedAtomsIterator.next();
+				if (atom.witnessedAt()+TimeUnit.SECONDS.toMillis(Constants.PRIMITIVE_STALE) > timestamp)
+					break;
+				
+				submittedAtomsIterator.remove();
+			}
 		}
 	}
 }

@@ -47,15 +47,15 @@ public final class Atom extends ExtendedObject implements Primitive
 	
 	public final static class Builder
 	{
-		private Atom atom;
-		private long nonce;
-		private final List<String> manifest;
+		private final Atom atom;
 		private final Map<Identity, KeyPair<?,?,?>> signers;
+		
+		private volatile boolean built = false;
 		
 		private Builder(long nonce)
 		{
-			this.nonce = nonce;
-			this.manifest = new ArrayList<String>(6); 		 // Rarely will a manifest be larger than 6 instructions
+			this.atom = new Atom();
+			this.atom.nonce = nonce;
 			this.signers = new HashMap<Identity, KeyPair<?,?,?>>(3); // Rarely will there be more than three signers
 		}
 
@@ -72,34 +72,39 @@ public final class Atom extends ExtendedObject implements Primitive
 		public Builder(final long nonce, final List<String> manifest)
 		{
 			this(nonce);
-			this.manifest.addAll(manifest);
+			this.atom.manifest.addAll(manifest);
+		}
+		
+		public void reset()
+		{
+			this.atom.nonce = ThreadLocalRandom.current().nextLong();
+			this.atom.manifest.clear();
+			this.signers.clear();
+			this.built = false;
 		}
 		
 		private void throwIfBuilt()
 		{
-			if (this.atom == null)
-				return;
-			
-			this.atom.throwIfSealed();
-			this.atom.throwIfImmutable();
+			if (this.built)
+				throw new IllegalStateException("Atom is built and now immutable");
 		}
 		
 		public long getNonce()
 		{
-			return this.nonce;
+			return this.atom.nonce;
 		}
 		
-		public Builder setNonce(final long nonce)
+		public Atom get()
 		{
-			throwIfBuilt();
+			if (this.built == false)
+				throw new IllegalStateException("Atom is not built");
 			
-			this.nonce = nonce;
-			return this;
+			return this.atom;
 		}
 		
 		public List<String> getManifest()
 		{
-			return Collections.unmodifiableList(this.manifest);
+			return Collections.unmodifiableList(this.atom.manifest);
 		}
 		
 		public Builder push(final Blob blob) 
@@ -108,10 +113,10 @@ public final class Atom extends ExtendedObject implements Primitive
 			
 			throwIfBuilt();
 
-			if (this.manifest.size() == Atom.MAX_MANIFEST_ITEMS)
+			if (this.atom.manifest.size() == Atom.MAX_MANIFEST_ITEMS)
 				throw new IllegalStateException("Manifest contains maximum items of "+Atom.MAX_MANIFEST_ITEMS);
 
-			this.manifest.add(blob.asDataURL());
+			this.atom.manifest.add(blob.asDataURL());
 			return this;
 		}
 
@@ -121,10 +126,10 @@ public final class Atom extends ExtendedObject implements Primitive
 			
 			throwIfBuilt();
 
-			if (this.manifest.size() + manifest.size() > Atom.MAX_MANIFEST_ITEMS)
+			if (this.atom.manifest.size() + manifest.size() > Atom.MAX_MANIFEST_ITEMS)
 				throw new IllegalStateException("Manifest would exceed maximum items of "+Atom.MAX_MANIFEST_ITEMS);
 			
-			this.manifest.addAll(manifest);
+			this.atom.manifest.addAll(manifest);
 			return this;
 		}
 		
@@ -135,10 +140,10 @@ public final class Atom extends ExtendedObject implements Primitive
 
 			throwIfBuilt();
 			
-			if (this.manifest.size() == Atom.MAX_MANIFEST_ITEMS)
+			if (this.atom.manifest.size() == Atom.MAX_MANIFEST_ITEMS)
 				throw new IllegalStateException("Manifest contains maximum items of "+Atom.MAX_MANIFEST_ITEMS);
 			
-			this.manifest.add(instruction);
+			this.atom.manifest.add(instruction);
 			return this;
 		}
 		
@@ -163,14 +168,12 @@ public final class Atom extends ExtendedObject implements Primitive
 			return build(difficulty, null);
 		}
 		
-		public Atom build(final int difficulty, List<KeyPair<?,?,?>> signers) throws CryptoException
+		public Atom build(final int difficulty, Collection<KeyPair<?,?,?>> signers) throws CryptoException
 		{
 			throwIfBuilt();
 
-			this.atom = new Atom(this.nonce, this.manifest);
-			
 			if (difficulty > 0)
-				discoverPOW(this.atom, difficulty);
+				discoverHash(difficulty, false);
 
 			// Signers set via builder
 			if (this.signers.isEmpty() == false)
@@ -186,17 +189,23 @@ public final class Atom extends ExtendedObject implements Primitive
 					this.atom.sign(signer);
 			}
 			
+			this.built = true;
+			
 			return this.atom;
 		}
 		
-		private void discoverPOW(final Atom atom, final int difficulty)
+		public Hash discoverHash(final int difficulty, boolean reset)
 		{
-			Hash hash = atom.computeHash();
+			if (reset)
+				this.atom.nonce = ThreadLocalRandom.current().nextLong();
+			
+			Hash hash = this.atom.computeHash();
 			while(hash.leadingZeroBits() < difficulty)
 			{
-				atom.nonce++;
-				hash = atom.computeHash();
+				this.atom.nonce++;
+				hash = this.atom.computeHash();
 			}
+			return hash;
 		}
 	}
 
@@ -221,8 +230,8 @@ public final class Atom extends ExtendedObject implements Primitive
 		super();
 		
 		this.nonce = ThreadLocalRandom.current().nextLong();
-		this.manifest = new ArrayList<String>(3);
-		this.signatures = new HashMap<Identity, Signature>(3);
+		this.manifest = new ArrayList<String>(4);
+		this.signatures = new HashMap<Identity, Signature>(4);
 	}
 
 	/**
@@ -244,22 +253,6 @@ public final class Atom extends ExtendedObject implements Primitive
 		this.signatures = new HashMap<Identity, Signature>(atom.signatures);
 	}
 
-	private Atom(final long nonce, final List<String> manifest)
-	{
-		super();
-		
-		Objects.requireNonNull(manifest, "Manifest is null");
-		Numbers.isZero(manifest.size(), "Manifest is empty");
-		Numbers.greaterThan(manifest.size(), Atom.MAX_MANIFEST_ITEMS, "Manifest exceeds maximum items of "+Atom.MAX_MANIFEST_ITEMS);
-		
-		this.nonce = nonce;
-		this.manifest = new ArrayList<String>(manifest.size());
-		for (int i = 0 ; i < manifest.size() ; i++)
-			this.manifest.add(manifest.get(i));
-			
-		this.signatures = new HashMap<Identity, Signature>(3);
-	}
-	
 	@Override
 	public boolean isDeferredPersist()
 	{
@@ -274,12 +267,6 @@ public final class Atom extends ExtendedObject implements Primitive
 	public boolean isSealed()
 	{
 		return this.signatures.isEmpty() == false;
-	}
-	
-	private void throwIfSealed()
-	{
-		if (isSealed())
-			throw new IllegalStateException("Atom "+getHash()+" is sealed");
 	}
 	
 	private void throwIfImmutable()
@@ -318,7 +305,7 @@ public final class Atom extends ExtendedObject implements Primitive
 		return signature;
 	}
 
-	public Signature sign(final PublicKey<?> key, final Signature signature)
+	public Signature signature(final PublicKey<?> key, final Signature signature)
 	{
 		throwIfImmutable();
 		

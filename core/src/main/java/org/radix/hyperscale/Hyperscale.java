@@ -196,7 +196,7 @@ public class Hyperscale
 												   	   new org.radix.hyperscale.console.StateMachine(), new org.radix.hyperscale.console.Database(),
 				
 												   	   // Godix special functions
-												   	   new org.radix.hyperscale.console.Godix(), new org.radix.hyperscale.console.Contexts());
+												   	   new org.radix.hyperscale.console.Godix(), new org.radix.hyperscale.console.Spam(), new org.radix.hyperscale.console.Contexts());
 				}
 				else
 				{
