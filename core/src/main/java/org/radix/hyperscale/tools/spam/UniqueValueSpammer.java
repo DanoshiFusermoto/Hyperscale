@@ -16,14 +16,10 @@ import org.radix.hyperscale.ledger.ShardGroupID;
 import org.radix.hyperscale.ledger.ShardMapper;
 import org.radix.hyperscale.ledger.StateAddress;
 import org.radix.hyperscale.ledger.StateContext;
-import org.radix.hyperscale.ledger.messages.SubmitAtomsMessage;
 import org.radix.hyperscale.ledger.primitives.Atom;
 import org.radix.hyperscale.ledger.sme.components.UniqueValueComponent;
 import org.radix.hyperscale.logging.Logger;
 import org.radix.hyperscale.logging.Logging;
-import org.radix.hyperscale.network.AbstractConnection;
-import org.radix.hyperscale.network.ConnectionState;
-import org.radix.hyperscale.network.StandardConnectionFilter;
 import org.radix.hyperscale.utils.UInt256;
 
 @SpamConfig(name = "unique")
@@ -96,7 +92,9 @@ final class UniqueValueSpammer extends Spammer
 							final long extraValue = ThreadLocalRandom.current().nextLong();
 							final String extraInstruction = uniqueValueComponentContext+"::set(uint256("+extraValue+"), identity('"+signer.getIdentity()+"'))";
 							atomBuilder.push(extraInstruction);
-							atomShardGroups.add(ShardMapper.toShardGroup(StateAddress.from(uniqueValueComponentContext, Hash.valueOf(UInt256.from(extraValue))), numShardGroups));
+							
+							final StateAddress uniqueStateAddress = StateAddress.from(uniqueValueComponentContext, Hash.valueOf(UInt256.from(extraValue)));
+							atomShardGroups.add(ShardMapper.toShardGroup(uniqueStateAddress, numShardGroups));
 						}
 					}
 					
@@ -116,6 +114,24 @@ final class UniqueValueSpammer extends Spammer
 					
 					atomBuilder.signer(signer);
 					atomBuilder.build(getPOWDifficulty());
+
+					// Submit local
+					for (Context context : contexts)
+					{
+						if (context.getNode().isSynced() == false)
+							continue;
+						
+						final ShardGroupID contextShardGroupID = ShardMapper.toShardGroup(context.getNode().getIdentity(), numShardGroups);
+						if (atomShardGroups.remove(contextShardGroupID))
+							submit(context, atomBuilder.get());
+					}
+					
+					// Submit remote
+					if (atomShardGroups.isEmpty() == false)
+					{
+						for (ShardGroupID shardGroup : atomShardGroups)
+							submit(shardGroup, atomBuilder.get());
+					}
 				}
 				catch (Throwable t)
 				{
@@ -124,41 +140,6 @@ final class UniqueValueSpammer extends Spammer
 				finally
 				{
 					getProcessed().incrementAndGet();
-				}
-				
-				try
-				{
-					boolean submitted = false;
-					for (Context context : contexts)
-					{
-						final ShardGroupID contextShardGroupID = ShardMapper.toShardGroup(context.getNode().getIdentity(), numShardGroups);
-						if (atomShardGroups.contains(contextShardGroupID))
-						{
-							submit(context, atomBuilder.get());
-							submitted = true;
-							break;
-						}
-					}
-
-					if (submitted == false)
-					{
-						for (ShardGroupID shardGroupID : atomShardGroups)
-						{
-							final Context submissionContext = contexts.get(ThreadLocalRandom.current().nextInt(contexts.size()));
-							final SubmitAtomsMessage submitAtomsMessage = new SubmitAtomsMessage(atomBuilder.get());
-							final StandardConnectionFilter submissionConnectionFilter = StandardConnectionFilter.build(submissionContext).setStates(ConnectionState.CONNECTED).setShardGroupID(shardGroupID).setSynced(true).setStale(false);
-							final List<AbstractConnection> connections = submissionContext.getNetwork().get(submissionConnectionFilter);
-							if (connections.isEmpty() == false)
-							{
-								submissionContext.getNetwork().getMessaging().send(submitAtomsMessage, connections.getFirst());
-								break;
-							}
-						}
-					}
-				}
-				catch (Throwable t)
-				{
-					spammerLog.error(t);
 				}
 
 				if (getProcessed().get() == nextBurstInterval)
