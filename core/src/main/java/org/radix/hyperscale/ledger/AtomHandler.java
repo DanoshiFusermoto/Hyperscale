@@ -407,7 +407,7 @@ public class AtomHandler implements Service, LedgerInterface
 
 					pendingAtom.setAtom(atom);
 				
-					if (atom.getHash().leadingZeroBits() < Constants.MIN_PRIMITIVE_POW_DIFFICULTY && atom.hasAuthority(Universe.getDefault().getCreator()) == false)
+					if (atom.getHash().leadingZeroBits() < Constants.MIN_PRIMITIVE_POW_DIFFICULTY && atom.hasAuthority(Universe.get().getCreator()) == false)
 						throw new ValidationException("Atom POW of "+atom.getHash().leadingZeroBits()+" does not meet leading bits requirement of "+Constants.MIN_PRIMITIVE_POW_DIFFICULTY);
 					
 					if (atom.verify() == false)
@@ -998,7 +998,7 @@ public class AtomHandler implements Service, LedgerInterface
 				substateCommit = this.context.getLedger().getLedgerStore().search(StateAddress.from(Atom.class, atom));
 				if (substateCommit != null)
 				{
-					if (Universe.getDefault().getGenesis().getHash().equals(substateCommit.getSubstate().get(NativeField.BLOCK)))
+					if (Universe.get().getGenesis().getHash().equals(substateCommit.getSubstate().get(NativeField.BLOCK)))
 						throw new IllegalStateException("Called AtomHandler::get with genesis atom hash "+atom);
 
 					if (substateCommit.getSubstate().get(NativeField.CERTIFICATE) != null)
@@ -1080,7 +1080,7 @@ public class AtomHandler implements Service, LedgerInterface
 			final SubstateCommit substateCommit = this.context.getLedger().getLedgerStore().search(StateAddress.from(Atom.class, atom));
 			if (substateCommit != null)
 			{
-				if (Universe.getDefault().getGenesis().getHash().equals(substateCommit.getSubstate().get(NativeField.BLOCK)))
+				if (Universe.get().getGenesis().getHash().equals(substateCommit.getSubstate().get(NativeField.BLOCK)))
 					throw new IllegalStateException("Called AtomHandler::get with genesis atom hash "+atom);
 
 				if (substateCommit.getSubstate().get(NativeField.CERTIFICATE) != null || substateCommit.getSubstate().get(NativeField.TIMEOUT) != null)

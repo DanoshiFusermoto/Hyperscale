@@ -44,7 +44,7 @@ final class UniqueValueSpammer extends Spammer
 			long burstStartNano = System.nanoTime();
 			long lastProgressReport = System.currentTimeMillis();
 			final long waitIntervalNano = TimeUnit.SECONDS.toNanos(1) / getRate();
-			final int numShardGroups = Universe.getDefault().shardGroupCount();
+			final int numShardGroups = Universe.get().shardGroupCount();
 			final String atomContext = Atom.class.getAnnotation(StateContext.class).value();
 			final String uniqueValueComponentContext = UniqueValueComponent.class.getAnnotation(StateContext.class).value();
 			

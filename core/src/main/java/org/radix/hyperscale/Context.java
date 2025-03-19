@@ -93,7 +93,7 @@ public final class Context implements Service
 				// TODO make this more intelligent with options
 				if (count > 1)
 				{
-					int nodesPerShardGroup = Math.max(1, count / Universe.getDefault().shardGroupCount());
+					int nodesPerShardGroup = Math.max(1, count / Universe.get().shardGroupCount());
 					ShardGroupID shardGroupID = ShardGroupID.from(cc / nodesPerShardGroup);
 					
 					try
@@ -105,15 +105,15 @@ public final class Context implements Service
 						else
 							BLSKey = BLSKeyPair.fromFile(keyFile, false);
 						
-						if (BLSKey == null || (BLSKey != null && ShardMapper.toShardGroup(BLSKey.getIdentity(), Universe.getDefault().shardGroupCount()).equals(shardGroupID) == false))
+						if (BLSKey == null || (BLSKey != null && ShardMapper.toShardGroup(BLSKey.getIdentity(), Universe.get().shardGroupCount()).equals(shardGroupID) == false))
 						{
-							if (BLSKey == null || Universe.getDefault().getValidators().stream().anyMatch(bp -> bp.equals(BLSKey.getIdentity())) == false)
+							if (BLSKey == null || Universe.get().getValidators().stream().anyMatch(bp -> bp.equals(BLSKey.getIdentity())) == false)
 							{
 								BLSKeyPair validatorKey;
 								do
 								{
 									validatorKey = new BLSKeyPair();
-									if (shardGroupID.equals(ShardMapper.toShardGroup(validatorKey.getIdentity(), Universe.getDefault().shardGroupCount())) == false)
+									if (shardGroupID.equals(ShardMapper.toShardGroup(validatorKey.getIdentity(), Universe.get().shardGroupCount())) == false)
 										validatorKey = null;
 								}
 								while(validatorKey == null);
@@ -168,8 +168,8 @@ public final class Context implements Service
 				throw new IllegalStateException("Context "+name.toLowerCase()+" already created");
 			
 			Configuration contextConfig = new Configuration(Objects.requireNonNull(configuration));
-			contextConfig.set("network.port", configuration.get("network.port", Universe.getDefault().getPort())+incrementer.get());
-			contextConfig.set("network.udp", configuration.get("network.udp", Universe.getDefault().getPort())+incrementer.get());
+			contextConfig.set("network.port", configuration.get("network.port", Universe.get().getPort())+incrementer.get());
+			contextConfig.set("network.udp", configuration.get("network.udp", Universe.get().getPort())+incrementer.get());
 			contextConfig.set("websocket.port", configuration.get("websocket.port", WebSocketImpl.DEFAULT_PORT)+incrementer.get());
 			contextConfig.set("ledger.synced.always", Boolean.getBoolean("singleton"));
 			

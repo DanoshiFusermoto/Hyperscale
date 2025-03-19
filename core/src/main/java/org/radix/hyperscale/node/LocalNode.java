@@ -15,8 +15,6 @@ import org.radix.hyperscale.crypto.CryptoException;
 import org.radix.hyperscale.crypto.bls12381.BLSKeyPair;
 import org.radix.hyperscale.crypto.bls12381.BLSSignature;
 import org.radix.hyperscale.crypto.ed25519.EDKeyPair;
-import org.radix.hyperscale.crypto.ed25519.EDPublicKey;
-import org.radix.hyperscale.crypto.ed25519.EDSignature;
 import org.radix.hyperscale.ledger.BlockHeader;
 import org.radix.hyperscale.serialization.Polymorphic;
 import org.radix.hyperscale.serialization.SerializerId2;
@@ -38,11 +36,11 @@ public final class LocalNode extends Node implements Polymorphic
 		    	services.add(Services.GATEWAY);
 			
 			return new LocalNode(BLSKey,
-								 configuration.get("network.port", Universe.getDefault().getPort()), 
+								 configuration.get("network.port", Universe.get().getPort()), 
 								 configuration.get("api.port", WebService.DEFAULT_PORT),
 								 configuration.get("websocket.port", WebSocketImpl.DEFAULT_PORT),
 								 services,
-								 Universe.getDefault().getGenesis().getHeader(), 
+								 Universe.get().getGenesis().getHeader(), 
 								 Agent.AGENT, Agent.AGENT_VERSION, Agent.PROTOCOL_VERSION);
 		}
 		catch (IOException ex)

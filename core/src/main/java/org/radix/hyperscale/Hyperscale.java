@@ -148,7 +148,7 @@ public class Hyperscale
 			System.setProperty("debug", Boolean.toString(Configuration.getDefault().getCommandLine("debug", false)));
 			
 			// Universe //
-			Universe.createAsDefault(Bytes.fromBase64String(Configuration.getDefault().get("universe")));
+			Universe.create(Bytes.fromBase64String(Configuration.getDefault().get("universe")));
 
 			// Time //
 			Constructor<?> timeConstructor = Class.forName(Configuration.getDefault().get("time.provider", "org.radix.hyperscale.time.WallClockTime")).getConstructor(Configuration.class);
@@ -170,7 +170,7 @@ public class Hyperscale
 				final Hash godixKeyValidationHash = Hash.random();
 				final EDSignature godixKeyValidationSignature = godixKeyPair.getPrivateKey().sign(godixKeyValidationHash);
 				godixKeyValidationSignature.reset();
-				if (Universe.getDefault().getCreator().<EDPublicKey>getKey().verify(godixKeyValidationHash, godixKeyValidationSignature) == false)
+				if (Universe.get().getCreator().<EDPublicKey>getKey().verify(godixKeyValidationHash, godixKeyValidationSignature) == false)
 				{
 					System.out.println("Unable to start with Godix functions verification of universe.key against Universe definition failed!");
 					System.exit(911);
@@ -307,7 +307,7 @@ public class Hyperscale
 				{
 					try
 					{
-						if (killMessage.verify(Universe.getDefault().getCreator().getKey()) == false)
+						if (killMessage.verify(Universe.get().getCreator().getKey()) == false)
 						{
 							log.error(context.getName()+": "+killMessage.getClass().getAnnotation(SerializerId2.class)+" has invalid signature from " + connection);
 							return;
@@ -319,7 +319,7 @@ public class Hyperscale
 							if (relayConnection.equals(connection))
 								continue;
 							
-							if (killMessage.includeBoostraps() == false && Universe.getDefault().getValidators().contains(context.getNode().getIdentity()))
+							if (killMessage.includeBoostraps() == false && Universe.get().getValidators().contains(context.getNode().getIdentity()))
 								continue;
 						
 							try

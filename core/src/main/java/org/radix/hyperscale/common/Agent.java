@@ -36,7 +36,7 @@ public final class Agent
 
 		if (uri.getPort() == -1)
 		{
-			host += ":"+Universe.getDefault().getPort();
+			host += ":"+Universe.get().getPort();
 			uri = URI.create(host);
 		}
 

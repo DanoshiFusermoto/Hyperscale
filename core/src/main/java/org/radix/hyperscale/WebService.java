@@ -261,7 +261,7 @@ public class WebService implements Service
 			
 			try
 			{
-				responseJSON.put("universe", Serialization.getInstance().toJsonObject(Universe.getDefault(), Output.ALL));
+				responseJSON.put("universe", Serialization.getInstance().toJsonObject(Universe.get(), Output.ALL));
 				status(responseJSON, 200);
 			}
 			catch(Throwable t)

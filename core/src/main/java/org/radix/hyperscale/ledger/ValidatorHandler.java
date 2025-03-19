@@ -147,23 +147,23 @@ public final class ValidatorHandler implements Service
 			final Hash headHash = this.context.getLedger().getLedgerStore().head();
 			
 			// Setup Genesis
-			if (headHash.equals(Universe.getDefault().getGenesis().getHash()))
+			if (headHash.equals(Universe.get().getGenesis().getHash()))
 			{
 				final Map<Identity, Long> genesisPowers = new HashMap<>();
-				for (Identity validator : Universe.getDefault().getValidators())
+				for (final Identity validator : Universe.get().getValidators())
 				{
-					powerLog.info(this.context.getName()+": Setting vote power for genesis validator "+validator.toString(Constants.TRUNCATED_IDENTITY_LENGTH)+":"+ShardMapper.toShardGroup(validator, Universe.getDefault().shardGroupCount())+" to "+Constants.VOTE_POWER_BOOTSTRAP);
+					powerLog.info(this.context.getName()+": Setting vote power for genesis validator "+validator.toString(Constants.TRUNCATED_IDENTITY_LENGTH)+":"+ShardMapper.toShardGroup(validator, Universe.get().shardGroupCount())+" to "+Constants.VOTE_POWER_BOOTSTRAP);
 					genesisPowers.put(validator, Constants.VOTE_POWER_BOOTSTRAP);
 				}
 				
 				for (long e = 0 ; e < Constants.VOTE_POWER_MATURITY_EPOCHS ; e++)
 					this.validatorStore.store(new VotePowers(e, genesisPowers));
 				
-				final ShardGroupID localShardGroup = ShardMapper.toShardGroup(this.context.getNode().getIdentity(), Universe.getDefault().shardGroupCount());
+				final ShardGroupID localShardGroup = ShardMapper.toShardGroup(this.context.getNode().getIdentity(), Universe.get().shardGroupCount());
 				final VotePowers genesisVotePowers = this.validatorStore.get(Epoch.from(Constants.VOTE_POWER_MATURITY_EPOCHS-1));
-				for (Entry<Identity, Long> validator : genesisVotePowers.getAll().entrySet())
+				for (final Entry<Identity, Long> validator : genesisVotePowers.getAll().entrySet())
 				{
-					if (ShardMapper.toShardGroup(validator.getKey(), Universe.getDefault().shardGroupCount()).equals(localShardGroup))
+					if (ShardMapper.toShardGroup(validator.getKey(), Universe.get().shardGroupCount()).equals(localShardGroup))
 						this.accumulatorLocalEpochPowers.put(validator.getKey(), validator.getValue());
 					
 					this.withVotePower.add(validator.getKey());

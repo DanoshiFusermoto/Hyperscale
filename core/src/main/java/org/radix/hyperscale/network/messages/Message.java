@@ -99,7 +99,7 @@ public abstract class Message extends Serializable implements Hashable
 
 		// Deserialize message
 		final Message message = Serialization.getInstance().fromDson(payloadBuffer.array(), 0, payloadBuffer.position(), Message.class);
-		if (message.getMagic() != Universe.getDefault().getMagic())
+		if (message.getMagic() != Universe.get().getMagic())
 			throw new BanException("Wrong magic for this deployment");
 
 		message.setDirection(Direction.INBOUND);
@@ -228,7 +228,7 @@ public abstract class Message extends Serializable implements Hashable
 
 	@JsonProperty("magic")
 	@DsonOutput(value = Output.HASH, include = false)
-	private int magic = Universe.getDefault().getMagic();
+	private int magic = Universe.get().getMagic();
 
 	@JsonProperty("seq")
 	@DsonOutput(value = Output.HASH, include = false)

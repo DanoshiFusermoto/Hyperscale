@@ -148,7 +148,7 @@ public abstract class Spammer extends Executable
 	
 	int getPOWDifficulty()
 	{
-		if (this.signers.containsKey(Universe.getDefault().getCreator().getIdentity()))
+		if (this.signers.containsKey(Universe.get().getCreator().getIdentity()))
 			return 0;
 		
 		return Constants.MIN_PRIMITIVE_POW_DIFFICULTY;
