@@ -228,7 +228,7 @@ public abstract class Message extends Serializable implements Hashable
 
 	@JsonProperty("magic")
 	@DsonOutput(value = Output.HASH, include = false)
-	private int magic = Universe.get().getMagic();
+	private long magic = Universe.get().getMagic();
 
 	@JsonProperty("seq")
 	@DsonOutput(value = Output.HASH, include = false)
