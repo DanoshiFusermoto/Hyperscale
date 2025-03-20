@@ -14,6 +14,7 @@ import org.json.JSONObject;
 import org.radix.hyperscale.common.BasicObject;
 import org.radix.hyperscale.crypto.CryptoException;
 import org.radix.hyperscale.crypto.Identity;
+import org.radix.hyperscale.crypto.Signature;
 import org.radix.hyperscale.crypto.ed25519.EDKeyPair;
 import org.radix.hyperscale.crypto.ed25519.EDPublicKey;
 import org.radix.hyperscale.crypto.ed25519.EDSignature;
@@ -34,6 +35,22 @@ public class Universe extends BasicObject
 	private static final int DESCRIPTION_MAX_LENGTH = 256;
 	private static final long EPOCH_MIN_DURATION = 60;
 	private static final long EPOCH_MAX_DURATION = TimeUnit.DAYS.toSeconds(7);
+	private static final long ROUND_INTERVAL_MIN_DURATION = 50;
+	private static final long ROUND_INTERVAL_MAX_DURATION = 5000;
+	
+	public static enum Type
+	{
+		PRODUCTION,
+		TEST,
+		DEVELOPMENT;
+		
+		@JsonValue
+		@Override
+		public String toString() 
+		{
+			return this.name();
+		}
+	}
 	
 	public static Universe get()
 	{
@@ -78,11 +95,14 @@ public class Universe extends BasicObject
 		private String description;
 		private Type type;
 		private Long createdAt;
-		private Integer epochDuration;
-		private Integer shardGroups;
 		private Identity creator;
 		private Block genesis;
 		private LinkedHashSet<Identity> validators;
+		
+		private Long epochDuration;
+		private Long roundInterval;
+		private Integer shardGroups;
+		private Integer primitivePOW;
 
 		private Builder() 
 		{
@@ -163,13 +183,39 @@ public class Universe extends BasicObject
 		/**
 		 * Sets the epoch duration in seconds of the universe.
 		 *
-		 * @param epoch The duration for an epoch in seconds of the universe.
+		 * @param epoch The duration for an epoch in seconds.
 		 * @return A reference to {@code this} to allow method chaining.
 		 */
-		public Builder epochDuration(final int epochDuration) 
+		public Builder epochDuration(final long epochDuration) 
 		{
 			Numbers.inRange(epochDuration, EPOCH_MIN_DURATION, EPOCH_MAX_DURATION, "Invalid epoch duration: "+epochDuration);
 			this.epochDuration = epochDuration;
+			return this;
+		}
+
+		/**
+		 * Sets the millisecond round interval target for consensus of the universe.
+		 *
+		 * @param interval The interval target rounds of consensus.
+		 * @return A reference to {@code this} to allow method chaining.
+		 */
+		public Builder roundInterval(final long interval) 
+		{
+			Numbers.inRange(interval, ROUND_INTERVAL_MIN_DURATION, ROUND_INTERVAL_MAX_DURATION, "Invalid round interval target duration: "+interval);
+			this.roundInterval = interval;
+			return this;
+		}
+
+		/**
+		 * Sets the minimum leading bits of POW required for primitives which are POW "protected".
+		 *
+		 * @param interval The interval target rounds of consensus.
+		 * @return A reference to {@code this} to allow method chaining.
+		 */
+		public Builder primitivePOW(final int leadingBits) 
+		{
+			Numbers.isNegative(leadingBits, "Primitive POW leading bits is negative");
+			this.primitivePOW = leadingBits;
 			return this;
 		}
 
@@ -234,7 +280,6 @@ public class Universe extends BasicObject
 		{
 			require(this.port, "Port number");
 			require(this.name, "Name");
-			require(this.description, "Description");
 			require(this.type, "Type");
 			require(this.createdAt, "Created timestamp");
 			require(this.creator, "Creator");
@@ -242,6 +287,8 @@ public class Universe extends BasicObject
 			require(this.validators, "Genesis validators");
 			require(this.shardGroups, "Initial shard groups");
 			require(this.epochDuration, "Epoch duration");
+			require(this.roundInterval, "Round interval");
+			require(this.primitivePOW, "Primitive POW");
 			return new Universe(this);
 		}
 
@@ -262,34 +309,6 @@ public class Universe extends BasicObject
 		return new Builder();
 	}
 
-	/**
-	 * Computes universe magic number from specified parameters.
-	 *
-	 * @param creator {@link ECPublicKey} of universe creator to use when calculating universe magic
-	 * @param createdAt universe timestamp to use when calculating universe magic
-	 * @param port universe port to use when calculating universe magic
-	 * @param type universe type to use when calculating universe magic
-	 * @return The universe magic
-	 */
-	public static int computeMagic(Identity creator, long createdAt, int shardGroups, int epochDuration, int port, Type type) 
-	{
-		return (int) (31l * creator.getHash().asLong() * 19l * createdAt * 13l * epochDuration * 7l * port * 5l * shardGroups + type.ordinal());
-	}
-
-	public enum Type
-	{
-		PRODUCTION,
-		TEST,
-		DEVELOPMENT;
-		
-		@JsonValue
-		@Override
-		public String toString() 
-		{
-			return this.name();
-		}
-	}
-
 	@JsonProperty("name")
 	@DsonOutput(Output.ALL)
 	private String name;
@@ -308,11 +327,19 @@ public class Universe extends BasicObject
 
 	@JsonProperty("epoch_duration")
 	@DsonOutput(Output.ALL)
-	private int	epochDuration;
+	private long epochDuration;
+
+	@JsonProperty("round_interval")
+	@DsonOutput(Output.ALL)
+	private long roundInterval;
 
 	@JsonProperty("shard_groups")
 	@DsonOutput(Output.ALL)
 	private int	shardGroups;
+
+	@JsonProperty("primitive_POW")
+	@DsonOutput(Output.ALL)
+	private int	primitivePOW;
 
 	@JsonProperty("type")
 	@DsonOutput(Output.ALL)
@@ -335,7 +362,8 @@ public class Universe extends BasicObject
 	@DsonOutput(Output.ALL)
 	private EDSignature signature;
 
-	Universe() {
+	Universe() 
+	{
 		// No-arg constructor for serializer
 	}
 
@@ -353,6 +381,8 @@ public class Universe extends BasicObject
 		this.genesis = builder.genesis;
 		this.validators = builder.validators;
 		this.shardGroups = builder.shardGroups;
+		this.primitivePOW = builder.primitivePOW;
+		this.roundInterval = builder.roundInterval;
 	}
 
 	/**
@@ -362,9 +392,9 @@ public class Universe extends BasicObject
 	 */
 	@JsonProperty("magic")
 	@DsonOutput(value = Output.HASH, include = false)
-	public int getMagic() 
+	public long getMagic() 
 	{
-		return computeMagic(this.creator, this.createdAt, this.shardGroups, this.epochDuration, this.port, this.type);
+		return getHash().asLong();
 	}
 
 	/**
@@ -372,7 +402,7 @@ public class Universe extends BasicObject
 	 *
 	 * @return
 	 */
-	public int getEpochDuration()
+	public long getEpochDuration()
 	{
 		return this.epochDuration;
 	}
@@ -385,6 +415,26 @@ public class Universe extends BasicObject
 	public int shardGroupCount()
 	{
 		return this.shardGroups;
+	}
+
+	/**
+	 * The number of leading bits required for a primitive POW.
+	 *
+	 * @return
+	 */
+	public int getPrimitivePOW()
+	{
+		return this.primitivePOW;
+	}
+
+	/**
+	 * The round interval target in milliseconds.
+	 *
+	 * @return
+	 */
+	public long getRoundInterval()
+	{
+		return this.roundInterval;
 	}
 
 	/**
@@ -497,9 +547,10 @@ public class Universe extends BasicObject
 		this.signature = signature;
 	}
 
-	public void sign(final EDKeyPair key) throws CryptoException
+	public Signature sign(final EDKeyPair key) throws CryptoException
 	{
 		this.signature = key.getPrivateKey().sign(getHash());
+		return this.signature;
 	}
 
 	public boolean verify(final EDPublicKey key) throws CryptoException
