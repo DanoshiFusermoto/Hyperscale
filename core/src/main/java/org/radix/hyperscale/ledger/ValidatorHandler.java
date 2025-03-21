@@ -530,7 +530,7 @@ public final class ValidatorHandler implements Service
 						epochAtomBuilder.push(votePowersBlob.asDataURL());
 						epochAtomBuilder.push("ledger::epoch("+this.pendingEpoch.getClock()+", "+shardGroupID+", hash('"+votePowersBlob.getHash()+"'))");
 						epochAtomBuilder.signer(this.context.getNode().getKeyPair());
-						this.context.getLedger().submit(epochAtomBuilder.build());
+						this.context.getLedger().submit(epochAtomBuilder.build(Universe.get().getPrimitivePOW()));
 							
 						if (powerLog.hasLevel(Logging.DEBUG))
 							powerLog.debug(ValidatorHandler.this.context.getName()+": Submitted local vote powers for epoch "+ValidatorHandler.this.pendingEpoch.getClock());

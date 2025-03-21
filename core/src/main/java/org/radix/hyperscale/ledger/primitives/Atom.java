@@ -156,12 +156,6 @@ public final class Atom extends ExtendedObject implements Primitive
 			this.signers.putIfAbsent(signer.getIdentity(), signer);
 			return this;
 		}
-
-		
-		public Atom build() throws CryptoException
-		{
-			return build(Constants.MIN_PRIMITIVE_POW_DIFFICULTY);
-		}
 		
 		public Atom build(final int difficulty) throws CryptoException
 		{

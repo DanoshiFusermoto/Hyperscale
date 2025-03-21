@@ -407,8 +407,8 @@ public class AtomHandler implements Service, LedgerInterface
 
 					pendingAtom.setAtom(atom);
 				
-					if (atom.getHash().leadingZeroBits() < Constants.MIN_PRIMITIVE_POW_DIFFICULTY && atom.hasAuthority(Universe.get().getCreator()) == false)
-						throw new ValidationException("Atom POW of "+atom.getHash().leadingZeroBits()+" does not meet leading bits requirement of "+Constants.MIN_PRIMITIVE_POW_DIFFICULTY);
+					if (atom.getHash().leadingZeroBits() < Universe.get().getPrimitivePOW() && atom.hasAuthority(Universe.get().getCreator()) == false)
+						throw new ValidationException("Atom POW of "+atom.getHash().leadingZeroBits()+" does not meet leading bits requirement of "+Universe.get().getPrimitivePOW());
 					
 					if (atom.verify() == false)
 						throw new ValidationException("Atom failed signature verification");

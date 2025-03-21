@@ -14,6 +14,7 @@ import org.apache.commons.cli.Options;
 import org.apache.commons.io.FileUtils;
 import org.json.JSONObject;
 import org.radix.hyperscale.Context;
+import org.radix.hyperscale.Universe;
 import org.radix.hyperscale.apps.SimpleWallet;
 import org.radix.hyperscale.crypto.Hash;
 import org.radix.hyperscale.crypto.Identity;
@@ -103,7 +104,7 @@ public class StateMachine extends Function
 				// Check manifest syntax
 				ManifestParser.parse(this.atomBuilder.getManifest());
 				
-				final Atom atom = this.atomBuilder.build();
+				final Atom atom = this.atomBuilder.build(Universe.get().getPrimitivePOW());
 				printStream.println("Submitting atom "+atom.getHash()+" -> "+Serialization.getInstance().toJsonObject(atom, Output.API).toString(4));
 
 				if (context.getLedger().submit(atom) == false)
@@ -181,7 +182,7 @@ public class StateMachine extends Function
 			if (this.atomBuilder == null)
 			{
 				ManifestParser.parse(atomBuilder.getManifest());
-				wallet.submit(atomBuilder.build());
+				wallet.submit(atomBuilder.build(Universe.get().getPrimitivePOW()));
 			}
 		}
 		else if (commandLine.hasOption("instantiate"))
@@ -223,7 +224,7 @@ public class StateMachine extends Function
 			if (this.atomBuilder == null)
 			{
 				ManifestParser.parse(atomBuilder.getManifest());
-				wallet.submit(atomBuilder.build());
+				wallet.submit(atomBuilder.build(Universe.get().getPrimitivePOW()));
 			}
 		}
 		else if (commandLine.hasOption("constructor"))
@@ -242,7 +243,7 @@ public class StateMachine extends Function
 			if (this.atomBuilder == null)
 			{
 				ManifestParser.parse(atomBuilder.getManifest());
-				wallet.submit(atomBuilder.build());
+				wallet.submit(atomBuilder.build(Universe.get().getPrimitivePOW()));
 			}
 		}
 		else if (commandLine.hasOption("method"))
@@ -261,7 +262,7 @@ public class StateMachine extends Function
 			if (this.atomBuilder == null)
 			{
 				ManifestParser.parse(atomBuilder.getManifest());
-				wallet.submit(atomBuilder.build());
+				wallet.submit(atomBuilder.build(Universe.get().getPrimitivePOW()));
 			}
 		}
 		else if (commandLine.hasOption("substate"))

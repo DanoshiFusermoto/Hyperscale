@@ -151,7 +151,7 @@ public abstract class Spammer extends Executable
 		if (this.signers.containsKey(Universe.get().getCreator().getIdentity()))
 			return 0;
 		
-		return Constants.MIN_PRIMITIVE_POW_DIFFICULTY;
+		return Universe.get().getPrimitivePOW();
 	}
 
 	boolean nextIsIsolatedShard()
