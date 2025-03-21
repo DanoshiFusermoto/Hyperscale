@@ -1,6 +1,5 @@
 package org.radix.hyperscale;
 
-import java.math.BigInteger;
 import java.util.concurrent.TimeUnit;
 
 public final class Constants 
@@ -12,12 +11,6 @@ public final class Constants
 	// RUNTIME //
 	public static final int 	JAVA_VERSION_MIN = 17;
 	public static final int 	JAVA_VERSION_MAX = 21;
-	
-	// TODO put these in universe config
-	public static final double 	BASELINE_DISTANCE_FACTOR = 2.5;
-	public static final long 	BASELINE_DISTANCE_TARGET = BigInteger.valueOf(Long.MIN_VALUE).abs().subtract(BigInteger.valueOf((long) (Long.MIN_VALUE / (BASELINE_DISTANCE_FACTOR * Math.log(BASELINE_DISTANCE_FACTOR)))).abs()).longValue(); // TODO rubbish, but produces close enough needed output
-	public static final long 	BLOCK_DISTANCE_FACTOR = 64;
-	public static final long 	BLOCK_DISTANCE_TARGET = BigInteger.valueOf(Long.MIN_VALUE).abs().subtract(BigInteger.valueOf((long) (Long.MIN_VALUE / (BLOCK_DISTANCE_FACTOR * Math.log(BLOCK_DISTANCE_FACTOR)))).abs()).longValue(); // TODO rubbish, but produces close enough needed output
 	
 	// NETWORK
 	public static final int 	DEFAULT_TCP_CONNECTIONS_OUT_SYNC = 3; 
