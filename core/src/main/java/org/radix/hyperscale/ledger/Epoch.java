@@ -1,6 +1,5 @@
 package org.radix.hyperscale.ledger;
 
-import org.radix.hyperscale.Constants;
 import org.radix.hyperscale.crypto.Hash;
 import org.radix.hyperscale.utils.Numbers;
 
@@ -49,12 +48,12 @@ public final class Epoch
 			throw new IllegalArgumentException("Proposal has is invalid");
 		
 		final long height = Longs.fromByteArray(proposal.toByteArray());
-		return from(height / Constants.BLOCKS_PER_EPOCH);
+		return from(height / Ledger.definitions().proposalsPerEpoch());
 	}
 
 	public static final Epoch from(final BlockHeader header)
 	{
-		return from(header.getHeight() / Constants.BLOCKS_PER_EPOCH);
+		return from(header.getHeight() / Ledger.definitions().proposalsPerEpoch());
 	}
 
 	public static final Epoch from(final long clock)

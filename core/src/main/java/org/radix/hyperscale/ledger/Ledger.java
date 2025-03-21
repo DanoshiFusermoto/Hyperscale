@@ -71,7 +71,75 @@ public final class Ledger implements Service, LedgerInterface
 	static 
 	{
 		ledgerLog.setLevel(Logging.INFO);
+		
+		final Universe universe = Universe.get();
+		if (universe == null)
+			throw new IllegalStateException("Universe is not yet initialized!");
+		
+		definitions = new Definitions();
 	}
+	
+	/**
+	 * Helper to provide common definitions and parameters derived from the Universe
+	 */
+	public static class Definitions
+	{
+		// BLOCK PERIODS AND INTERVALS
+		public static final int 	EPOCH_PERIOD_DURATION_MILLISECONDS = 60000;
+		public static final int 	EPOCH_DURATION_MILLISECONDS = (int) TimeUnit.DAYS.toMillis(1);
+		public static final int		BLOCK_INTERVAL_TARGET_MILLISECONDS = 500;
+		public static final int 	BLOCKS_PER_PERIOD = EPOCH_PERIOD_DURATION_MILLISECONDS / BLOCK_INTERVAL_TARGET_MILLISECONDS;
+		public static final int 	BLOCKS_PER_EPOCH = EPOCH_DURATION_MILLISECONDS / BLOCK_INTERVAL_TARGET_MILLISECONDS;
+		public static final long 	getDurationToBlockCount(long duration, TimeUnit unit)
+		{
+			long milliseconds = unit.toMillis(duration);
+			return milliseconds / BLOCK_INTERVAL_TARGET_MILLISECONDS;
+		}
+		
+		public static final int 	PROPOSAL_PHASE_TIMEOUT_MS = BLOCK_INTERVAL_TARGET_MILLISECONDS*6;
+		public static final int 	VOTE_PHASE_TIMEOUT_MS = BLOCK_INTERVAL_TARGET_MILLISECONDS*6;
+		public static final int 	TRANSITION_PHASE_TIMEOUT_MS = BLOCK_INTERVAL_TARGET_MILLISECONDS*2;
+
+
+		public long roundInterval()
+		{
+			return Universe.get().getRoundInterval();
+		}
+		
+		public long epochDuration(final TimeUnit unit)
+		{
+			return unit.convert(Universe.get().getEpochDuration(), TimeUnit.SECONDS);
+		}
+
+		public long proposalsPerEpoch()
+		{
+			return epochDuration(TimeUnit.MILLISECONDS) / roundInterval();
+		}
+		
+		public long proposalPhaseTimeout(final TimeUnit unit)
+		{
+			return unit.convert(Constants.PROPOSAL_PHASE_TIMEOUT_ROUNDS * Universe.get().getRoundInterval(), TimeUnit.MILLISECONDS);
+		}
+
+		public long votePhaseTimeout(final TimeUnit unit)
+		{
+			return unit.convert(Constants.VOTE_PHASE_TIMEOUT_ROUNDS * Universe.get().getRoundInterval(), TimeUnit.MILLISECONDS);
+		}
+
+		public long transitionPhaseTimeout(final TimeUnit unit)
+		{
+			return unit.convert(Constants.TRANSITION_PHASE_TIMEOUT_ROUNDS * Universe.get().getRoundInterval(), TimeUnit.MILLISECONDS);
+		}
+	}
+	
+	private static final Definitions definitions;
+	
+	public static final Definitions definitions()
+	{
+		return definitions;
+	}
+	
+	///
 	
 	private final Context 	context;
 	
@@ -259,7 +327,7 @@ public final class Ledger implements Service, LedgerInterface
 				ledgerLog.info(Ledger.this.context.getName()+": Setting ledger epoch as "+this.epoch.get().getClock());
 
 				// Check continuity of sync blocks
-				while(header.getHeight() > Math.max(1, this.head.get().getHeight() - Constants.BLOCKS_PER_EPOCH))
+				while(header.getHeight() > Math.max(1, this.head.get().getHeight() - definitions().proposalsPerEpoch()))
 				{
 					Hash prevHeaderHash = this.ledgerStore.getSyncBlock(header.getHeight()-1);
 					BlockHeader prevHeader = this.ledgerStore.get(header.getPrevious(), BlockHeader.class);

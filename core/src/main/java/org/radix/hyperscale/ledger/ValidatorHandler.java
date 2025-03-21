@@ -314,7 +314,7 @@ public final class ValidatorHandler implements Service
 		this.lock.readLock().lock();
 		try
 		{
-			final Epoch epoch = Epoch.from(height / Constants.BLOCKS_PER_EPOCH);
+			final Epoch epoch = Epoch.from(height / Ledger.definitions().proposalsPerEpoch());
 			final int numShardGroups = this.context.getLedger().numShardGroups(epoch);
 			List<Identity> proposers = new ArrayList<Identity>();
 			for (Identity proposer : this.withVotePower)
@@ -505,7 +505,7 @@ public final class ValidatorHandler implements Service
 		try
 		{
 			// Increment the pending Epoch if the current one has elapsed and flip the vote powers into pending state
-			if (block.getHeader().getHeight() % Constants.BLOCKS_PER_EPOCH == 0)
+			if (block.getHeader().getHeight() % Ledger.definitions().proposalsPerEpoch() == 0)
 			{
 				this.pendingEpoch = currentEpoch.increment(Constants.VOTE_POWER_MATURITY_EPOCHS-1);
 				this.pendingLocalEpochPowers.clear();
@@ -516,7 +516,7 @@ public final class ValidatorHandler implements Service
 			{
 				// Spread the submission of Epoch validator messages over the course of the current Epoch to avoid a load spike
 				if (getVotePower(currentEpoch, this.context.getNode().getIdentity()) > 0 && this.pendingLocalEpochPowers.isEmpty() == false && 
-					block.getHeader().getHeight() % Constants.BLOCKS_PER_EPOCH == Math.abs(this.context.getNode().getIdentity().getHash().asLong() % Constants.BLOCKS_PER_EPOCH))
+					block.getHeader().getHeight() % Ledger.definitions().proposalsPerEpoch() == Math.abs(this.context.getNode().getIdentity().getHash().asLong() % Ledger.definitions().proposalsPerEpoch()))
 				{
 					final int numShardGroups = this.context.getLedger().numShardGroups(currentEpoch);
 					final ShardGroupID shardGroupID = ShardMapper.toShardGroup(this.context.getNode().getIdentity(), numShardGroups);
@@ -706,10 +706,10 @@ public final class ValidatorHandler implements Service
 
 			if (committedSourceEpoch != null)
 			{
-				final long committedFromHeight = Math.max(1, committedSourceEpoch.getClock() * Constants.BLOCKS_PER_EPOCH);			
+				final long committedFromHeight = Math.max(1, committedSourceEpoch.getClock() * Ledger.definitions().proposalsPerEpoch());			
 				if (committedFromHeight >= 0)
 				{
-					final long committedToHeight = (committedSourceEpoch.getClock() + 1) * Constants.BLOCKS_PER_EPOCH;			
+					final long committedToHeight = (committedSourceEpoch.getClock() + 1) * Ledger.definitions().proposalsPerEpoch();			
 					for (long e = committedFromHeight ; e < committedToHeight ; e++)
 					{
 						final BlockHeader header = ValidatorHandler.this.context.getLedger().getBlockHeader(e);
@@ -723,10 +723,10 @@ public final class ValidatorHandler implements Service
 
 			if (pendingSourceEpoch != null)
 			{
-				final long pendingFromHeight = Math.max(1, pendingSourceEpoch.getClock() * Constants.BLOCKS_PER_EPOCH);			
+				final long pendingFromHeight = Math.max(1, pendingSourceEpoch.getClock() * Ledger.definitions().proposalsPerEpoch());			
 				if (pendingFromHeight >= 0)
 				{
-					final long pendingToHeight = (pendingSourceEpoch.getClock() + 1) * Constants.BLOCKS_PER_EPOCH;			
+					final long pendingToHeight = (pendingSourceEpoch.getClock() + 1) * Ledger.definitions().proposalsPerEpoch();			
 					for (long e = pendingFromHeight ; e < pendingToHeight ; e++)
 					{
 						final BlockHeader header = ValidatorHandler.this.context.getLedger().getBlockHeader(e);
@@ -740,7 +740,7 @@ public final class ValidatorHandler implements Service
 				ValidatorHandler.this.pendingLocalEpochPowers.putAll(accumulatingLocalEpochPowers);
 			}
 
-			final long accumulateFromHeight = Math.max(1, accumulatorSourceEpoch.getClock() * Constants.BLOCKS_PER_EPOCH);
+			final long accumulateFromHeight = Math.max(1, accumulatorSourceEpoch.getClock() * Ledger.definitions().proposalsPerEpoch());
 			for (long e = accumulateFromHeight ; e <= event.getHead().getHeight() ; e++)
 			{
 				final BlockHeader header = ValidatorHandler.this.context.getLedger().getBlockHeader(e);

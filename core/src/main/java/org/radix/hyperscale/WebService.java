@@ -35,6 +35,7 @@ import org.radix.hyperscale.ledger.Block;
 import org.radix.hyperscale.ledger.BlockHeader;
 import org.radix.hyperscale.ledger.Epoch;
 import org.radix.hyperscale.ledger.Isolation;
+import org.radix.hyperscale.ledger.Ledger;
 import org.radix.hyperscale.ledger.PrimitiveSearchQuery;
 import org.radix.hyperscale.ledger.PrimitiveSearchResponse;
 import org.radix.hyperscale.ledger.ShardGroupID;
@@ -361,13 +362,13 @@ public class WebService implements Service
 				final long timestamp = System.currentTimeMillis()-TimeUnit.SECONDS.toMillis(1);
 				final Epoch epoch = context.getLedger().getEpoch();
 				final BlockHeader head = context.getLedger().getHead();
-				final JSONObject 	headJSON = Serialization.getInstance().toJsonObject(head, Output.ALL);
+				final JSONObject  headJSON = Serialization.getInstance().toJsonObject(head, Output.ALL);
 				headJSON.remove("inventory");
 				responseJSON.put("head", headJSON);
 				
 				final JSONObject ageJSON = new JSONObject();
-				ageJSON.put("duration", DurationFormatUtils.formatDuration(head.getHeight() * Constants.BLOCK_INTERVAL_TARGET_MILLISECONDS, "H:mm:ss", true));
-				ageJSON.put("millis", head.getHeight() * Constants.BLOCK_INTERVAL_TARGET_MILLISECONDS);
+				ageJSON.put("duration", DurationFormatUtils.formatDuration(head.getHeight() * Ledger.definitions().roundInterval(), "H:mm:ss", true));
+				ageJSON.put("millis", head.getHeight() * Ledger.definitions().roundInterval());
 				responseJSON.put("age", ageJSON);
 
 				final JSONObject statistics = new JSONObject();
@@ -378,8 +379,8 @@ public class WebService implements Service
 					final JSONObject transactions = new JSONObject();
 					transactions.put("pending", context.getLedger().getAtomHandler().size());
 					transactions.put("failed", context.getMetaData().get("ledger.processed.atoms.timedout.accept", 0l)+
-											context.getMetaData().get("ledger.processed.atoms.timedout.execution", 0l)+
-											context.getMetaData().get("ledger.processed.atoms.timedout.commit", 0l));
+											   context.getMetaData().get("ledger.processed.atoms.timedout.execution", 0l)+
+											   context.getMetaData().get("ledger.processed.atoms.timedout.commit", 0l));
 					transactions.put("local", context.getMetaData().get("ledger.processed.atoms.local", 0l));
 					transactions.put("total", context.getMetaData().get("ledger.processed.atoms.total", 0l));
 					processed.put("transactions", transactions);
