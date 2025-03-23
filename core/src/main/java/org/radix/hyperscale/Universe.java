@@ -8,11 +8,13 @@ import java.io.IOException;
 import java.util.LinkedHashSet;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 import org.json.JSONObject;
 import org.radix.hyperscale.common.BasicObject;
 import org.radix.hyperscale.crypto.CryptoException;
 import org.radix.hyperscale.crypto.Identity;
+import org.radix.hyperscale.crypto.Signature;
 import org.radix.hyperscale.crypto.ed25519.EDKeyPair;
 import org.radix.hyperscale.crypto.ed25519.EDPublicKey;
 import org.radix.hyperscale.crypto.ed25519.EDSignature;
@@ -28,7 +30,29 @@ public class Universe extends BasicObject
 {
 	private static Universe instance = null;
 	
-	public static Universe getDefault()
+	private static final int NAME_MIN_LENGTH = 3;
+	private static final int NAME_MAX_LENGTH = 32;
+	private static final int DESCRIPTION_MAX_LENGTH = 256;
+	private static final long EPOCH_MIN_DURATION = 60;
+	private static final long EPOCH_MAX_DURATION = TimeUnit.DAYS.toSeconds(7);
+	private static final long ROUND_INTERVAL_MIN_DURATION = 50;
+	private static final long ROUND_INTERVAL_MAX_DURATION = 5000;
+	
+	public static enum Type
+	{
+		PRODUCTION,
+		TEST,
+		DEVELOPMENT;
+		
+		@JsonValue
+		@Override
+		public String toString() 
+		{
+			return this.name();
+		}
+	}
+	
+	public static Universe get()
 	{
 		if (instance == null)
 			throw new RuntimeException("Configuration not set");
@@ -36,8 +60,10 @@ public class Universe extends BasicObject
 		return instance;
 	}
 
-	public static Universe createAsDefault(JSONObject universe)
+	public static Universe create(final JSONObject universe)
 	{
+		Objects.requireNonNull(universe, "Universe JSON is null");
+		
 		if (instance != null)
 			throw new RuntimeException("Default configuration already set");
 		
@@ -46,8 +72,11 @@ public class Universe extends BasicObject
 		return instance;
 	}
 
-	public static Universe createAsDefault(byte[] universe) throws IOException
+	public static Universe create(final byte[] universe) throws IOException
 	{
+		Objects.requireNonNull(universe, "Universe bytes is null");
+		Numbers.isZero(universe.length, "Universe bytes is empty");
+
 		if (instance != null)
 			throw new RuntimeException("Default configuration already set");
 		
@@ -56,14 +85,6 @@ public class Universe extends BasicObject
 		return instance;
 	}
 	
-	public static Universe clearDefault()
-	{
-		Universe universe = getDefault();
-		instance = null;
-		return universe;
-	}
-
-
 	/**
 	 * Universe builder.
 	 */
@@ -73,12 +94,15 @@ public class Universe extends BasicObject
 		private String name;
 		private String description;
 		private Type type;
-		private Long timestamp;
-		private Integer epoch;
-		private Integer shardGroups;
+		private Long createdAt;
 		private Identity creator;
 		private Block genesis;
 		private LinkedHashSet<Identity> validators;
+		
+		private Long epochDuration;
+		private Long roundInterval;
+		private Integer shardGroups;
+		private Integer primitivePOW;
 
 		private Builder() 
 		{
@@ -91,7 +115,7 @@ public class Universe extends BasicObject
 		 * @param port The TCP/UDP port for the universe to use, {@code 0 <= port <= 65,535}.
 		 * @return A reference to {@code this} to allow method chaining.
 		 */
-		public Builder port(int port) 
+		public Builder port(final int port) 
 		{
 			Numbers.inRange(port, 1, 65535, "Invalid port number: " + port);
 			this.port = port;
@@ -105,9 +129,12 @@ public class Universe extends BasicObject
 		 * @param name The name of the universe.
 		 * @return A reference to {@code this} to allow method chaining.
 		 */
-		public Builder name(String name) 
+		public Builder name(final String name) 
 		{
-			this.name = Objects.requireNonNull(name);
+			Objects.requireNonNull(name, "Universe name is null");
+			Numbers.inRange(name.length(), NAME_MIN_LENGTH, NAME_MAX_LENGTH, "Universe name has invalid length");
+			
+			this.name = name;
 			return this;
 		}
 
@@ -118,9 +145,12 @@ public class Universe extends BasicObject
 		 * @param description The description of the universe.
 		 * @return A reference to {@code this} to allow method chaining.
 		 */
-		public Builder description(String description) 
+		public Builder description(final String description) 
 		{
-			this.description = Objects.requireNonNull(description);
+			Objects.requireNonNull(description, "Universe description is null");
+			Numbers.inRange(description.length(), 0, DESCRIPTION_MAX_LENGTH, "Universe description has invalid length");
+
+			this.description = description;
 			return this;
 		}
 
@@ -130,9 +160,10 @@ public class Universe extends BasicObject
 		 * @param type The type of the universe.
 		 * @return A reference to {@code this} to allow method chaining.
 		 */
-		public Builder type(Type type) 
+		public Builder type(final Type type) 
 		{
-			this.type = Objects.requireNonNull(type);
+			Objects.requireNonNull(type, "Universe type is null");
+			this.type = type;
 			return this;
 		}
 
@@ -142,23 +173,49 @@ public class Universe extends BasicObject
 		 * @param timestamp The creation timestamp of the universe.
 		 * @return A reference to {@code this} to allow method chaining.
 		 */
-		public Builder timestamp(long timestamp) 
+		public Builder createdAt(final long createdAt) 
 		{
-			Numbers.isNegative(timestamp, "Invalid timestamp: " + timestamp);
-			this.timestamp = timestamp;
+			Numbers.isNegative(createdAt, "Creation timestamp is invalid: " + createdAt);
+			this.createdAt = createdAt;
 			return this;
 		}
 
 		/**
-		 * Sets the epoch duration in events of the universe.
+		 * Sets the epoch duration in seconds of the universe.
 		 *
-		 * @param epoch The event duration for an epoch of the universe.
+		 * @param epoch The duration for an epoch in seconds.
 		 * @return A reference to {@code this} to allow method chaining.
 		 */
-		public Builder epoch(int epoch) 
+		public Builder epochDuration(final long epochDuration) 
 		{
-			Numbers.isNegative(epoch, "Invalid epoch: " + timestamp);
-			this.epoch = epoch;
+			Numbers.inRange(epochDuration, EPOCH_MIN_DURATION, EPOCH_MAX_DURATION, "Invalid epoch duration: "+epochDuration);
+			this.epochDuration = epochDuration;
+			return this;
+		}
+
+		/**
+		 * Sets the millisecond round interval target for consensus of the universe.
+		 *
+		 * @param interval The interval target rounds of consensus.
+		 * @return A reference to {@code this} to allow method chaining.
+		 */
+		public Builder roundInterval(final long interval) 
+		{
+			Numbers.inRange(interval, ROUND_INTERVAL_MIN_DURATION, ROUND_INTERVAL_MAX_DURATION, "Invalid round interval target duration: "+interval);
+			this.roundInterval = interval;
+			return this;
+		}
+
+		/**
+		 * Sets the minimum leading bits of POW required for primitives which are POW "protected".
+		 *
+		 * @param interval The interval target rounds of consensus.
+		 * @return A reference to {@code this} to allow method chaining.
+		 */
+		public Builder primitivePOW(final int leadingBits) 
+		{
+			Numbers.isNegative(leadingBits, "Primitive POW leading bits is negative");
+			this.primitivePOW = leadingBits;
 			return this;
 		}
 
@@ -168,7 +225,7 @@ public class Universe extends BasicObject
 		 * @param shardGroups The quantity of initial shard groups.
 		 * @return A reference to {@code this} to allow method chaining.
 		 */
-		public Builder shardGroups(int shardGroups) 
+		public Builder shardGroups(final int shardGroups) 
 		{
 			Numbers.lessThan(shardGroups, 1, "Invalid shard groups: " + shardGroups);
 			this.shardGroups = shardGroups;
@@ -181,9 +238,9 @@ public class Universe extends BasicObject
 		 * @param creator The universe creators public key.
 		 * @return A reference to {@code this} to allow method chaining.
 		 */
-		public Builder creator(Identity creator) 
+		public Builder creator(final Identity creator) 
 		{
-			this.creator = Objects.requireNonNull(creator);
+			this.creator = Objects.requireNonNull(creator, "Universe creator identity is null");
 			return this;
 		}
 
@@ -193,9 +250,9 @@ public class Universe extends BasicObject
 		 * @param genesis The genesis.
 		 * @return A reference to {@code this} to allow method chaining.
 		 */
-		public Builder setGenesis(Block genesis) 
+		public Builder setGenesis(final Block genesis) 
 		{
-			Objects.requireNonNull(genesis);
+			Objects.requireNonNull(genesis, "Universe genesis block is null");
 			this.genesis = genesis;
 			return this;
 		}
@@ -206,9 +263,10 @@ public class Universe extends BasicObject
 		 * @param validators The Genesis validators.
 		 * @return A reference to {@code this} to allow method chaining.
 		 */
-		public Builder setValidators(Set<Identity> validators) 
+		public Builder setValidators(final Set<Identity> validators) 
 		{
-			Objects.requireNonNull(validators);
+			Objects.requireNonNull(validators, "Universe validators is null");
+			Numbers.lessThan(validators.size(), 1, "Universe validators is null");
 			this.validators = new LinkedHashSet<Identity>(validators);
 			return this;
 		}
@@ -222,20 +280,22 @@ public class Universe extends BasicObject
 		{
 			require(this.port, "Port number");
 			require(this.name, "Name");
-			require(this.description, "Description");
-			require(this.type, "universeype");
-			require(this.timestamp, "Timestamp");
+			require(this.type, "Type");
+			require(this.createdAt, "Created timestamp");
 			require(this.creator, "Creator");
 			require(this.genesis , "Genesis block");
 			require(this.validators, "Genesis validators");
 			require(this.shardGroups, "Initial shard groups");
+			require(this.epochDuration, "Epoch duration");
+			require(this.roundInterval, "Round interval");
+			require(this.primitivePOW, "Primitive POW");
 			return new Universe(this);
 		}
 
 		private void require(Object item, String what) 
 		{
 			if (item == null)
-				throw new IllegalStateException(what + " must be specified");
+				throw new IllegalStateException(what+" must be specified");
 		}
 	}
 
@@ -249,34 +309,6 @@ public class Universe extends BasicObject
 		return new Builder();
 	}
 
-	/**
-	 * Computes universe magic number from specified parameters.
-	 *
-	 * @param creator {@link ECPublicKey} of universe creator to use when calculating universe magic
-	 * @param timestamp universe timestamp to use when calculating universe magic
-	 * @param port universe port to use when calculating universe magic
-	 * @param type universe type to use when calculating universe magic
-	 * @return The universe magic
-	 */
-	public static int computeMagic(Identity creator, long timestamp, int shardGroups, int epoch, int port, Type type) 
-	{
-		return (int) (31l * creator.getHash().asLong() * 19l * timestamp * 13l * epoch * 7l * port * 5l * shardGroups + type.ordinal());
-	}
-
-	public enum Type
-	{
-		PRODUCTION,
-		TEST,
-		DEVELOPMENT;
-		
-		@JsonValue
-		@Override
-		public String toString() 
-		{
-			return this.name();
-		}
-	}
-
 	@JsonProperty("name")
 	@DsonOutput(Output.ALL)
 	private String name;
@@ -285,21 +317,29 @@ public class Universe extends BasicObject
 	@DsonOutput(Output.ALL)
 	private String description;
 
-	@JsonProperty("timestamp")
+	@JsonProperty("created_at")
 	@DsonOutput(Output.ALL)
-	private long timestamp;
+	private long createdAt;
 
 	@JsonProperty("port")
 	@DsonOutput(Output.ALL)
 	private int	port;
 
-	@JsonProperty("epoch")
+	@JsonProperty("epoch_duration")
 	@DsonOutput(Output.ALL)
-	private int	epoch;
+	private long epochDuration;
+
+	@JsonProperty("round_interval")
+	@DsonOutput(Output.ALL)
+	private long roundInterval;
 
 	@JsonProperty("shard_groups")
 	@DsonOutput(Output.ALL)
 	private int	shardGroups;
+
+	@JsonProperty("primitive_POW")
+	@DsonOutput(Output.ALL)
+	private int	primitivePOW;
 
 	@JsonProperty("type")
 	@DsonOutput(Output.ALL)
@@ -322,24 +362,27 @@ public class Universe extends BasicObject
 	@DsonOutput(Output.ALL)
 	private EDSignature signature;
 
-	Universe() {
+	Universe() 
+	{
 		// No-arg constructor for serializer
 	}
 
-	private Universe(Builder builder) 
+	private Universe(final Builder builder) 
 	{
 		super();
 
-		this.port = builder.port.intValue();
+		this.port = builder.port;
 		this.name = builder.name;
 		this.description = builder.description;
 		this.type = builder.type;
-		this.epoch = builder.epoch;
-		this.timestamp = builder.timestamp.longValue();
+		this.epochDuration = builder.epochDuration;
+		this.createdAt = builder.createdAt;
 		this.creator = builder.creator;
 		this.genesis = builder.genesis;
 		this.validators = builder.validators;
 		this.shardGroups = builder.shardGroups;
+		this.primitivePOW = builder.primitivePOW;
+		this.roundInterval = builder.roundInterval;
 	}
 
 	/**
@@ -349,24 +392,19 @@ public class Universe extends BasicObject
 	 */
 	@JsonProperty("magic")
 	@DsonOutput(value = Output.HASH, include = false)
-	public int getMagic() 
+	public long getMagic() 
 	{
-		return computeMagic(this.creator, this.timestamp, this.shardGroups, this.epoch, this.port, this.type);
+		return getHash().asLong();
 	}
 
 	/**
-	 * The size of an epoch in events.
+	 * The duration of an epoch in seconds.
 	 *
 	 * @return
 	 */
-	public int getEpoch()
+	public long getEpochDuration()
 	{
-		return this.epoch;
-	}
-
-	public long toEpoch(long height)
-	{
-		return height / this.epoch;
+		return this.epochDuration;
 	}
 
 	/**
@@ -377,6 +415,26 @@ public class Universe extends BasicObject
 	public int shardGroupCount()
 	{
 		return this.shardGroups;
+	}
+
+	/**
+	 * The number of leading bits required for a primitive POW.
+	 *
+	 * @return
+	 */
+	public int getPrimitivePOW()
+	{
+		return this.primitivePOW;
+	}
+
+	/**
+	 * The round interval target in milliseconds.
+	 *
+	 * @return
+	 */
+	public long getRoundInterval()
+	{
+		return this.roundInterval;
 	}
 
 	/**
@@ -414,9 +472,9 @@ public class Universe extends BasicObject
 	 *
 	 * @return
 	 */
-	public long getTimestamp()
+	public long getCreatedAt()
 	{
-		return this.timestamp;
+		return this.createdAt;
 	}
 
 	/**
@@ -484,17 +542,18 @@ public class Universe extends BasicObject
 		return this.signature;
 	}
 
-	public void setSignature(EDSignature signature)
+	public void setSignature(final EDSignature signature)
 	{
 		this.signature = signature;
 	}
 
-	public void sign(EDKeyPair key) throws CryptoException
+	public Signature sign(final EDKeyPair key) throws CryptoException
 	{
 		this.signature = key.getPrivateKey().sign(getHash());
+		return this.signature;
 	}
 
-	public boolean verify(EDPublicKey key) throws CryptoException
+	public boolean verify(final EDPublicKey key) throws CryptoException
 	{
 		return key.verify(getHash(), this.signature);
 	}

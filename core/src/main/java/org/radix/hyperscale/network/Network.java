@@ -239,7 +239,7 @@ public final class Network implements Service
    			this.TCPServerSocket.setReceiveBufferSize(this.context.getConfiguration().get("network.tcp.buffer", Constants.DEFAULT_TCP_BUFFER));
    			
    			InetAddress inetAddress = this.context.getConfiguration().has("network.address") == false ? null : InetAddress.getByName(this.context.getConfiguration().get("network.address", "0.0.0.0"));
-   			SocketAddress socketAddress = new InetSocketAddress(inetAddress, this.context.getConfiguration().get("network.port", Universe.getDefault().getPort()));
+   			SocketAddress socketAddress = new InetSocketAddress(inetAddress, this.context.getConfiguration().get("network.port", Universe.get().getPort()));
    			this.TCPServerSocket.bind(socketAddress, 32);
    			
    			networkLog.info("TCP server socket "+this.TCPServerSocket.getLocalSocketAddress()+" RCV_BUF: "+this.TCPServerSocket.getReceiveBufferSize());

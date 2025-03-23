@@ -95,7 +95,7 @@ public class Epoch implements GlobalInstruction
 		stateMachine.lock(StateAddress.from("epoch", getClock()+":"+getShardGroupID()), StateLockMode.WRITE);
 
 		// Genesis
-		if (getClock() == 0 && Universe.getDefault().getGenesis().contains(stateMachine.getPendingAtom().getHash()))
+		if (getClock() == 0 && Universe.get().getGenesis().contains(stateMachine.getPendingAtom().getHash()))
 		{
 			for (int e = 1 ; e < Constants.VOTE_POWER_MATURITY_EPOCHS ; e++)
 				stateMachine.lock(StateAddress.from("epoch", e+":"+getShardGroupID()), StateLockMode.WRITE);
@@ -129,7 +129,7 @@ public class Epoch implements GlobalInstruction
 		final ShardGroupID localShardGroupID = ShardMapper.toShardGroup(localIdentity, numShardGroups);
 		
 		// Genesis
-		if (getClock() == 0 && Universe.getDefault().getGenesis().contains(stateMachine.getPendingAtom().getHash()))
+		if (getClock() == 0 && Universe.get().getGenesis().contains(stateMachine.getPendingAtom().getHash()))
 		{
 			for (int e = 0 ; e < Constants.VOTE_POWER_MATURITY_EPOCHS ; e++)
 			{

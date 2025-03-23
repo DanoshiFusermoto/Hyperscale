@@ -44,7 +44,7 @@ public final class SubstateRequestHandler implements Service
 {
 	private static final Logger gossipLog = Logging.getLogger("gossip");
 
-	private static final int SUBSTATE_RECORD_LIFETIME_MS = Constants.BLOCK_INTERVAL_TARGET_MILLISECONDS * (Constants.MIN_COMMIT_ROUNDS / 2);
+	private static final int SUBSTATE_RECORD_LIFETIME_MS = (int) (Ledger.definitions().roundInterval() * (Constants.MIN_COMMIT_ROUNDS / 2));
 	
 	final class SubstateRequest extends CompletableFuture<Substate>
 	{
@@ -163,7 +163,7 @@ public final class SubstateRequestHandler implements Service
 
 	private final MonitoredReentrantLock lock;
 	
-	private final ScheduledExecutable timeoutExecutor = new ScheduledExecutable(0, Constants.BLOCK_INTERVAL_TARGET_MILLISECONDS, TimeUnit.MILLISECONDS)
+	private final ScheduledExecutable timeoutExecutor = new ScheduledExecutable(0, Ledger.definitions().roundInterval(), TimeUnit.MILLISECONDS)
 	{
 		final List<SubstateRequest> timedoutSubstateRequests = new ArrayList<SubstateRequest>();
 		@Override

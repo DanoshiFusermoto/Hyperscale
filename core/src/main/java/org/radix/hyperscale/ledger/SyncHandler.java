@@ -58,7 +58,6 @@ import org.radix.hyperscale.logging.Logging;
 import org.radix.hyperscale.network.AbstractConnection;
 import org.radix.hyperscale.network.ConnectionState;
 import org.radix.hyperscale.network.ConnectionTask;
-import org.radix.hyperscale.network.GossipHandler;
 import org.radix.hyperscale.network.MessageProcessor;
 import org.radix.hyperscale.network.StandardConnectionFilter;
 import org.radix.hyperscale.network.events.DisconnectedEvent;
@@ -890,7 +889,7 @@ public class SyncHandler implements Service
 		this.desyncHead = this.syncHead;
 
 		// Nothing to prepare if at genesis head
-		if (this.desyncHead.getHash().equals(Universe.getDefault().getGenesis().getHash()))
+		if (this.desyncHead.getHash().equals(Universe.get().getGenesis().getHash()))
 		{
 			this.isPrepared = true;
 			return;
@@ -908,7 +907,7 @@ public class SyncHandler implements Service
 		do
 		{
 			recentBlockHeaders.add(current);
-			if (current.getPrevious().equals(Universe.getDefault().getGenesis().getHash()))
+			if (current.getPrevious().equals(Universe.get().getGenesis().getHash()))
 				break;
 			
 			current = this.context.getLedger().getLedgerStore().get(current.getPrevious(), BlockHeader.class);
@@ -1371,7 +1370,7 @@ public class SyncHandler implements Service
 						break;
 					}
 				
-					if (this.context.getLedger().getHead().getHash().equals(Universe.getDefault().getGenesis().getHash()) == true && 
+					if (this.context.getLedger().getHead().getHash().equals(Universe.get().getGenesis().getHash()) == true && 
 						syncPeer.getNode().getHead().isAheadOf(this.context.getLedger().getHead(), Constants.OOS_RESOLVED_LIMIT_BLOCKS) == true)
 					{
 						isUnsynced = true;

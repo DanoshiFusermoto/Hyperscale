@@ -302,7 +302,7 @@ public final class PackageHandler implements Service
 					final MutableLong syncInventoryHeight = new MutableLong(Math.max(1, syncAcquiredMessage.getHead().getHeight() - Constants.SYNC_INVENTORY_HEAD_OFFSET));
 					while (syncInventoryHeight.getValue() <= PackageHandler.this.context.getLedger().getHead().getHeight())
 					{
-						final Epoch epoch = Epoch.from(syncInventoryHeight.getValue() / Constants.BLOCKS_PER_EPOCH);
+						final Epoch epoch = Epoch.from(syncInventoryHeight.getValue() / Ledger.definitions().proposalsPerEpoch());
 						final int numShardGroups = PackageHandler.this.context.getLedger().numShardGroups(epoch);
 						final ShardGroupID remoteShardGroupID = ShardMapper.toShardGroup(connection.getNode().getIdentity(), numShardGroups);
 

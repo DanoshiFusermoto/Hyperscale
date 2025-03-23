@@ -92,7 +92,7 @@ public final class PolyglotComponent extends Component
 
 		public final Universe universe()
 		{
-			return Universe.getDefault();
+			return Universe.get();
 		}
 
 		public final ShardGroupID shardGroup()

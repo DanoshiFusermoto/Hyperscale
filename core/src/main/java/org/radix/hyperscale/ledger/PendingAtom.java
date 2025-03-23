@@ -779,7 +779,7 @@ public final class PendingAtom implements Hashable, StateAddressable
 			if (commitOperation == null)
 				throw new IllegalStateException("Commit operation not yet created for pending atom "+getHash());
 			
-			if (this.certificate == null && Universe.getDefault().getGenesis().contains(getHash()) == false)
+			if (this.certificate == null && Universe.get().getGenesis().contains(getHash()) == false)
 				throw new IllegalStateException("Commit operation not accessible without atom certificate for pending atom "+getHash());
 			
 			if (this.certificate != null && this.certificate.getDecision().equals(commitOperation.getDecision()) == false)

@@ -15,7 +15,7 @@ public class SimulatedTime implements TimeProvider
 	
 	public SimulatedTime(final Configuration configuration)
 	{
-		this.initialTime = Objects.requireNonNull(configuration, "Configuration is null").get("time.simulated.inital", Universe.getDefault().getTimestamp());
+		this.initialTime = Objects.requireNonNull(configuration, "Configuration is null").get("time.simulated.inital", Universe.get().getCreatedAt());
 		this.millisPerCommit = Objects.requireNonNull(configuration, "Configuration is null").get("time.simulated.increment", 10);
 	}
 

@@ -128,7 +128,7 @@ public class PeerHandler implements Service
 		this.context = Objects.requireNonNull(context, "Context is null");
     	this.peerStore = new PeerStore(context);
     	
-    	if (Boolean.getBoolean("singleton") == false || Universe.getDefault().shardGroupCount() > 1)
+    	if (Boolean.getBoolean("singleton") == false || Universe.get().shardGroupCount() > 1)
 			this.bootstrapper = new BootstrapService(this.context);
 		else
 			this.bootstrapper = null;

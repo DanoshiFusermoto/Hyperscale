@@ -12,6 +12,7 @@ import org.apache.commons.cli.Option;
 import org.apache.commons.cli.Options;
 import org.json.JSONObject;
 import org.radix.hyperscale.Context;
+import org.radix.hyperscale.Universe;
 import org.radix.hyperscale.apps.SimpleWallet;
 import org.radix.hyperscale.crypto.Hash;
 import org.radix.hyperscale.crypto.Identity;
@@ -77,7 +78,7 @@ public class Tokens extends Function
 				atomBuilder.push(wallet.spend(symbol, amount, receiver));
 			}
 
-			final Atom atom = atomBuilder.build();
+			final Atom atom = atomBuilder.build(Universe.get().getPrimitivePOW());
 			wallet.submit(atom);
 
 			JSONObject atomJSON = Serialization.getInstance().toJsonObject(atom, Output.API);
@@ -101,7 +102,7 @@ public class Tokens extends Function
 			final Atom.Builder atomBuilder = new Atom.Builder();
 			atomBuilder.push(TokenComponent.class.getAnnotation(StateContext.class).value()+"::create('"+json.getString("symbol")+"', '"+json.getString("description")+"', account('"+wallet.getIdentity()+"'))");
 
-			final Atom atom = atomBuilder.build();
+			final Atom atom = atomBuilder.build(Universe.get().getPrimitivePOW());
 			wallet.submit(atom);
 
 			printStream.println(Serialization.getInstance().toJson(atom, Output.API));
@@ -129,7 +130,7 @@ public class Tokens extends Function
 			final Atom.Builder atomBuilder = new Atom.Builder();
 			atomBuilder.push(TokenComponent.class.getAnnotation(StateContext.class).value()+"::mint('"+ISO+"', "+amount+", account('"+wallet.getIdentity()+"'))");
 
-			final Atom atom = atomBuilder.build();
+			final Atom atom = atomBuilder.build(Universe.get().getPrimitivePOW());
 			wallet.submit(atom);
 			
 			printStream.println(Serialization.getInstance().toJson(atom, Output.API));

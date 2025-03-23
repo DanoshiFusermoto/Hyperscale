@@ -71,7 +71,75 @@ public final class Ledger implements Service, LedgerInterface
 	static 
 	{
 		ledgerLog.setLevel(Logging.INFO);
+		
+		final Universe universe = Universe.get();
+		if (universe == null)
+			throw new IllegalStateException("Universe is not yet initialized!");
+		
+		definitions = new Definitions();
 	}
+	
+	/**
+	 * Helper to provide common definitions and parameters derived from the Universe
+	 */
+	public static class Definitions
+	{
+		// BLOCK PERIODS AND INTERVALS
+		public static final int 	EPOCH_PERIOD_DURATION_MILLISECONDS = 60000;
+		public static final int 	EPOCH_DURATION_MILLISECONDS = (int) TimeUnit.DAYS.toMillis(1);
+		public static final int		BLOCK_INTERVAL_TARGET_MILLISECONDS = 500;
+		public static final int 	BLOCKS_PER_PERIOD = EPOCH_PERIOD_DURATION_MILLISECONDS / BLOCK_INTERVAL_TARGET_MILLISECONDS;
+		public static final int 	BLOCKS_PER_EPOCH = EPOCH_DURATION_MILLISECONDS / BLOCK_INTERVAL_TARGET_MILLISECONDS;
+		public static final long 	getDurationToBlockCount(long duration, TimeUnit unit)
+		{
+			long milliseconds = unit.toMillis(duration);
+			return milliseconds / BLOCK_INTERVAL_TARGET_MILLISECONDS;
+		}
+		
+		public static final int 	PROPOSAL_PHASE_TIMEOUT_MS = BLOCK_INTERVAL_TARGET_MILLISECONDS*6;
+		public static final int 	VOTE_PHASE_TIMEOUT_MS = BLOCK_INTERVAL_TARGET_MILLISECONDS*6;
+		public static final int 	TRANSITION_PHASE_TIMEOUT_MS = BLOCK_INTERVAL_TARGET_MILLISECONDS*2;
+
+
+		public long roundInterval()
+		{
+			return Universe.get().getRoundInterval();
+		}
+		
+		public long epochDuration(final TimeUnit unit)
+		{
+			return unit.convert(Universe.get().getEpochDuration(), TimeUnit.SECONDS);
+		}
+
+		public long proposalsPerEpoch()
+		{
+			return epochDuration(TimeUnit.MILLISECONDS) / roundInterval();
+		}
+		
+		public long proposalPhaseTimeout(final TimeUnit unit)
+		{
+			return unit.convert(Constants.PROPOSAL_PHASE_TIMEOUT_ROUNDS * Universe.get().getRoundInterval(), TimeUnit.MILLISECONDS);
+		}
+
+		public long votePhaseTimeout(final TimeUnit unit)
+		{
+			return unit.convert(Constants.VOTE_PHASE_TIMEOUT_ROUNDS * Universe.get().getRoundInterval(), TimeUnit.MILLISECONDS);
+		}
+
+		public long transitionPhaseTimeout(final TimeUnit unit)
+		{
+			return unit.convert(Constants.TRANSITION_PHASE_TIMEOUT_ROUNDS * Universe.get().getRoundInterval(), TimeUnit.MILLISECONDS);
+		}
+	}
+	
+	private static final Definitions definitions;
+	
+	public static final Definitions definitions()
+	{
+		return definitions;
+	}
+	
+	///
 	
 	private final Context 	context;
 	
@@ -191,19 +259,19 @@ public final class Ledger implements Service, LedgerInterface
 			Hash genesis = this.ledgerStore.getSyncBlock(0);
 			if (genesis != null)
 			{
-				if (Universe.getDefault().getGenesis().getHeader().getHash().equals(genesis) == false)
+				if (Universe.get().getGenesis().getHeader().getHash().equals(genesis) == false)
 					throw new RuntimeException("You didn't clean your database dumbass!");
 			}
 	
 			final Hash headHash = this.ledgerStore.head();
 			// Check if this is just a new ledger store and doesn't need integrity or recovery
-			if (headHash.equals(Universe.getDefault().getGenesis().getHeader().getHash()) == true && this.ledgerStore.has(headHash, BlockHeader.class) == false)
+			if (headHash.equals(Universe.get().getGenesis().getHeader().getHash()) == true && this.ledgerStore.has(headHash, BlockHeader.class) == false)
 			{
 				// Some simple manual actions here with regard to persistance & provisioning as don't want to 
 				// complicate the flow with a special cases for genesis in the modules
 				
 				// Store the genesis header
-				this.ledgerStore.store(Universe.getDefault().getGenesis().getHeader());
+				this.ledgerStore.store(Universe.get().getGenesis().getHeader());
 
 				// Store the genesis atom
 //				for (Atom atom : Universe.getDefault().getGenesis().getAccepted())
@@ -211,13 +279,13 @@ public final class Ledger implements Service, LedgerInterface
 					
 				// Commit the genesis operations
 				List<CommitOperation> commitOperations = new ArrayList<CommitOperation>();
-				for (Atom atom : Universe.getDefault().getGenesis().getAccepted())
+				for (Atom atom : Universe.get().getGenesis().getAccepted())
 				{
 					// Need to take a "clean" copy of the atom in the case that multiple contexts are being initialised
 					// Otherwise left overs from execution in other contexts may throw exceptions for the current context
 					PendingAtom pendingAtom = new PendingAtom(this.context, new Atom(atom));
 					pendingAtom.prepare();
-					pendingAtom.accepted(Universe.getDefault().getGenesis().getHeader());
+					pendingAtom.accepted(Universe.get().getGenesis().getHeader());
 					
 					// All substates should be void
 					pendingAtom.provision();
@@ -235,7 +303,7 @@ public final class Ledger implements Service, LedgerInterface
 					commitOperations.add(pendingAtom.getCommitOperation());
 				}
 				
-				this.ledgerStore.commit(Universe.getDefault().getGenesis(), commitOperations);
+				this.ledgerStore.commit(Universe.get().getGenesis(), commitOperations);
 				return;
 			}
 			else
@@ -252,14 +320,14 @@ public final class Ledger implements Service, LedgerInterface
 				this.head.set(header);
 				ledgerLog.info(Ledger.this.context.getName()+": Setting ledger head as "+header);
 
-				if (header.equals(Universe.getDefault().getGenesis().getHeader()) == false && header.getCertificate() == null)
+				if (header.equals(Universe.get().getGenesis().getHeader()) == false && header.getCertificate() == null)
 					ledgerLog.warn(Ledger.this.context.getName()+": Ledger head "+header+" does not have a certificate!");
 				
 				this.epoch.set(Epoch.from(header));
 				ledgerLog.info(Ledger.this.context.getName()+": Setting ledger epoch as "+this.epoch.get().getClock());
 
 				// Check continuity of sync blocks
-				while(header.getHeight() > Math.max(1, this.head.get().getHeight() - Constants.BLOCKS_PER_EPOCH))
+				while(header.getHeight() > Math.max(1, this.head.get().getHeight() - definitions().proposalsPerEpoch()))
 				{
 					Hash prevHeaderHash = this.ledgerStore.getSyncBlock(header.getHeight()-1);
 					BlockHeader prevHeader = this.ledgerStore.get(header.getPrevious(), BlockHeader.class);
@@ -546,7 +614,7 @@ public final class Ledger implements Service, LedgerInterface
 	public int numShardGroups(final Epoch epoch)
 	{
 		// TODO dynamic shard group count from height / epoch
-		return Universe.getDefault().shardGroupCount();
+		return Universe.get().shardGroupCount();
 	}
 
 	// ASYNC ATOM LISTENER //
@@ -903,7 +971,7 @@ public final class Ledger implements Service, LedgerInterface
 				Ledger.this.head.set(event.getHead());
 				Ledger.this.epoch.set(Epoch.from(event.getHead()));
 				
-				if (event.getHead().getHash().equals(Universe.getDefault().getGenesis().getHash()) == true)
+				if (event.getHead().getHash().equals(Universe.get().getGenesis().getHash()) == true)
 					Ledger.this.context.getNode().setProgressing(true);
 
 				if (ledgerLog.hasLevel(Logging.INFO))
@@ -952,7 +1020,7 @@ public final class Ledger implements Service, LedgerInterface
     			if (Ledger.this.context.getNode().isSynced() == false)
     				return;
     			
-    			if (Ledger.this.getHead().getHash().equals(Universe.getDefault().getGenesis().getHash()) == false && 
+    			if (Ledger.this.getHead().getHash().equals(Universe.get().getGenesis().getHash()) == false && 
     				Ledger.this.getHead().getHeight() >= event.getConnection().getNode().getHead().getHeight() - Constants.OOS_TRIGGER_LIMIT_BLOCKS)
     				return;
 

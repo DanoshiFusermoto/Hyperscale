@@ -4,9 +4,9 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 import org.eclipse.collections.api.factory.Sets;
-import org.radix.hyperscale.Constants;
 import org.radix.hyperscale.crypto.Hash;
 import org.radix.hyperscale.crypto.Identity;
 import org.radix.hyperscale.time.Time;
@@ -56,7 +56,7 @@ public class ProgressRound
 		this.clock = clock;
 		this.driftClock = driftClock;
 		this.totalVotePower = totalVotePower;
-		this.epoch = Epoch.from(clock / Constants.BLOCKS_PER_EPOCH);
+		this.epoch = Epoch.from(clock / Ledger.definitions().proposalsPerEpoch());
 
 		this.voteTimeout = 0;
 		this.voteWeight = 0;
@@ -113,9 +113,9 @@ public class ProgressRound
 		this.completedAt = Time.getSystemTime();
 	}
 	
-	long calculateDriftAdjustment(int timeoutDuration)
+	long calculateDriftAdjustment(long timeoutDuration)
 	{
-		int adjustedTimeoutDuration = timeoutDuration;
+		long adjustedTimeoutDuration = timeoutDuration;
 		
 		// Shard is ahead
 		if (this.driftClock > 0)
@@ -133,19 +133,19 @@ public class ProgressRound
 		{
 			this.state = State.PROPOSING;
 			this.proposeStartAt = Time.getSystemTime();
-			this.proposalsTimeout = this.proposeStartAt + calculateDriftAdjustment(Constants.PROPOSAL_PHASE_TIMEOUT_MS);
+			this.proposalsTimeout = this.proposeStartAt + calculateDriftAdjustment(Ledger.definitions().proposalPhaseTimeout(TimeUnit.MILLISECONDS));
 		}
 		else if (this.state.equals(State.PROPOSING))
 		{
 			this.state = State.TRANSITION;
 			this.transitionStartAt = Time.getSystemTime();
-			this.transitionTimeout = this.transitionStartAt + calculateDriftAdjustment(Constants.TRANSITION_PHASE_TIMEOUT_MS);
+			this.transitionTimeout = this.transitionStartAt + calculateDriftAdjustment(Ledger.definitions().transitionPhaseTimeout(TimeUnit.MILLISECONDS));
 		}
 		else if (this.state.equals(State.TRANSITION))
 		{
 			this.state = State.VOTING;
 			this.voteStartAt = Time.getSystemTime();
-			this.voteTimeout = this.voteStartAt + calculateDriftAdjustment(Constants.VOTE_PHASE_TIMEOUT_MS);
+			this.voteTimeout = this.voteStartAt + calculateDriftAdjustment(Ledger.definitions().votePhaseTimeout(TimeUnit.MILLISECONDS));
 		}
 		else if (this.state.equals(State.VOTING))
 		{
@@ -196,7 +196,7 @@ public class ProgressRound
 		if (this.voteStartAt == 0)
 			return false;
 		
-		return Time.getSystemTime() > this.voteStartAt + (Constants.MINIMUM_ROUND_DURATION_MILLISECONDS / 3);
+		return Time.getSystemTime() > this.voteStartAt + (Ledger.definitions().roundInterval() / 3);
 	}
 
 	public boolean isVoteTimedout()
@@ -217,7 +217,7 @@ public class ProgressRound
 		if (this.transitionStartAt == 0)
 			return false;
 
-		return Time.getSystemTime() > this.transitionStartAt + (Constants.MINIMUM_ROUND_DURATION_MILLISECONDS / 3);
+		return Time.getSystemTime() > this.transitionStartAt + (Ledger.definitions().roundInterval() / 3);
 	}
 
 	public boolean isTransitionTimedout()
@@ -296,7 +296,7 @@ public class ProgressRound
 		if (this.proposeStartAt == 0)
 			return false;
 
-		return Time.getSystemTime() > this.proposeStartAt + (Constants.MINIMUM_ROUND_DURATION_MILLISECONDS / 3);
+		return Time.getSystemTime() > this.proposeStartAt + (Ledger.definitions().roundInterval() / 3);
 	}
 
 	public boolean isProposalsTimedout()

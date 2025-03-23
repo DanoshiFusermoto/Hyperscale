@@ -147,23 +147,23 @@ public final class ValidatorHandler implements Service
 			final Hash headHash = this.context.getLedger().getLedgerStore().head();
 			
 			// Setup Genesis
-			if (headHash.equals(Universe.getDefault().getGenesis().getHash()))
+			if (headHash.equals(Universe.get().getGenesis().getHash()))
 			{
 				final Map<Identity, Long> genesisPowers = new HashMap<>();
-				for (Identity validator : Universe.getDefault().getValidators())
+				for (final Identity validator : Universe.get().getValidators())
 				{
-					powerLog.info(this.context.getName()+": Setting vote power for genesis validator "+validator.toString(Constants.TRUNCATED_IDENTITY_LENGTH)+":"+ShardMapper.toShardGroup(validator, Universe.getDefault().shardGroupCount())+" to "+Constants.VOTE_POWER_BOOTSTRAP);
+					powerLog.info(this.context.getName()+": Setting vote power for genesis validator "+validator.toString(Constants.TRUNCATED_IDENTITY_LENGTH)+":"+ShardMapper.toShardGroup(validator, Universe.get().shardGroupCount())+" to "+Constants.VOTE_POWER_BOOTSTRAP);
 					genesisPowers.put(validator, Constants.VOTE_POWER_BOOTSTRAP);
 				}
 				
 				for (long e = 0 ; e < Constants.VOTE_POWER_MATURITY_EPOCHS ; e++)
 					this.validatorStore.store(new VotePowers(e, genesisPowers));
 				
-				final ShardGroupID localShardGroup = ShardMapper.toShardGroup(this.context.getNode().getIdentity(), Universe.getDefault().shardGroupCount());
+				final ShardGroupID localShardGroup = ShardMapper.toShardGroup(this.context.getNode().getIdentity(), Universe.get().shardGroupCount());
 				final VotePowers genesisVotePowers = this.validatorStore.get(Epoch.from(Constants.VOTE_POWER_MATURITY_EPOCHS-1));
-				for (Entry<Identity, Long> validator : genesisVotePowers.getAll().entrySet())
+				for (final Entry<Identity, Long> validator : genesisVotePowers.getAll().entrySet())
 				{
-					if (ShardMapper.toShardGroup(validator.getKey(), Universe.getDefault().shardGroupCount()).equals(localShardGroup))
+					if (ShardMapper.toShardGroup(validator.getKey(), Universe.get().shardGroupCount()).equals(localShardGroup))
 						this.accumulatorLocalEpochPowers.put(validator.getKey(), validator.getValue());
 					
 					this.withVotePower.add(validator.getKey());
@@ -314,7 +314,7 @@ public final class ValidatorHandler implements Service
 		this.lock.readLock().lock();
 		try
 		{
-			final Epoch epoch = Epoch.from(height / Constants.BLOCKS_PER_EPOCH);
+			final Epoch epoch = Epoch.from(height / Ledger.definitions().proposalsPerEpoch());
 			final int numShardGroups = this.context.getLedger().numShardGroups(epoch);
 			List<Identity> proposers = new ArrayList<Identity>();
 			for (Identity proposer : this.withVotePower)
@@ -505,7 +505,7 @@ public final class ValidatorHandler implements Service
 		try
 		{
 			// Increment the pending Epoch if the current one has elapsed and flip the vote powers into pending state
-			if (block.getHeader().getHeight() % Constants.BLOCKS_PER_EPOCH == 0)
+			if (block.getHeader().getHeight() % Ledger.definitions().proposalsPerEpoch() == 0)
 			{
 				this.pendingEpoch = currentEpoch.increment(Constants.VOTE_POWER_MATURITY_EPOCHS-1);
 				this.pendingLocalEpochPowers.clear();
@@ -516,7 +516,7 @@ public final class ValidatorHandler implements Service
 			{
 				// Spread the submission of Epoch validator messages over the course of the current Epoch to avoid a load spike
 				if (getVotePower(currentEpoch, this.context.getNode().getIdentity()) > 0 && this.pendingLocalEpochPowers.isEmpty() == false && 
-					block.getHeader().getHeight() % Constants.BLOCKS_PER_EPOCH == Math.abs(this.context.getNode().getIdentity().getHash().asLong() % Constants.BLOCKS_PER_EPOCH))
+					block.getHeader().getHeight() % Ledger.definitions().proposalsPerEpoch() == Math.abs(this.context.getNode().getIdentity().getHash().asLong() % Ledger.definitions().proposalsPerEpoch()))
 				{
 					final int numShardGroups = this.context.getLedger().numShardGroups(currentEpoch);
 					final ShardGroupID shardGroupID = ShardMapper.toShardGroup(this.context.getNode().getIdentity(), numShardGroups);
@@ -530,7 +530,7 @@ public final class ValidatorHandler implements Service
 						epochAtomBuilder.push(votePowersBlob.asDataURL());
 						epochAtomBuilder.push("ledger::epoch("+this.pendingEpoch.getClock()+", "+shardGroupID+", hash('"+votePowersBlob.getHash()+"'))");
 						epochAtomBuilder.signer(this.context.getNode().getKeyPair());
-						this.context.getLedger().submit(epochAtomBuilder.build());
+						this.context.getLedger().submit(epochAtomBuilder.build(Universe.get().getPrimitivePOW()));
 							
 						if (powerLog.hasLevel(Logging.DEBUG))
 							powerLog.debug(ValidatorHandler.this.context.getName()+": Submitted local vote powers for epoch "+ValidatorHandler.this.pendingEpoch.getClock());
@@ -706,10 +706,10 @@ public final class ValidatorHandler implements Service
 
 			if (committedSourceEpoch != null)
 			{
-				final long committedFromHeight = Math.max(1, committedSourceEpoch.getClock() * Constants.BLOCKS_PER_EPOCH);			
+				final long committedFromHeight = Math.max(1, committedSourceEpoch.getClock() * Ledger.definitions().proposalsPerEpoch());			
 				if (committedFromHeight >= 0)
 				{
-					final long committedToHeight = (committedSourceEpoch.getClock() + 1) * Constants.BLOCKS_PER_EPOCH;			
+					final long committedToHeight = (committedSourceEpoch.getClock() + 1) * Ledger.definitions().proposalsPerEpoch();			
 					for (long e = committedFromHeight ; e < committedToHeight ; e++)
 					{
 						final BlockHeader header = ValidatorHandler.this.context.getLedger().getBlockHeader(e);
@@ -723,10 +723,10 @@ public final class ValidatorHandler implements Service
 
 			if (pendingSourceEpoch != null)
 			{
-				final long pendingFromHeight = Math.max(1, pendingSourceEpoch.getClock() * Constants.BLOCKS_PER_EPOCH);			
+				final long pendingFromHeight = Math.max(1, pendingSourceEpoch.getClock() * Ledger.definitions().proposalsPerEpoch());			
 				if (pendingFromHeight >= 0)
 				{
-					final long pendingToHeight = (pendingSourceEpoch.getClock() + 1) * Constants.BLOCKS_PER_EPOCH;			
+					final long pendingToHeight = (pendingSourceEpoch.getClock() + 1) * Ledger.definitions().proposalsPerEpoch();			
 					for (long e = pendingFromHeight ; e < pendingToHeight ; e++)
 					{
 						final BlockHeader header = ValidatorHandler.this.context.getLedger().getBlockHeader(e);
@@ -740,7 +740,7 @@ public final class ValidatorHandler implements Service
 				ValidatorHandler.this.pendingLocalEpochPowers.putAll(accumulatingLocalEpochPowers);
 			}
 
-			final long accumulateFromHeight = Math.max(1, accumulatorSourceEpoch.getClock() * Constants.BLOCKS_PER_EPOCH);
+			final long accumulateFromHeight = Math.max(1, accumulatorSourceEpoch.getClock() * Ledger.definitions().proposalsPerEpoch());
 			for (long e = accumulateFromHeight ; e <= event.getHead().getHeight() ; e++)
 			{
 				final BlockHeader header = ValidatorHandler.this.context.getLedger().getBlockHeader(e);

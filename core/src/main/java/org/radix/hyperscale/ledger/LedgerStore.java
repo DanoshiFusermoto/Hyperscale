@@ -928,7 +928,7 @@ public class LedgerStore extends DatabaseStore implements LedgerProvider
 	    		throw new DatabaseException("Failed to store " + block.getHash() + " block header due to " + status.name());
 		    block.getHeader().flushCachedDsonOutput();
 		    
-		    if (block.getHash().equals(Universe.getDefault().getGenesis().getHash()) == false)
+		    if (block.getHeader().getHeight() > 0 && block.getHash().equals(Universe.get().getGenesis().getHash()) == false)
 	    	{
 		    	status = has(transaction, StateAddress.from(BlockHeader.class, block.getHeader().getPrevious()));
 				if (status.equals(OperationStatus.SUCCESS) == false)
@@ -1290,7 +1290,7 @@ public class LedgerStore extends DatabaseStore implements LedgerProvider
 			if (status.equals(OperationStatus.SUCCESS))
 				return Hash.from(value.getData());
 
-			return Universe.getDefault().getGenesis().getHash();
+			return Universe.get().getGenesis().getHash();
         }
 		catch (Throwable t)
 		{

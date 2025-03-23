@@ -1,6 +1,5 @@
 package org.radix.hyperscale;
 
-import java.math.BigInteger;
 import java.util.concurrent.TimeUnit;
 
 public final class Constants 
@@ -12,12 +11,6 @@ public final class Constants
 	// RUNTIME //
 	public static final int 	JAVA_VERSION_MIN = 17;
 	public static final int 	JAVA_VERSION_MAX = 21;
-	
-	// TODO put these in universe config
-	public static final double 	BASELINE_DISTANCE_FACTOR = 2.5;
-	public static final long 	BASELINE_DISTANCE_TARGET = BigInteger.valueOf(Long.MIN_VALUE).abs().subtract(BigInteger.valueOf((long) (Long.MIN_VALUE / (BASELINE_DISTANCE_FACTOR * Math.log(BASELINE_DISTANCE_FACTOR)))).abs()).longValue(); // TODO rubbish, but produces close enough needed output
-	public static final long 	BLOCK_DISTANCE_FACTOR = 64;
-	public static final long 	BLOCK_DISTANCE_TARGET = BigInteger.valueOf(Long.MIN_VALUE).abs().subtract(BigInteger.valueOf((long) (Long.MIN_VALUE / (BLOCK_DISTANCE_FACTOR * Math.log(BLOCK_DISTANCE_FACTOR)))).abs()).longValue(); // TODO rubbish, but produces close enough needed output
 	
 	// NETWORK
 	public static final int 	DEFAULT_TCP_CONNECTIONS_OUT_SYNC = 3; 
@@ -46,32 +39,18 @@ public final class Constants
 	public static final int 	MAX_GOSSIP_ITEM_RETRIES = MAX_STRIKES_FOR_DISCONNECT;
 	public static final int 	MAX_DIRECT_ITEM_RETRIES = MAX_STRIKES_FOR_DISCONNECT;
 
-	// BLOCK PERIODS AND INTERVALS
-	public static final int 	EPOCH_PERIOD_DURATION_MILLISECONDS = 60000;
-	public static final int 	EPOCH_DURATION_MILLISECONDS = (int) TimeUnit.DAYS.toMillis(1);
-	public static final int		BLOCK_INTERVAL_TARGET_MILLISECONDS = 500;
-	public static final int 	BLOCKS_PER_PERIOD = EPOCH_PERIOD_DURATION_MILLISECONDS / BLOCK_INTERVAL_TARGET_MILLISECONDS;
-	public static final int 	BLOCKS_PER_EPOCH = EPOCH_DURATION_MILLISECONDS / BLOCK_INTERVAL_TARGET_MILLISECONDS;
-	public static final long 	getDurationToBlockCount(long duration, TimeUnit unit)
-	{
-		long milliseconds = unit.toMillis(duration);
-		return milliseconds / BLOCK_INTERVAL_TARGET_MILLISECONDS;
-	}
-	
 	// CONSENSUS
 	public static final int 	MIN_COMMIT_SUPERS = 2;
 	public static final int 	MIN_COMMIT_ROUNDS = 6;
 	public static final int 	ESCALATE_COMMIT_URGENCY = 8;
-	public static final int 	PROPOSAL_PHASE_TIMEOUT_MS = BLOCK_INTERVAL_TARGET_MILLISECONDS*6;
-	public static final int 	VOTE_PHASE_TIMEOUT_MS = BLOCK_INTERVAL_TARGET_MILLISECONDS*6;
-	public static final int 	TRANSITION_PHASE_TIMEOUT_MS = BLOCK_INTERVAL_TARGET_MILLISECONDS*2;
-	public static final int 	MINIMUM_ROUND_DURATION_MILLISECONDS = BLOCK_INTERVAL_TARGET_MILLISECONDS;
+	public static final int 	PROPOSAL_PHASE_TIMEOUT_ROUNDS = 6;
+	public static final int 	VOTE_PHASE_TIMEOUT_ROUNDS = 6;
+	public static final int 	TRANSITION_PHASE_TIMEOUT_ROUNDS = 2;
 
 	// PRIMITIVES
 	public static final int 	PRIMITIVE_STALE = 60;
 	public static final int 	PRIMITIVE_EXPIRE = 90;
 	public static final int 	PRIMITIVE_GC_INTERVAL = 3;
-	public static final int 	MIN_PRIMITIVE_POW_DIFFICULTY = 12;
 
 	// ATOMS
 	public static final int 	ATOM_DISCARD_AT_PENDING_LIMIT = 50000;

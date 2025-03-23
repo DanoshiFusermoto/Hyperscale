@@ -100,7 +100,7 @@ public class BlockHandler implements Service
 		SUCCESS, FAILED, SKIPPED, POSTPONED, STALE;
 	}
 
-	private LatchedProcessor blockProcessor = new LatchedProcessor(Constants.BLOCK_INTERVAL_TARGET_MILLISECONDS / ProgressRound.State.values().length, TimeUnit.MILLISECONDS)
+	private LatchedProcessor blockProcessor = new LatchedProcessor(Ledger.definitions().roundInterval() / ProgressRound.State.values().length, TimeUnit.MILLISECONDS)
 	{
 		@Override
 		public void process()
@@ -1259,7 +1259,7 @@ public class BlockHandler implements Service
 				blocksLog.info(this.context.getName()+": Progress round completed "+progressRound);
 
 			// Progress interval & delay
-			final long targetRoundDuration = Math.max(Constants.MINIMUM_ROUND_DURATION_MILLISECONDS, Configuration.getDefault().get("ledger.liveness.delay", 0));
+			final long targetRoundDuration = Math.max(Ledger.definitions().roundInterval(), Configuration.getDefault().get("ledger.liveness.delay", 0));
 			final long roundDelayDuration = (targetRoundDuration-progressRound.getDuration())+Math.min(progressRound.driftMilli()/2, 0);
 			
 			// Too fast
@@ -1308,7 +1308,7 @@ public class BlockHandler implements Service
 		// A commit (if pending) will be performed after any required proposal generation.
 		if (progressRoundPhase.equals(ProgressRound.State.COMPLETED))
 		{
-			final long minDuration = Math.max(Constants.MINIMUM_ROUND_DURATION_MILLISECONDS, Configuration.getDefault().get("ledger.liveness.delay", 0));
+			final long minDuration = Math.max(Ledger.definitions().roundInterval(), Configuration.getDefault().get("ledger.liveness.delay", 0));
 			final long durationDelay = minDuration - progressRound.getDuration();
 			if (durationDelay < 0)
 			{

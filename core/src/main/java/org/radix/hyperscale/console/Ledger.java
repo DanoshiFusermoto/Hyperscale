@@ -124,7 +124,7 @@ public class Ledger extends Function
 			printStream.println();
 			printStream.println("Synced: "+context.getNode().isSynced());
 			printStream.println("Identity: S-"+(ShardMapper.toShardGroup(context.getNode().getIdentity(), context.getLedger().numShardGroups()))+" <- "+context.getNode().getIdentity().toString(Constants.TRUNCATED_IDENTITY_LENGTH));
-			printStream.println("Epoch: "+context.getLedger().getEpoch().getClock()+" "+(context.getLedger().getHead().getHeight() % Constants.BLOCKS_PER_EPOCH)+"/"+Constants.BLOCKS_PER_EPOCH);
+			printStream.println("Epoch: "+context.getLedger().getEpoch().getClock()+" "+(context.getLedger().getHead().getHeight() % org.radix.hyperscale.ledger.Ledger.definitions().proposalsPerEpoch())+"/"+org.radix.hyperscale.ledger.Ledger.definitions().proposalsPerEpoch());
 			printStream.println("Head: "+context.getLedger().getHead());
 			printStream.println("Timestamp: "+TimeUnit.MILLISECONDS.toSeconds(context.getLedger().getTimestamp())+" / "+new Date(context.getLedger().getTimestamp()));
 			printStream.println("Transactions (P/A/AT/EL/ET/CT/T): "+context.getLedger().getAtomHandler().size()+"/"+context.getMetaData().get("ledger.processed.atoms.local", 0l)+"/"+context.getMetaData().get("ledger.processed.atoms.timedout.accept", 0l)+"/"+context.getMetaData().get("ledger.processed.atoms.latent.execution", 0l)+"/"+context.getMetaData().get("ledger.processed.atoms.timedout.execution", 0l)+"/"+context.getMetaData().get("ledger.processed.atoms.timedout.commit", 0l)+"/"+context.getMetaData().get("ledger.processed.atoms.total", 0l));
