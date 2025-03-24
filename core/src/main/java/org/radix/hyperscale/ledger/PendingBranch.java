@@ -183,7 +183,7 @@ public class PendingBranch
 	{
 		Objects.requireNonNull(pendingBlock, "Pending block is null");
 		
-		if (pendingBlock.getBlock() == null)
+		if (pendingBlock.isConstructed() == false)
 			throw new IllegalStateException("Can not apply an un-constructed block "+pendingBlock.getHeader());
 		
 		if (Block.MAX_BLOCK_SIZE != Integer.MAX_VALUE)
@@ -331,12 +331,12 @@ public class PendingBranch
 		synchronized(this)
 		{
 			// Apply any pending proposals referenced by this branch that have not yet been applied
-			Iterator<PendingBlock> blocksIterator = this.blocks.iterator();
+			final Iterator<PendingBlock> blocksIterator = this.blocks.iterator();
 			while(blocksIterator.hasNext())
 			{
 				final PendingBlock vertex = blocksIterator.next();
 
-				if (vertex.getBlock() == null)
+				if (vertex.isConstructed() == false)
 					continue;
 
 				if (isApplied(vertex.getHash()) == false)
@@ -407,11 +407,11 @@ public class PendingBranch
 		{
 			for (int b = 0 ; b < this.blocks.size() ; b++)
 			{
-				PendingBlock pendingBlock = this.blocks.get(b);
+				final PendingBlock pendingBlock = this.blocks.get(b);
 				if (excludeTo != null && pendingBlock.getHeight() >= excludeTo.getHeight())
 					continue;
 				
-				InventoryType referenceType = pendingBlock.references(item, types);
+				final InventoryType referenceType = pendingBlock.references(item, types);
 				if (referenceType != null)
 					return referenceType;
 			}
@@ -428,10 +428,10 @@ public class PendingBranch
 				return true;
 			
 			PendingBlock current = null;
-			Iterator<PendingBlock> blockIterator = this.blocks.descendingIterator();
+			final Iterator<PendingBlock> blockIterator = this.blocks.descendingIterator();
 			while(blockIterator.hasNext())
 			{
-				PendingBlock previous = blockIterator.next();
+				final PendingBlock previous = blockIterator.next();
 				if (current != null)
 				{
 					if (previous.getHash().equals(current.getHeader().getPrevious()) == false)
@@ -455,7 +455,7 @@ public class PendingBranch
 		Numbers.isZero(blocks.size(), "Pending blocks is empty");
 
 		PendingBlock last = null;
-		for (PendingBlock block : blocks)
+		for (final PendingBlock block : blocks)
 		{
 			if (last == null || last.getHeight() < block.getHeight())
 				last = block;
@@ -473,7 +473,7 @@ public class PendingBranch
 				branchTip = this.blocks.getLast().getHash();
 			
 			boolean mergable = false;
-			for (PendingBlock block : blocks)
+			for (final PendingBlock block : blocks)
 			{
 				if (block.getHeader() == null)
 					throw new IllegalStateException("Block "+block.getHash()+" does not have a header");
@@ -558,7 +558,7 @@ public class PendingBranch
 		Objects.requireNonNull(blocks, "Pending blocks is null");
 		Numbers.isZero(blocks.size(), "Pending blocks is empty");
 
-		List<PendingBlock> sortedBlocks = new ArrayList<PendingBlock>(blocks);
+		final List<PendingBlock> sortedBlocks = new ArrayList<PendingBlock>(blocks);
 		Collections.sort(sortedBlocks, (pb1, pb2) -> {
 			if (pb1.getHeight() < pb2.getHeight())
 				return -1;
@@ -571,12 +571,12 @@ public class PendingBranch
 
 		synchronized(this)
 		{
-			for (PendingBlock sortedBlock : sortedBlocks)
+			for (final PendingBlock sortedBlock : sortedBlocks)
 			{
 				if (sortedBlock.getHeader() == null)
 					throw new IllegalStateException("Block "+sortedBlock.getHash()+" does not have a header");
 
-				for (PendingBlock vertex : this.blocks)
+				for (final PendingBlock vertex : this.blocks)
 				{
 					if (vertex.getHash().equals(sortedBlock.getHeader().getPrevious()))
 					{
@@ -695,7 +695,7 @@ public class PendingBranch
 
 		synchronized(this)
 		{
-			for (PendingBlock sortedBlock : sortedBlocks)
+			for (final PendingBlock sortedBlock : sortedBlocks)
 				if (this.meta.containsKey(sortedBlock.getHeader().getPrevious()))
 					return true;
 			
@@ -708,7 +708,7 @@ public class PendingBranch
 		Objects.requireNonNull(blocks, "Pending blocks is null");
 		Numbers.isZero(blocks.size(), "Pending blocks is empty");
 
-		List<PendingBlock> sortedBlocks = new ArrayList<PendingBlock>(blocks);
+		final List<PendingBlock> sortedBlocks = new ArrayList<PendingBlock>(blocks);
 		Collections.sort(sortedBlocks, (pb1, pb2) -> {
 			if (pb1.getHeight() < pb2.getHeight())
 				return -1;
@@ -721,7 +721,7 @@ public class PendingBranch
 
 		synchronized(this)
 		{
-			for (PendingBlock sortedBlock : sortedBlocks)
+			for (final PendingBlock sortedBlock : sortedBlocks)
 				if (this.meta.containsKey(sortedBlock.getHeader().getPrevious()))
 					return true;
 			
@@ -738,13 +738,13 @@ public class PendingBranch
 	{
 		Objects.requireNonNull(header, "Block is null");
 
-		List<PendingBlock> trimmed = new ArrayList<PendingBlock>();
+		final List<PendingBlock> trimmed = new ArrayList<PendingBlock>();
 		synchronized(this)
 		{
-			Iterator<PendingBlock> vertexIterator = this.blocks.iterator();
+			final Iterator<PendingBlock> vertexIterator = this.blocks.iterator();
 			while(vertexIterator.hasNext())
 			{
-				PendingBlock vertex = vertexIterator.next();
+				final PendingBlock vertex = vertexIterator.next();
 				if (vertex.getHeader().getHeight() <= header.getHeight())
 				{
 					remove(vertex);
@@ -771,13 +771,13 @@ public class PendingBranch
 	{
 		Objects.requireNonNull(header, "Block is null");
 
-		List<PendingBlock> trimmed = new ArrayList<PendingBlock>();
+		final List<PendingBlock> trimmed = new ArrayList<PendingBlock>();
 		synchronized(this)
 		{
-			Iterator<PendingBlock> vertexIterator = this.blocks.iterator();
+			final Iterator<PendingBlock> vertexIterator = this.blocks.iterator();
 			while(vertexIterator.hasNext())
 			{
-				PendingBlock vertex = vertexIterator.next();
+				final PendingBlock vertex = vertexIterator.next();
 				if (vertex.getHeader().getHeight() >= header.getHeight())
 				{
 					remove(vertex);
@@ -799,14 +799,14 @@ public class PendingBranch
 		if (Objects.requireNonNull(block, "Block is null").getHeader() == null)
 			throw new IllegalStateException("Block "+block.getHash()+" does not have a header");
 
-		LinkedList<PendingBlock> committed = new LinkedList<PendingBlock>();
+		final LinkedList<PendingBlock> committed = new LinkedList<PendingBlock>();
 		synchronized(this)
 		{
-			Iterator<PendingBlock> vertexIterator = this.blocks.iterator();
+			final Iterator<PendingBlock> vertexIterator = this.blocks.iterator();
 			while(vertexIterator.hasNext())
 			{
-				PendingBlock vertex = vertexIterator.next();
-				if (vertex.getBlock() == null)
+				final PendingBlock vertex = vertexIterator.next();
+				if (vertex.isConstructed() == false)
 					throw new IllegalStateException("Unconstructed proposal "+vertex.getHeader()+" found when commiting to "+block.getHeader());
 				
 				committed.add(vertex);
@@ -844,7 +844,7 @@ public class PendingBranch
 			// Blocks to be committed require at least one "confirming" super block higher than it, thus there will always be at least one super block in a pending branch.
 			// The required quantity of super blocks in a branch is defined by minSupers and may be larger than 2 depending on certain conditions. 
 			// TODO using pendingBlock.getHeader().getHeight() as the vote power timestamp possibly makes this weakly subjective and may cause issue in long branches
-			LinkedList<PendingBlock> supers = supers();
+			final LinkedList<PendingBlock> supers = supers();
 			if (supers.size() < Math.max(superCount, Constants.MIN_COMMIT_SUPERS))
 				return null;
 			
@@ -852,7 +852,7 @@ public class PendingBranch
 				blocksLog.debug(this.context.getName()+": Found commit branch "+this+" with supers "+supers);
 			
 			PendingBlock superBlock = null;
-			Iterator<PendingBlock> superBlockIterator = supers.iterator();
+			final Iterator<PendingBlock> superBlockIterator = supers.iterator();
 			while(superBlockIterator.hasNext())
 			{
 				superBlock = superBlockIterator.next();
@@ -867,11 +867,11 @@ public class PendingBranch
 				return null;
 			
 			PendingBlock commitable = null;
-			Iterator<PendingBlock> vertexIterator = this.blocks.iterator();
+			final Iterator<PendingBlock> vertexIterator = this.blocks.iterator();
 			while(vertexIterator.hasNext())
 			{
-				PendingBlock vertex = vertexIterator.next();
-				if (vertex.getBlock() == null)
+				final PendingBlock vertex = vertexIterator.next();
+				if (vertex.isConstructed() == false)
 					break;
 
 				commitable = vertex;
@@ -890,14 +890,14 @@ public class PendingBranch
 
 	LinkedList<PendingBlock> supers()
 	{
-		LinkedList<PendingBlock> supers = new LinkedList<PendingBlock>();
+		final LinkedList<PendingBlock> supers = new LinkedList<PendingBlock>();
 		synchronized(this)
 		{	
-			Iterator<PendingBlock> vertexIterator = this.blocks.iterator();
+			final Iterator<PendingBlock> vertexIterator = this.blocks.iterator();
 			while(vertexIterator.hasNext())
 			{
-				PendingBlock vertex = vertexIterator.next();
-				if (vertex.getHeader().getCertificate() != null)
+				final PendingBlock vertex = vertexIterator.next();
+				if (vertex.isSuper())
 					supers.add(vertex);
 			}
 		}
@@ -1095,7 +1095,7 @@ public class PendingBranch
 		
 		if (stateAccumulatorLog.hasLevel(Logging.DEBUG))
 		{
-			for (StateAddress stateAddress : stateAddresses)
+			for (final StateAddress stateAddress : stateAddresses)
 				stateAccumulatorLog.debug(this.context.getName()+": Unlockable state address "+stateAddress+" via "+pendingAtom);
 		}
 	}
@@ -1129,8 +1129,8 @@ public class PendingBranch
 	{
 		synchronized(this)
 		{
-			LinkedList<PendingBlock> blocks = new LinkedList<PendingBlock>();
-			for (PendingBlock pendingBlock : this.blocks)
+			final LinkedList<PendingBlock> blocks = new LinkedList<PendingBlock>();
+			for (final PendingBlock pendingBlock : this.blocks)
 			{
 				blocks.add(pendingBlock);
 				if (pendingBlock.getHash().equals(block))
@@ -1156,7 +1156,7 @@ public class PendingBranch
 		
 		synchronized(this)
 		{
-			for (PendingBlock vertex : this.blocks)
+			for (final PendingBlock vertex : this.blocks)
 				if (vertex.getHash().equals(block))
 					return vertex;
 			
@@ -1221,7 +1221,7 @@ public class PendingBranch
 			if (this.root.getHeight() == height)
 				throw new IllegalArgumentException("Block at height "+height+" is branch root "+this.root);
 			
-			PendingBlock block = getBlockAtHeight(height);
+			final PendingBlock block = getBlockAtHeight(height);
 			if (block == null)
 				throw new IllegalStateException("Expected to find pending block at height "+height);
 			
@@ -1273,16 +1273,13 @@ public class PendingBranch
 		
 		synchronized(this)
 		{
-			PendingBlock block = null;
-			for (PendingBlock vertex : this.blocks)
+			for (final PendingBlock vertex : this.blocks)
 			{
 				if (vertex.getHeight() == height)
-				{
-					block = vertex;
-					break;
-				}
+					return vertex;
 			}
-			return block;
+
+			return null;
 		}
 	}
 
@@ -1302,9 +1299,9 @@ public class PendingBranch
 				return null;
 			
 			BlockHeader buildableHead = this.root;
-			for (PendingBlock vertex : this.blocks)
+			for (final PendingBlock vertex : this.blocks)
 			{
-				if (vertex.getHeight() < round.clock() && vertex.getBlock() != null && isApplied(vertex.getHash()) == true && vertex.getHeight() > buildableHead.getHeight())
+				if (vertex.getHeight() < round.clock() && vertex.isConstructed() == true && isApplied(vertex.getHash()) == true && vertex.getHeight() > buildableHead.getHeight())
 					buildableHead = vertex.getHeader();
 				else
 					break;
@@ -1314,16 +1311,16 @@ public class PendingBranch
 		}
 	}
 	
-	public boolean isBuildable(BlockHeader header)
+	public boolean isBuildable(final BlockHeader header)
 	{
 		synchronized(this)
 		{
 			if (this.root.getHash().equals(header.getHash()))
 				return true;
 			
-			for (PendingBlock vertex : this.blocks)
+			for (final PendingBlock vertex : this.blocks)
 			{
-				if (vertex.getHash().equals(header.getHash()) && vertex.getBlock() != null && isApplied(vertex.getHash()))
+				if (vertex.getHash().equals(header.getHash()) && vertex.isConstructed() == true && isApplied(vertex.getHash()) == true)
 					return true;
 			}
 			
@@ -1346,7 +1343,7 @@ public class PendingBranch
 	{
 		synchronized(this)
 		{
-			for (PendingBlock vertex : this.blocks)
+			for (final PendingBlock vertex : this.blocks)
 			{
 				if (vertex.getBlock() == null)
 					return false;
@@ -1359,7 +1356,7 @@ public class PendingBranch
 	{
 		synchronized(this)
 		{
-			for (PendingBlock vertex : this.blocks)
+			for (final PendingBlock vertex : this.blocks)
 			{
 				if (isApplied(vertex.getHash()) == false)
 					return false;
