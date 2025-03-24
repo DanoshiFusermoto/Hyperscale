@@ -162,13 +162,14 @@ public class BlockHandler implements Service
 				final ProgressRound.State progressRoundPhase = progressRoundEvent.getProgressPhase();
 					
 				// TODO local/secondary proposals on timeout
-				if (progressRoundPhase.equals(ProgressRound.State.NONE))
-					prebuild(progressRound, ProgressRound.State.NONE);
-				else if (progressRoundPhase.equals(ProgressRound.State.VOTING))
+				if (progressRoundPhase.equals(ProgressRound.State.VOTING))
 					prebuild(progressRound, ProgressRound.State.VOTING);
-				else if (progressRoundPhase.equals(ProgressRound.State.TRANSITION) && 
-						 progressRound.isProposalsLatent() && progressRound.getProposers().isEmpty())
-					prebuild(progressRound, ProgressRound.State.TRANSITION);
+				else if (progressRoundPhase.equals(ProgressRound.State.TRANSITION))
+				{
+					// Trigger secondaries proposal build
+					if (progressRound.isProposalsLatent() && progressRound.getProposers().isEmpty())
+						prebuild(progressRound, ProgressRound.State.TRANSITION);
+				}
 				
 				_decideCommit(progressRound, progressRoundPhase);
 			}
@@ -607,11 +608,11 @@ public class BlockHandler implements Service
 						blocksLog.info(this.context.getName()+": Seen proposal "+pendingBlock.getHash()+" for progress round "+proposalRound.clock()+" from "+pendingBlock.getHeader().getProposer());
 				}
 				
-				if (pendingBlock.getBlock() == null)
+				if (pendingBlock.isConstructed() == false)
 				{
 					final PendingBlock previousBlock = this.pendingBlocks.get(pendingBlock.getHeader().getPrevious());
 					if (pendingBlock.getHeader().getPrevious().equals(head.getHash()) == false && 
-						previousBlock != null && previousBlock.getBlock() == null)
+						previousBlock != null && previousBlock.isConstructed() == false)
 						continue;
 
 					if (blocksLog.hasLevel(Logging.DEBUG))
@@ -1184,8 +1185,10 @@ public class BlockHandler implements Service
 					final PendingBlock pendingBlock = this.pendingBlocks.get(proposal);
 					if (pendingBlock == null)
 						continue;
-					if (pendingBlock.getBlock() == null)
+					
+					if (pendingBlock.isConstructed() == false)
 						continue;
+					
 					try
 					{
 						contructedVotePower += this.context.getLedger().getValidatorHandler().getVotePower(progressRound.epoch(), pendingBlock.getHeader().getProposer());
@@ -1511,7 +1514,7 @@ public class BlockHandler implements Service
 		if (pendingBlock.isApplied() == false)
 			return null;
 
-		if (pendingBlock.getBlock() == null)
+		if (pendingBlock.isConstructed() == false)
 			return null;
 		
 		BlockVote blockVote = null;
@@ -1558,12 +1561,8 @@ public class BlockHandler implements Service
 		if (progressRound.driftClock() > 0)
 			return;
 		
-		// Initial genesis MUST build on phase NONE
-		if (progressRound.clock() <= 1 && progressPhase.equals(ProgressRound.State.VOTING))
-			return;
-
 		final ProgressRound buildRound;
-		if (progressPhase.equals(ProgressRound.State.NONE) || progressPhase.equals(ProgressRound.State.TRANSITION))
+		if (progressPhase.equals(ProgressRound.State.TRANSITION))
 		{
 			buildRound = progressRound;
 		}
@@ -1652,18 +1651,25 @@ public class BlockHandler implements Service
 			}
 			else
 			{
-				blocksLog.warn(this.context.getName()+": No branch selected at "+this.buildClock.get()+" building on ledger head "+ledgerState.getKey());
+				blocksLog.warn(this.context.getName()+": No branch selected at "+progressRound.clock()+" with ledger head "+ledgerState.getKey());
 	
-				selectedBranch = new PendingBranch(this.context, ledgerState.getKey(), ledgerState.getValue(), Collections.emptyList());
-				buildableHeader = selectedBranch.getRoot();
+				// TODO secondaries?
+				
+				return null;
 			}
 		}
 		else
-			buildableHeader = selectedBranch.getBuildable(progressRound);
+		{
+			final PendingBlock buildableBlock = selectedBranch.getBlockAtHeight(progressRound.clock()-1);
+			if (buildableBlock.isConstructable())
+				buildableHeader = buildableBlock.getHeader();
+			else
+				buildableHeader = null;
+		}
 		
 		if (buildableHeader == null)
 		{
-			blocksLog.warn(this.context.getName()+": No buildable header available at "+this.buildClock.get()+" on selected branch "+selectedBranch);
+			blocksLog.warn(this.context.getName()+": No buildable header available for progress round "+progressRound.clock()+" on selected branch "+selectedBranch);
 			return null;
 		}
 
@@ -1676,9 +1682,9 @@ public class BlockHandler implements Service
 		
 		long buildClock = buildableHeader.getHeight();
 		final List<PendingBlock> generatedBlocks = new ArrayList<>();
-		while(buildClock <= progressRound.clock()-1)
+		while(buildClock < progressRound.clock())
 		{
-			PendingBlock generatedBlock = this.blockBuilder.build(buildableHeader, buildableBranch, ledgerState.getKey());
+			final PendingBlock generatedBlock = this.blockBuilder.build(buildableHeader, buildableBranch, ledgerState.getKey());
 			if (generatedBlock == null)
 				throw new IllegalStateException("Failed to build all required blocks in branch "+buildableBranch);
 
@@ -1833,7 +1839,7 @@ public class BlockHandler implements Service
 			if (blocksLog.hasLevel(Logging.DEBUG))
 				blocksLog.debug(this.context.getName()+": Removed "+pendingBlock+" post commit of head "+proposalsCommitted.getLast().toString());
 
-			if (pendingBlock.getBlock() != null)
+			if (pendingBlock.isConstructed() == true)
 			{
 				this.context.getMetaData().increment("ledger.block.processed");
 				this.context.getMetaData().increment("ledger.block.latency", pendingBlock.getBlock().getAge(TimeUnit.MILLISECONDS));
@@ -1988,7 +1994,7 @@ public class BlockHandler implements Service
 		if (pendingBlock.getHeader() == null)
 			throw new IllegalStateException("Pending block "+pendingBlock.getHash()+" does not have a header");
 		
-		if (pendingBlock.getBlock() == null)
+		if (pendingBlock.isConstructed() == false)
 			throw new IllegalStateException("Pending block "+pendingBlock.getHash()+" does not have a constructed block");
 		
 		if (pendingBlock.getHeader().getProposer().equals(this.context.getNode().getIdentity()) == false)
@@ -2306,7 +2312,7 @@ public class BlockHandler implements Service
 		if (pendingBlock.getHeader() == null)
 			throw new IllegalStateException("Pending block "+pendingBlock.getHash()+" does not have a header");
 		
-		if (pendingBlock.getBlock() == null)
+		if (pendingBlock.isConstructed() == false)
 			throw new IllegalStateException("Pending block "+pendingBlock.getHash()+" is not constructed");
 
 		if (pendingBlock.isUnbranched() == false)
@@ -2381,7 +2387,7 @@ public class BlockHandler implements Service
 		}
 	}
 	
-	private PendingBranch findHighestWorkBranch(final List<PendingBranch> branches, final long height, boolean strict) 
+	private PendingBranch findHighestWorkBranch(final List<PendingBranch> branches, final long height) 
 	{
 	    PendingBranch selectedBranch = null;
 	    BlockHeader highestWork = null;
@@ -2396,7 +2402,7 @@ public class BlockHandler implements Service
 	        	if (branch.isBuildable(block.getHeader()) == false)
 	        		break;
 	        	
-	        	if (strict && block.getHeight() != height)
+	        	if (block.getHeight() != height)
 	        		continue;
 	        	
             	final BlockHeader header = block.getHeader();
@@ -2428,7 +2434,7 @@ public class BlockHandler implements Service
 	    return totalVotePower;
 	}
 	
-	private PendingBranch selectSuperBranch(final long height, boolean strict)
+	private PendingBranch selectSuperBranch(final long height)
 	{
 	    final List<PendingBranch> candidateBranches;
 	    synchronized(this.pendingBranches) 
@@ -2436,8 +2442,18 @@ public class BlockHandler implements Service
 	        if (this.pendingBranches.isEmpty())
 	            throw new IllegalStateException("No pending branches available");
 	            
-	        candidateBranches = new ArrayList<PendingBranch>(this.pendingBranches);
+	        candidateBranches = new ArrayList<PendingBranch>();
+	        for (final PendingBranch pendingBranch : this.pendingBranches)
+	        {
+	        	if (pendingBranch.getBlockAtHeight(height) == null)
+	        		continue;
+	        	
+	        	candidateBranches.add(pendingBranch);
+	        }
 	    }
+	    
+	    if (candidateBranches.isEmpty())
+	    	return null;
 	    
 	    // FIRST: Check if any branches contain super blocks
 	    final List<PendingBranch> branchesWithSupers = new ArrayList<>(candidateBranches.size());
@@ -2479,23 +2495,23 @@ public class BlockHandler implements Service
 	        }
 
 	        // Pick highest work proposal among these branches
-	        final PendingBranch selected = findHighestWorkBranch(consensusBranches, height, strict);
+	        final PendingBranch selected = findHighestWorkBranch(consensusBranches, height);
 	        if (selected != null)
 	            return selected;
 	    }
 	    
 	    // Fallback: No supers exist or no valid blocks building on branches with vote power
-	    return findHighestWorkBranch(candidateBranches, height, strict);
+	    return findHighestWorkBranch(candidateBranches, height);
 	}
 
 	private PendingBranch selectBranchToVote(final ProgressRound round) 
 	{
-		return selectSuperBranch(round.clock(), true);
+		return selectSuperBranch(round.clock());
 	}
 
 	private PendingBranch selectBranchToExtend(final ProgressRound round) 
 	{
-		return selectSuperBranch(round.getState().equals(ProgressRound.State.VOTING) ? round.clock() : round.clock()-1, false);
+		return selectSuperBranch(round.clock()-1);
 	}
 
 	private PendingBranch selectBranchWithQuorum(final ProgressRound round)
