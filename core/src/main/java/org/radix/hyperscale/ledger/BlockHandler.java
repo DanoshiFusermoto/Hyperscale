@@ -1176,8 +1176,9 @@ public class BlockHandler implements Service
 		if (progressRound.getState().equals(ProgressRound.State.TRANSITION))
 		{
 			final long transitionThreshold = progressRound.getProposeThreshold();
-			long contructedVotePower = 0;
+			long constructedVotePower = 0;
 
+			// Must have constructed proposals to proceed to the next phase
 			if (progressRound.isTransitionLatent() || progressRound.isFullyProposed())
 			{
 				for(final Hash proposal : progressRound.getProposals())
@@ -1191,7 +1192,7 @@ public class BlockHandler implements Service
 					
 					try
 					{
-						contructedVotePower += this.context.getLedger().getValidatorHandler().getVotePower(progressRound.epoch(), pendingBlock.getHeader().getProposer());
+						constructedVotePower += this.context.getLedger().getValidatorHandler().getVotePower(progressRound.epoch(), pendingBlock.getHeader().getProposer());
 					}
 					catch (IOException ioex)
 					{
@@ -1200,10 +1201,13 @@ public class BlockHandler implements Service
 				}
 			}
 			
-			if (progressRound.isTransitionTimedout() || contructedVotePower >= transitionThreshold)
+			// Phase can proceed if the constructed proposal threshold is met, or if the transition phase is latent
+			// and there is at least ONE constructed proposal.
+			// TODO might be improvements possible here by considering primary and secondary proposers separately
+			if ((progressRound.isTransitionLatent() && constructedVotePower > 0) || constructedVotePower >= transitionThreshold)
 			{
-				if (progressRound.isTransitionTimedout())
-					blocksLog.warn(this.context.getName()+": Transition phase timed out "+progressRound);
+				if (progressRound.isTransitionLatent())
+					blocksLog.warn(this.context.getName()+": Transition phase latent "+progressRound);
 				else if (blocksLog.hasLevel(Logging.INFO))
 					blocksLog.info(this.context.getName()+": Transition phase completed "+progressRound);
 
@@ -1517,38 +1521,35 @@ public class BlockHandler implements Service
 		if (pendingBlock.isConstructed() == false)
 			return null;
 		
-		BlockVote blockVote = null;
 		long votePower = branch.getVotePower(round.clock(), this.context.getNode().getIdentity());
-		if (votePower > 0)
+		if (votePower == 0)
+			return null;
+
+		final BlockVote blockVote = new BlockVote(pendingBlock.getHash(), this.context.getNode().getIdentity().getKey());
+		blockVote.sign(this.context.getNode().getKeyPair());
+		if (this.context.getLedger().getLedgerStore().store(blockVote).equals(OperationStatus.SUCCESS))
 		{
-			blockVote = new BlockVote(pendingBlock.getHash(), this.context.getNode().getIdentity().getKey());
-			blockVote.sign(this.context.getNode().getKeyPair());
-				
-			if (this.context.getLedger().getLedgerStore().store(blockVote).equals(OperationStatus.SUCCESS))
-			{
-				this.votesToVerify.put(blockVote.getHash(), blockVote);
-				this.blockProcessor.signal();
+			this.votesToVerify.put(blockVote.getHash(), blockVote);
+			this.blockProcessor.signal();
 
-				final ShardGroupID localShardGroupID = ShardMapper.toShardGroup(this.context.getNode().getIdentity(), this.context.getLedger().numShardGroups());
-				if (BlockHandler.this.context.getNetwork().getGossipHandler().broadcast(blockVote, localShardGroupID) == false)
-					blocksLog.warn(BlockHandler.this.context.getName()+": Failed to broadcast own block vote "+blockVote);
+			final ShardGroupID localShardGroupID = ShardMapper.toShardGroup(this.context.getNode().getIdentity(), this.context.getLedger().numShardGroups());
+			if (BlockHandler.this.context.getNetwork().getGossipHandler().broadcast(blockVote, localShardGroupID) == false)
+				blocksLog.warn(BlockHandler.this.context.getName()+": Failed to broadcast own block vote "+blockVote);
 
-				if (blocksLog.hasLevel(Logging.INFO))
-				{
-					if (pendingBlock.getHeader().getProposer().equals(this.context.getNode().getIdentity()))
-						blocksLog.info(BlockHandler.this.context.getName()+": Voted on own block "+pendingBlock+" "+blockVote.getHash());
-					else
-						blocksLog.info(BlockHandler.this.context.getName()+": Voted on block "+pendingBlock+" "+blockVote.getHash());
-				}
-			}
-			else
+			if (blocksLog.hasLevel(Logging.INFO))
 			{
-				// TODO handle better?
-				blocksLog.error(BlockHandler.this.context.getName()+": Vote on block "+pendingBlock+" failed");
+				if (pendingBlock.getHeader().getProposer().equals(this.context.getNode().getIdentity()))
+					blocksLog.info(BlockHandler.this.context.getName()+": Voted on own block "+pendingBlock+" "+blockVote.getHash());
+				else
+					blocksLog.info(BlockHandler.this.context.getName()+": Voted on block "+pendingBlock+" "+blockVote.getHash());
 			}
+			
+			return blockVote;
 		}
-		
-		return blockVote;
+
+		// TODO handle better?
+		blocksLog.error(BlockHandler.this.context.getName()+": Vote on block "+pendingBlock+" failed");
+		return null;
 	}
 	
 	private void prebuild(final ProgressRound progressRound, final ProgressRound.State progressPhase)
@@ -1661,7 +1662,7 @@ public class BlockHandler implements Service
 		else
 		{
 			final PendingBlock buildableBlock = selectedBranch.getBlockAtHeight(progressRound.clock()-1);
-			if (buildableBlock.isConstructable())
+			if (buildableBlock.isConstructed())
 				buildableHeader = buildableBlock.getHeader();
 			else
 				buildableHeader = null;
@@ -1669,7 +1670,7 @@ public class BlockHandler implements Service
 		
 		if (buildableHeader == null)
 		{
-			blocksLog.warn(this.context.getName()+": No buildable header available for progress round "+progressRound.clock()+" on selected branch "+selectedBranch);
+			blocksLog.warn(this.context.getName()+": No buildable header available at "+progressRound.clock()+" on selected branch "+selectedBranch);
 			return null;
 		}
 
@@ -2397,20 +2398,21 @@ public class BlockHandler implements Service
 	        if (height <= branch.getRoot().getHeight())
 	            continue;
 	        
-	        for (final PendingBlock block : branch.getBlocks()) 
-	        {
-	        	if (branch.isBuildable(block.getHeader()) == false)
-	        		break;
+	        final PendingBlock block = branch.getBlockAtHeight(height);
+	        if (block == null)
+	        	continue;
+	        
+	        if (block.isConstructed() == false)
+	        	continue;
+	        
+        	if (branch.isBuildable(block.getHeader()) == false)
+        		continue;
 	        	
-	        	if (block.getHeight() != height)
-	        		continue;
-	        	
-            	final BlockHeader header = block.getHeader();
-                if (highestWork == null || header.getTotalWork().compareTo(highestWork.getTotalWork()) > 0) 
-                {
-                    highestWork = header;
-                    selectedBranch = branch;
-                }
+           	final BlockHeader header = block.getHeader();
+            if (highestWork == null || header.getTotalWork().compareTo(highestWork.getTotalWork()) > 0) 
+            {
+                highestWork = header;
+                selectedBranch = branch;
 	        }
 	    }
 	    
@@ -2532,11 +2534,10 @@ public class BlockHandler implements Service
 			if (this.pendingBranches.isEmpty())
 				throw new IllegalStateException("No pending branches available");
 
-			Iterator<PendingBranch> pendingBranchIterator = this.pendingBranches.iterator();
+			final Iterator<PendingBranch> pendingBranchIterator = this.pendingBranches.iterator();
 			while (pendingBranchIterator.hasNext())
 			{
 				final PendingBranch pendingBranch = pendingBranchIterator.next();
-
 				try
 				{
 					if (pendingBranch.isEmpty())
@@ -2556,12 +2557,12 @@ public class BlockHandler implements Service
 						continue;
 					}
 					
-					LinkedList<PendingBlock> supers = pendingBranch.supers();
+					final LinkedList<PendingBlock> supers = pendingBranch.supers();
 					if (supers.size() < Constants.MIN_COMMIT_SUPERS)
 						continue;
 					
 					PendingBlock superBlock = null;
-					Iterator<PendingBlock> superBlockIterator = supers.iterator();
+					final Iterator<PendingBlock> superBlockIterator = supers.iterator();
 					while(superBlockIterator.hasNext())
 					{
 						superBlock = superBlockIterator.next();

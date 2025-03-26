@@ -32,7 +32,7 @@ public class ProgressRound
 	private final long proposalThreshold;
 	private volatile long proposalWeight;
 	private volatile long proposalsTimeout;
-	private volatile int primaryProposed;
+	private volatile int primariesProposed;
 
 	private volatile long transitionTimeout;
 
@@ -63,7 +63,7 @@ public class ProgressRound
 		this.voteThreshold = ValidatorHandler.twoFPlusOne(totalVotePower);
 		this.voted = Sets.mutable.<Identity>ofInitialCapacity(8).asSynchronized();
 
-		this.primaryProposed = 0;
+		this.primariesProposed = 0;
 		this.proposalsTimeout = 0;
 		this.proposed = Sets.mutable.<Identity>ofInitialCapacity(proposers.size()).asSynchronized();
 		this.proposers = Sets.immutable.<Identity>ofAll(proposers).castToSet();
@@ -220,14 +220,6 @@ public class ProgressRound
 		return Time.getSystemTime() > this.transitionStartAt + (Ledger.definitions().roundInterval() / 3);
 	}
 
-	public boolean isTransitionTimedout()
-	{
-		if (this.transitionTimeout == 0)
-			return false;
-		
-		return Time.getSystemTime() > this.transitionTimeout;
-	}
-
 	boolean propose(final Hash proposal, final Identity identity, final long votePower)
 	{
 		// TODO penalties
@@ -241,7 +233,7 @@ public class ProgressRound
 		this.proposalWeight += votePower;
 		
 		if (this.proposers.contains(identity))
-			this.primaryProposed++;
+			this.primariesProposed++;
 		
 		return true;
 	}
@@ -317,7 +309,7 @@ public class ProgressRound
 	
 	public boolean isFullyProposed()
 	{
-		return this.primaryProposed == this.proposers.size();
+		return this.primariesProposed == this.proposers.size();
 	}
 	
 	public List<Identity> getAbsentProposers()
