@@ -838,55 +838,69 @@ public class PendingBranch
 	
 	PendingBlock commitable(int superCount)
 	{
-		synchronized(this)
-		{
-			// See if there is a section of the best branch that can be committed
+	    synchronized(this)
+	    {
+	        // Check if we have enough super blocks to satisfy consensus rules
+	    	//
 			// Blocks to be committed require at least one "confirming" super block higher than it, thus there will always be at least one super block in a pending branch.
-			// The required quantity of super blocks in a branch is defined by minSupers and may be larger than 2 depending on certain conditions. 
-			// TODO using pendingBlock.getHeader().getHeight() as the vote power timestamp possibly makes this weakly subjective and may cause issue in long branches
-			final LinkedList<PendingBlock> supers = supers();
-			if (supers.size() < Math.max(superCount, Constants.MIN_COMMIT_SUPERS))
-				return null;
-			
-			if (blocksLog.hasLevel(Logging.DEBUG))
-				blocksLog.debug(this.context.getName()+": Found commit branch "+this+" with supers "+supers);
-			
-			PendingBlock superBlock = null;
-			final Iterator<PendingBlock> superBlockIterator = supers.iterator();
-			while(superBlockIterator.hasNext())
-			{
-				superBlock = superBlockIterator.next();
+			// The required quantity of super blocks in a branch is defined by 'superCount' and may be larger than 2 depending on certain conditions.
+	        final LinkedList<PendingBlock> supers = supers();
+	        if (supers.size() < Math.max(superCount, Constants.MIN_COMMIT_SUPERS))
+	            return null;
 
-				if (supers.getLast().equals(superBlock) == false)
-					break;
-				
-				superBlock = null;
-			}
-			
-			if (superBlock == null)
-				return null;
-			
-			PendingBlock commitable = null;
-			final Iterator<PendingBlock> vertexIterator = this.blocks.iterator();
-			while(vertexIterator.hasNext())
-			{
-				final PendingBlock vertex = vertexIterator.next();
-				if (vertex.isConstructed() == false)
-					break;
+	        if (blocksLog.hasLevel(Logging.DEBUG))
+	            blocksLog.debug(this.context.getName()+": Found commit branch "+this+" with supers "+supers);
 
-				commitable = vertex;
+	        // Find the highest constructed super that is NOT the last super
+	        PendingBlock highestConstructedSuper = null;
+	        for (final PendingBlock superBlock : supers) 
+	        {
+	            // Break on the last super
+	            if (supers.getLast().equals(superBlock))
+	                break;
+	                
+	            // Also break on a non-constructed supers
+	            if (superBlock.isConstructed() == false)
+	                break;
+	                
+	            highestConstructedSuper = superBlock;
+	        }
+	        
+	        if (highestConstructedSuper == null)
+	            return null;
 
-				// Only commit to the first super in the branch
-				if (superBlock.equals(vertex))
-					break;
-			}
+	        // Check if all blocks up to this super are constructed
+	        boolean allConstructed = true;
+	        PendingBlock lastConstructedSuper = null;
+	        
+	        for (final PendingBlock vertex : this.blocks) 
+	        {
+	            // If we've reached our target super, we're done
+	            if (highestConstructedSuper.equals(vertex))
+	                break;
+	                
+	            // If we hit a non-constructed block, we can't commit to our target
+	            if (vertex.isConstructed() == false) 
+	            {
+	                allConstructed = false;
+	                break;
+	            }
+	            
+	            // Keep track of the last constructed super seen
+	            if (supers.contains(vertex) && vertex.isConstructed())
+	                lastConstructedSuper = vertex;
+	        }
+	        
+	        // If all blocks up to our target are constructed, return the target
+	        // Otherwise, return the last constructed super we found
+	        PendingBlock commitable = allConstructed ? highestConstructedSuper : lastConstructedSuper;
 
-			if (commitable != null && blocksLog.hasLevel(Logging.INFO))
-				blocksLog.info(this.context.getName()+": Found commitable block "+commitable+" in branch "+this);
+	        if (commitable != null && blocksLog.hasLevel(Logging.INFO))
+	            blocksLog.info(this.context.getName()+": Found commitable block "+commitable+" in branch "+this);
 
-			return commitable;
-		}
-	}
+	        return commitable;
+	    }
+	}	
 
 	LinkedList<PendingBlock> supers()
 	{
