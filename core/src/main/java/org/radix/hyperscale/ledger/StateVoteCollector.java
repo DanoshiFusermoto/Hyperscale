@@ -263,7 +263,7 @@ public final class StateVoteCollector
 				StateVote stateVote = this.votes.get(stateKey);
 				List<MerkleProof> voteMerkleAudit = MERKLE_AUDITS_DISABLED == false && this.states.size() > 1 ? voteMerkleTree.auditProof(stateVote.getObject()) : rootMerkleProofAudit;
 				StateVote completedStateVote = new StateVote(stateVote.getAddress(), stateVote.getAtom(), stateVote.getBlock(), stateVote.getExecution(),
-															 voteMerkleHash, voteMerkleAudit, key.getPublicKey(), stateVote.getVotePower(), signature);
+															 voteMerkleHash, voteMerkleAudit, key.getPublicKey(), signature, stateVote.getWeight());
 				completedStateVotes.add(completedStateVote);
 			}
 			

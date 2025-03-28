@@ -238,7 +238,7 @@ public final class StateVoteBlock extends ExtendedObject implements EphemeralPri
 		for(int i = 0 ; i < referenceStateVoteBlock.votes.size() ; i++)
 		{
 			StateVote vote = referenceStateVoteBlock.votes.get(i);
-			votes.add(new StateVote(vote.getObject(), vote.getAddress(), vote.getAtom(), this.block, vote.getExecution(), vote.getVoteMerkle(), vote.getVoteAudit(), this.owner, votePower, this.signature));
+			votes.add(new StateVote(vote.getObject(), vote.getAddress(), vote.getAtom(), this.block, vote.getExecution(), vote.getVoteMerkle(), vote.getVoteAudit(), this.owner, this.signature, votePower));
 		}
 		return Collections.unmodifiableList(votes);
 	}
