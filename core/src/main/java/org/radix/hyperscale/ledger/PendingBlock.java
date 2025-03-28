@@ -204,17 +204,6 @@ public final class PendingBlock implements Hashable
 		}
 	}
 	
-	long getVoteThreshold()
-	{
-		synchronized(this)
-		{
-			if (this.unbranched)
-				throw new IllegalStateException("Branch not set for "+this);
-			
-			return this.voteThreshold;
-		}
-	}
-
 	boolean isApplied()
 	{
 		return this.applied;
@@ -1076,11 +1065,30 @@ public final class PendingBlock implements Hashable
 		}
 	}
 
-	public long getVoteWeight() 
+	long getVoteWeight() 
 	{
 		synchronized(this)
 		{
 			return this.voteWeight;
+		}
+	}
+	
+	long getVoteThreshold()
+	{
+		synchronized(this)
+		{
+			if (this.unbranched)
+				throw new IllegalStateException("Branch not set for "+this);
+			
+			return this.voteThreshold;
+		}
+	}
+	
+	boolean isSuper()
+	{
+		synchronized(this)
+		{
+			return this.voteWeight >= this.voteThreshold;
 		}
 	}
 
