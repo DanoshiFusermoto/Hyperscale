@@ -22,7 +22,6 @@ import org.radix.hyperscale.crypto.bls12381.BLSPublicKey;
 import org.radix.hyperscale.crypto.bls12381.BLSSignature;
 import org.radix.hyperscale.logging.Logger;
 import org.radix.hyperscale.logging.Logging;
-import org.radix.hyperscale.utils.Numbers;
 
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ListMultimap;
@@ -146,10 +145,9 @@ public final class BlockVoteCollector
 		}
 	}
 	
-	void vote(final BlockVote blockVote, final long votePower)
+	void vote(final BlockVote blockVote)
 	{
 		Objects.requireNonNull(blockVote, "Block vote is null");
-		Numbers.isNegative(votePower, "Vote power is negative");
 
 		if (blockVote.getHeight() != this.progressRound.clock())
 			throw new IllegalArgumentException("Block vote "+blockVote+" is not for progress round "+this.progressRound.clock());
@@ -160,18 +158,18 @@ public final class BlockVoteCollector
 				throw new IllegalArgumentException("Block vote owner "+blockVote.getOwner().getIdentity().toString(12)+" has already cast a vote for progress round "+this.progressRound.clock());
 
 			this.votes.put(blockVote.getHash(), blockVote);
-			this.voted.put(blockVote.getOwner().getIdentity(), votePower);
+			this.voted.put(blockVote.getOwner().getIdentity(), blockVote.getWeight());
 
 			// Not local validator vote power, then apply
 			if (blockVote.getOwner().equals(this.context.getNode().getIdentity().getKey()) == false)
-				this.voteWeight += votePower;
+				this.voteWeight += blockVote.getWeight();
 			
 			// Special terms for local validator vote power
 			if (this.localApplied == false && this.voted.containsKey(this.context.getNode().getIdentity()) == true)
 			{
 				// Local vote power is very high (and might cause liveness stall), acting as a singleton 
 				// or the already counted votes constitute a majority
-				boolean applyLocalVotePower = votePower > (this.voteThreshold / 2) || this.voteWeight >= this.voteThreshold;
+				boolean applyLocalVotePower = blockVote.getWeight() > (this.voteThreshold / 2) || this.voteWeight >= this.voteThreshold;
 				if (applyLocalVotePower == false)
 				{
 					// Otherwise if any proposal has at least f+1 pledged, safe to also apply local vote
