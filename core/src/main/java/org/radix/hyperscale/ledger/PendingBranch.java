@@ -1226,23 +1226,6 @@ public class PendingBranch
 		// TODO Liveness recovery piece goes here // REMOVED FOR OPEN SOURCE
 	}
 
-	long getVoteWeight(final long height)
-	{
-		Numbers.isNegative(height, "Height is negative");
-		
-		synchronized(this)
-		{
-			if (this.root.getHeight() == height)
-				throw new IllegalArgumentException("Block at height "+height+" is branch root "+this.root);
-			
-			final PendingBlock block = getBlockAtHeight(height);
-			if (block == null)
-				throw new IllegalStateException("Expected to find pending block at height "+height);
-			
-			return block.getVoteWeight();
-		}
-	}
-
 	public long getVotePower(final long height, final Bloom owners) throws IOException
 	{
 		Objects.requireNonNull(owners, "Identities is null");
