@@ -58,6 +58,34 @@ public class ProgressRound
 	
 	private final QuorumCertificate view;
 	private volatile QuorumCertificate certificate;
+
+	ProgressRound(final BlockHeader head)
+	{
+		this.startedAt = head.getTimestamp();
+		this.completedAt = this.startedAt+Ledger.definitions().roundInterval();
+
+		this.view = head.getView();
+		this.certificate = new QuorumCertificate(head.getHash());
+		
+		this.state = State.COMPLETED;
+		this.clock = head.getHeight();
+		this.driftClock = 0;
+		this.totalVotePower = 1;
+		this.epoch = Epoch.from(this.clock / Ledger.definitions().proposalsPerEpoch());
+
+		this.voteTimeout = 0;
+		this.voteWeight = this.totalVotePower;
+		this.voteThreshold = this.totalVotePower;
+		this.votes = Collections.emptyMap();
+
+		this.primariesProposed = 1;
+		this.proposalsTimeout = 0;
+		this.proposed = Sets.immutable.of(head.getProposer()).castToSet();
+		this.proposers = Sets.immutable.of(head.getProposer()).castToSet();
+		this.proposals = Collections.singletonList(head.getHash());
+		this.proposalWeight = this.totalVotePower;
+		this.proposalThreshold = this.totalVotePower;
+	}
 	
 	ProgressRound(final long clock, final QuorumCertificate view, final Set<Identity> proposers, final long proposersVotePower, final long totalVotePower, final long driftClock)
 	{
