@@ -14,31 +14,29 @@ import org.radix.hyperscale.serialization.DsonOutput.Output;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
-@SerializerId2("ledger.block.certificate")
-@StateContext("block.certificate")
-public final class BlockCertificate extends VoteCertificate
+@SerializerId2("ledger.quorum.certificate")
+@StateContext("quorum.certificate")
+public final class QuorumCertificate extends VoteCertificate
 {
+	public final static QuorumCertificate NULL;
+	
+	static 
+	{
+		NULL = new QuorumCertificate();
+		NULL.block = Hash.ZERO;
+	}
+	
 	@JsonProperty("block")
 	@DsonOutput(Output.ALL)
 	private Hash block;
 	
 	@SuppressWarnings("unused") 
-	private BlockCertificate()
+	private QuorumCertificate()
 	{
 		super();
 	}
 	
-	BlockCertificate(final Hash block)
-	{
-		super();
-		
-		Objects.requireNonNull(block, "Block is null");
-		Hash.notZero(block, "Block is ZERO");
-
-		this.block = block;
-	}
-
-	BlockCertificate(final Hash block, final Bloom signers, final BLSPublicKey key, final BLSSignature signature)
+	QuorumCertificate(final Hash block, final Bloom signers, final BLSPublicKey key, final BLSSignature signature)
 	{
 		super(CommitDecision.ACCEPT, signers, key, signature);
 		
