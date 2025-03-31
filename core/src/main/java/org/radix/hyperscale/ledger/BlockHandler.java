@@ -158,8 +158,8 @@ public class BlockHandler implements Service
 					progressRoundPhase = progressRoundEvent.getProgressPhase();
 					
 					// TODO local/secondary proposals on timeout
-					if (progressRoundPhase.equals(ProgressRound.State.VOTING))
-						prebuild(progressRound, ProgressRound.State.VOTING);
+					if (progressRoundPhase.equals(ProgressRound.State.PROPOSING))
+						prebuild(progressRound, ProgressRound.State.PROPOSING);
 					else if (progressRoundPhase.equals(ProgressRound.State.TRANSITION))
 					{
 						// Trigger secondaries proposal build
@@ -259,7 +259,7 @@ public class BlockHandler implements Service
 		this.context.getNetwork().getGossipHandler().register(BlockHeader.class, new GossipFilter<BlockHeader>(this.context) 
 		{
 			@Override
-			public Set<ShardGroupID> filter(BlockHeader blockHeader)
+			public Set<ShardGroupID> filter(final BlockHeader blockHeader)
 			{
 				final Epoch epoch = Epoch.from(blockHeader);
 				final int numShardGroups = BlockHandler.this.context.getLedger().numShardGroups(epoch);
@@ -311,7 +311,7 @@ public class BlockHandler implements Service
 				if (BlockHandler.this.context.getNode().isSynced() == false)
 					return;
 				
-				for (BlockHeader header : headers)
+				for (final BlockHeader header : headers)
 				{
 					if (blocksLog.hasLevel(Logging.DEBUG))
 						blocksLog.debug(BlockHandler.this.context.getName()+": Block header received "+header+" for "+header.getProposer());
@@ -381,7 +381,7 @@ public class BlockHandler implements Service
 		this.context.getNetwork().getGossipHandler().register(BlockVote.class, new GossipFilter<BlockVote>(this.context) 
 		{
 			@Override
-			public Set<ShardGroupID> filter(BlockVote blockVote)
+			public Set<ShardGroupID> filter(final BlockVote blockVote)
 			{
 				final Epoch epoch = Epoch.from(blockVote.getBlock());
 				final int numShardGroups = BlockHandler.this.context.getLedger().numShardGroups(epoch);
@@ -433,7 +433,7 @@ public class BlockHandler implements Service
 		this.context.getNetwork().getGossipHandler().register(BlockVote.class, new GossipReceiver<BlockVote>() 
 		{
 			@Override
-			public void receive(Collection<BlockVote> blockVotes, AbstractConnection connection) throws IOException
+			public void receive(final Collection<BlockVote> blockVotes, final AbstractConnection connection) throws IOException
 			{
 				if (BlockHandler.this.context.getNode().isSynced() == false)
 					return;
@@ -1513,12 +1513,14 @@ public class BlockHandler implements Service
 			return null;
 		}
 		
-		PendingBlock pendingBlock = branch.getBlockAtHeight(round.clock());
+		final PendingBlock pendingBlock = branch.getBlockAtHeight(round.clock());
 		if (pendingBlock == null)
 		{
 			blocksLog.warn(this.context.getName()+": No proposal available at progress round "+round.clock()+" to vote on in branch "+branch);
 			return null;
 		}
+		
+		
 		
 		if (pendingBlock.isApplied() == false)
 			return null;
@@ -1567,30 +1569,16 @@ public class BlockHandler implements Service
 		if (progressRound.driftClock() > 0)
 			return;
 		
-		final ProgressRound buildRound;
-		if (progressPhase.equals(ProgressRound.State.TRANSITION))
-		{
-			buildRound = progressRound;
-		}
-		else if (progressPhase.equals(ProgressRound.State.VOTING))
-		{
-			buildRound = get(progressRound.clock()+1);
-			if (buildRound == null)
-				throw new IllegalArgumentException("Expected to find next progress round "+(progressRound.clock()+1)+" for build on progress phase "+progressPhase);
-		}
-		else
-			throw new IllegalArgumentException("Called builder with progress phase "+progressPhase+" for progress round "+progressRound);
-		
-		boolean build = buildRound.canPropose(this.context.getNode().getIdentity()) == true;
+		boolean build = progressRound.canPropose(this.context.getNode().getIdentity()) == true;
 
 		if (this.context.getConfiguration().get("ledger.liveness.recovery", Boolean.FALSE) == Boolean.TRUE && 
-			buildRound.getState().equals(ProgressRound.State.TRANSITION))
+			progressRound.getState().equals(ProgressRound.State.TRANSITION))
 			build = false;
 
 		if (this.context.getConfiguration().has("ledger.faults.produce_unbuildable_branches_every"))
 		{
 			int interval = this.context.getConfiguration().get("ledger.faults.produce_unbuildable_branches_every", -1);
-			if (interval > 0 && buildRound.clock() % interval == 0)
+			if (interval > 0 && progressRound.clock() % interval == 0)
 				build = false;
 		}
 		
@@ -1598,7 +1586,7 @@ public class BlockHandler implements Service
 		{
 			try
 			{
-				final List<PendingBlock> generatedBlocks = build(buildRound);
+				final List<PendingBlock> generatedBlocks = build(progressRound);
 				if (generatedBlocks != null)
 				{
 					final ShardGroupID localShardGroupID = ShardMapper.toShardGroup(this.context.getNode().getIdentity(), this.context.getLedger().numShardGroups());
@@ -1625,11 +1613,11 @@ public class BlockHandler implements Service
 			}
 			catch (Exception ex)
 			{
-				blocksLog.error(this.context.getName()+": Failed to build proposal on "+buildRound, ex);
+				blocksLog.error(this.context.getName()+": Failed to build proposal on "+progressRound, ex);
 			}
 		}
 		else if (build && this.buildLock)
-			blocksLog.warn(this.context.getName()+": Build lock is set: Skipping build on proposal "+buildRound);
+			blocksLog.warn(this.context.getName()+": Build lock is set: Skipping build on proposal "+progressRound);
 	}
 
 	private List<PendingBlock> build(final ProgressRound progressRound) throws IOException, LockException, ValidationException, CryptoException
@@ -2418,7 +2406,8 @@ public class BlockHandler implements Service
 	        candidateBranches = new ArrayList<PendingBranch>();
 	        for (final PendingBranch pendingBranch : this.pendingBranches)
 	        {
-	        	if (pendingBranch.getBlockAtHeight(height) == null)
+	        	final PendingBlock pendingBlock = pendingBranch.getBlockAtHeight(height);
+	        	if (pendingBlock == null)
 	        		continue;
 	        	
 	        	candidateBranches.add(pendingBranch);
