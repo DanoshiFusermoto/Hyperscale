@@ -95,11 +95,6 @@ public class BlockHandler implements Service
 		SUCCESS, FAILED, SKIPPED, POSTPONED, STALE;
 	}
 	
-	private enum BlockCertificateStatus
-	{
-		SUCCESS, FAILED, SKIPPED, POSTPONED, STALE;
-	}
-
 	private LatchedProcessor blockProcessor = new LatchedProcessor(Ledger.definitions().roundInterval() / ProgressRound.State.values().length, TimeUnit.MILLISECONDS)
 	{
 		@Override
@@ -228,6 +223,7 @@ public class BlockHandler implements Service
 	private final AtomicLong buildClock;
 	private final AtomicLong shardClock;
 	private final AtomicLong progressClock;
+	private volatile QuorumCertificate progressView;
 	private final MutableLongObjectMap<ProgressRound> progressRounds;
 
 	// TODO temporary fix to ensure that validation of new proposals, and the commitment of existing ones don't cause deadlocks between each other
@@ -1038,18 +1034,20 @@ public class BlockHandler implements Service
 							final long roundVotePower = this.context.getLedger().getValidatorHandler().getVotePower(voteRound.epoch(), blockVote.getOwner().getIdentity());
 							if (roundVotePower == 0)
 								blocksLog.warn(this.context.getName()+": Vote power is zero in epoch "+voteRound.epoch()+" for "+blockVote.getOwner().toString(12));
-	
-							if (voteRound.vote(blockVote.getOwner().getIdentity(), roundVotePower) == false)
-								blocksLog.warn(this.context.getName()+": Block vote "+blockVote.getHash()+" already seen in progress round "+voteRound.clock()+" for "+blockVote.getOwner().toString(12));
-
-							blockVoteCollector.vote(blockVote, roundVotePower);
+							
+							blockVote.setWeight(roundVotePower);
+							blockVoteCollector.vote(blockVote);
 						}
 						catch (IOException ioex)
 						{
 							blocksLog.warn(this.context.getName()+": Failed to pre-process block vote "+blockVote.getHash()+" in progress round "+voteRound.clock()+" for "+blockVote.getOwner().toString(12));
 						}
 					}
-					// TODO penalties for extra voting
+					else
+					{
+						// TODO penalties for extra voting
+						blocksLog.warn(this.context.getName()+": Block vote "+blockVote.getHash()+" already seen in progress round "+voteRound.clock()+" for "+blockVote.getOwner().toString(12));
+					}
 					
 					this.votesToVerify.remove(blockVote.getHash());
 				}
@@ -1233,6 +1231,23 @@ public class BlockHandler implements Service
 					blocksLog.info(this.context.getName()+": Transition phase completed "+progressRound);
 
 				progressRound.stepState();
+				
+				// Do the local vote here
+				// If the local instance shard is behind, don't cast a vote
+				if (progressRound.driftClock() <= 0)
+				{
+					PendingBranch selectedBranch = selectBranchToVote(progressRound);
+					try 
+					{
+						if (selectedBranch != null)
+							vote(progressRound, selectedBranch);
+					} 
+					catch (IOException | CryptoException | ValidationException ex) 
+					{
+						blocksLog.error(this.context.getName()+": Failed to cast vote on progress round "+progressRound+" to branch "+selectedBranch, ex);
+					}
+				}
+				
 				this.context.getEvents().post(new ProgressPhaseEvent(progressRound));
 			}
 
@@ -1241,22 +1256,6 @@ public class BlockHandler implements Service
 		
 		if (progressRound.getState().equals(ProgressRound.State.VOTING))
 		{
-			// If the local instance shard is behind, don't cast a vote
-			if (progressRound.driftClock() <= 0 && 
-				progressRound.hasVoted(this.context.getNode().getIdentity()) == false)
-			{
-				PendingBranch selectedBranch = selectBranchToVote(progressRound);
-				try 
-				{
-					if (selectedBranch != null)
-						vote(progressRound, selectedBranch);
-				} 
-				catch (IOException | CryptoException | ValidationException ex) 
-				{
-					blocksLog.error(this.context.getName()+": Failed to cast vote on progress round "+progressRound+" to branch "+selectedBranch, ex);
-				}
-			}
-
 			if (progressRound.isVoteCompleted() || progressRound.isVoteTimedout())
 			{
 				progressRound.stepState();
@@ -1388,7 +1387,7 @@ public class BlockHandler implements Service
 					nextProposers = Collections.emptySet(); // Forces a progress propose timeout
 				}
 				
-				return new ProgressRound(clock, nextProposers, nextProposersVotePower, nextTotalVotePower, this.shardClock.get()-this.progressClock.get());
+				return new ProgressRound(clock, this.progressView, nextProposers, nextProposersVotePower, nextTotalVotePower, this.shardClock.get()-this.progressClock.get());
 			});
 		}
 		
@@ -1415,16 +1414,13 @@ public class BlockHandler implements Service
 		
 		// Apply the vote to the progress round.  
 		// The vote should be applied even if the pending block is not yet know to ensure responsiveness and liveness of progress rounds 
-		if (voteRound.hasVoted(blockVote.getOwner().getIdentity()) == false)
+		if (voteRound.hasVoted(blockVote.getOwner().getIdentity()))
 		{
-			final long roundVotePower = this.context.getLedger().getValidatorHandler().getVotePower(voteRound.epoch(), blockVote.getOwner().getIdentity());
-			if (roundVotePower == 0)
-				blocksLog.warn(BlockHandler.this.context.getName()+": Progress vote power is zero for "+blockVote.getOwner());
-
-			if (voteRound.vote(blockVote.getOwner().getIdentity(), roundVotePower) == false)
-				blocksLog.warn(BlockHandler.this.context.getName()+": Progress vote "+blockVote.getHash()+" already seen in progress round "+voteRound.clock()+" for "+blockVote.getOwner());
+			// TODO penalty
+			blocksLog.warn(BlockHandler.this.context.getName()+": Progress vote "+blockVote.getHash()+" already seen in progress round "+voteRound.clock()+" for "+blockVote.getOwner());
+			return BlockVoteStatus.SKIPPED;
 		}
-
+		
 		final PendingBlock pendingBlock = this.pendingBlocks.get(blockVote.getBlock());
 		
 		// Postpone applying to the pending block if it is not yet known
@@ -1445,51 +1441,49 @@ public class BlockHandler implements Service
 			return BlockVoteStatus.POSTPONED;
 		}
 		
-		// Apply the vote to the pending block
-		if (pendingBlock.voted(blockVote.getOwner()) == false)
+		// Pending branch for the pending block is unknown
+		final PendingBranch pendingBranch = getPendingBranch(pendingBlock);
+		if (pendingBranch == null)
 		{
-			final PendingBranch pendingBranch = getPendingBranch(pendingBlock);
-			if (pendingBranch == null)
-			{
-				if (blocksLog.hasLevel(Logging.DEBUG))
-					blocksLog.warn(this.context.getName()+": Branch not found for "+blockVote.getHeight()+"@"+blockVote.getBlock()+" when processing block vote "+blockVote.getHash()+" by "+blockVote.getOwner());
+			if (blocksLog.hasLevel(Logging.DEBUG))
+				blocksLog.warn(this.context.getName()+": Branch not found for "+blockVote.getHeight()+"@"+blockVote.getBlock()+" when processing block vote "+blockVote.getHash()+" by "+blockVote.getOwner());
 				
-				return BlockVoteStatus.POSTPONED;
-			}
+			return BlockVoteStatus.POSTPONED;
+		}
 
-			try
+		try
+		{
+			final long preVoteWeight = voteRound.getVoteWeight();
+			voteRound.vote(blockVote);
+			if (blocksLog.hasLevel(Logging.INFO))
+				blocksLog.info(BlockHandler.this.context.getName()+": "+blockVote.getOwner().toString(12)+" voted on block "+blockVote.getHeight()+":"+blockVote.getBlock()+" "+blockVote.getHash());
+	
+			if (preVoteWeight < voteRound.getVoteThreshold() && voteRound.getVoteWeight() >= voteRound.getVoteThreshold())
 			{
-				final long branchVotePower = pendingBranch.getVotePower(blockVote.getHeight(), blockVote.getOwner().getIdentity(), true);
-				final long preWeight = pendingBlock.getVoteWeight(); 
-				if (pendingBlock.vote(blockVote, branchVotePower) == true)
+				final QuorumCertificate certificate = voteRound.buildCertificate();
+				if (certificate == null)
+					blocksLog.error(this.context.getName()+": Expected to construct view quorum certificate for progress round "+voteRound);
+				
+				// A new view certificate was created
+				if (certificate.equals(voteRound.getView()) == false)
 				{
+					final PendingBlock certificateBlock = this.pendingBlocks.get(certificate.getBlock());
+					certificateBlock.setAsSuper();
+					
 					if (blocksLog.hasLevel(Logging.INFO))
-						blocksLog.info(BlockHandler.this.context.getName()+": "+blockVote.getOwner().toString(12)+" voted on block "+pendingBlock+" "+blockVote.getHash());
-
-					if (preWeight < pendingBlock.getVoteThreshold() && pendingBlock.getVoteWeight() >= pendingBlock.getVoteThreshold())
-					{
-						if (blocksLog.hasLevel(Logging.INFO))
-							blocksLog.info(this.context.getName()+": Pending block is now a super "+pendingBlock.toString());
-						
-						if (pendingBlock.buildCertificate() == null)
-							blocksLog.error(this.context.getName()+": Expected to construct block certificate for "+pendingBlock.toString());
-					}
-
-					return BlockVoteStatus.SUCCESS;
+						blocksLog.info(this.context.getName()+": Pending block is now a super "+certificateBlock.toString());
+					
+					this.progressView = certificate;
 				}
-				else
-					return BlockVoteStatus.SKIPPED;
-			}
-			finally
-			{
-				this.context.getMetaData().increment("ledger.blockvote.processed");
-				this.context.getMetaData().increment("ledger.blockvote.latency", blockVote.getAge(TimeUnit.MILLISECONDS));
 			}
 		}
-		else
-			blocksLog.warn(this.context.getName()+": Already seen block vote "+blockVote.getHash()+" for block "+blockVote.getHeight()+"@"+blockVote.getBlock()+" by "+blockVote.getOwner());
+		finally
+		{
+			this.context.getMetaData().increment("ledger.blockvote.processed");
+			this.context.getMetaData().increment("ledger.blockvote.latency", blockVote.getAge(TimeUnit.MILLISECONDS));
+		}
 
-		return BlockVoteStatus.FAILED;
+		return BlockVoteStatus.SUCCESS;
 	}
 	
 	/** Local instance voting on progress round and proposal branch
@@ -1518,7 +1512,7 @@ public class BlockHandler implements Service
 			blocksLog.warn(this.context.getName()+": Progress vote is already cast in progress round "+round.clock()+" by "+this.context.getNode().getIdentity());
 			return null;
 		}
-
+		
 		PendingBlock pendingBlock = branch.getBlockAtHeight(round.clock());
 		if (pendingBlock == null)
 		{
@@ -1696,7 +1690,7 @@ public class BlockHandler implements Service
 		final List<PendingBlock> generatedBlocks = new ArrayList<>();
 		while(buildClock < progressRound.clock())
 		{
-			final PendingBlock generatedBlock = this.blockBuilder.build(buildableHeader, buildableBranch, ledgerState.getKey());
+			final PendingBlock generatedBlock = this.blockBuilder.build(buildableHeader, buildableBranch, ledgerState.getKey(), this.progressView);
 			if (generatedBlock == null)
 				throw new IllegalStateException("Failed to build all required blocks in branch "+buildableBranch);
 
@@ -1977,9 +1971,6 @@ public class BlockHandler implements Service
 			return BlockInsertStatus.POSTPONED;
 
 		final PendingBlock pendingBlock = new PendingBlock(this.context, header);
-		if (header.getCertificate() != null)
-			blocksLog.warn(this.context.getName()+": Discovered certificate when inserting block header "+header.toString());
-
 		if (this.pendingBlocks.putIfAbsent(pendingBlock.getHash(), pendingBlock) != null)
 			throw new IllegalStateException("Pending block "+pendingBlock.getHash()+" is already inserted");
 		
@@ -2278,37 +2269,6 @@ public class BlockHandler implements Service
 	}
 
 	
-	/**
-	 * Verifies and applies a proposal certificate to a proposal.
-	 * 
-	 * Should be private but is visible for testing
-	 * 
-	 * @param blockCertificate
-	 */
-	@VisibleForTesting
-	BlockCertificateStatus apply(final BlockCertificate blockCertificate)
-	{
-		Objects.requireNonNull(blockCertificate, "Block certificate is null");
-
-		if (blockCertificate.getHeight() <= this.context.getLedger().getHead().getHeight())
-			return BlockCertificateStatus.STALE;
-		
-		PendingBlock pendingBlock = this.pendingBlocks.get(blockCertificate.getBlock());
-		if (pendingBlock == null)
-			return BlockCertificateStatus.POSTPONED;
-
-		if (pendingBlock.getHeader() == null)
-			throw new IllegalStateException("Pending block "+pendingBlock.getHash()+" does not have a header");
-		
-		// TODO verification
-		
-		if (pendingBlock.getHeader().getCertificate() != null)
-			return BlockCertificateStatus.SKIPPED;
-
-		pendingBlock.getHeader().setCertificate(blockCertificate);
-		return BlockCertificateStatus.SUCCESS;
-	}
-
 	@VisibleForTesting
 	PendingBlock getBlock(Hash block)
 	{
@@ -2436,12 +2396,12 @@ public class BlockHandler implements Service
 	    for (final PendingBlock block : branch.getBlocks()) 
 	    {
 	        if (block.getHeight() > height)
-	            continue;
+	            break;
 	            
-	        final long votePower = block.getVoteWeight();
-	        final long fPlusOne = (block.getVoteThreshold()/2)+1;
-	        if (votePower >= fPlusOne) 
-	            totalVotePower += votePower;
+	        if (block.isSuper() == false)
+	        	continue;
+	        
+            totalVotePower ++;
 	    }
 	    
 	    return totalVotePower;
@@ -2777,6 +2737,7 @@ public class BlockHandler implements Service
 				// 		has been completed by the network at large.  The network would be safe, but the syncing replica could suffer a local 
 				//		safety / liveness issue.  
 
+				BlockHandler.this.progressView = event.getHead().getView(); 
 				BlockHandler.this.progressClock.set(event.getHead().getHeight()+1);
 				BlockHandler.this.shardClock.set(BlockHandler.this.progressClock.get());
 				BlockHandler.this.buildClock.set(event.getHead().getHeight());
