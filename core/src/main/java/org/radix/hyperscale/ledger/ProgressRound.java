@@ -3,13 +3,24 @@ package org.radix.hyperscale.ledger;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
+import org.eclipse.collections.api.factory.Maps;
 import org.eclipse.collections.api.factory.Sets;
+import org.eclipse.collections.api.map.primitive.MutableObjectLongMap;
+import org.eclipse.collections.impl.factory.primitive.ObjectLongMaps;
+import org.radix.hyperscale.collections.Bloom;
+import org.radix.hyperscale.crypto.CryptoException;
 import org.radix.hyperscale.crypto.Hash;
 import org.radix.hyperscale.crypto.Identity;
+import org.radix.hyperscale.crypto.bls12381.BLS12381;
+import org.radix.hyperscale.crypto.bls12381.BLSPublicKey;
+import org.radix.hyperscale.crypto.bls12381.BLSSignature;
 import org.radix.hyperscale.time.Time;
+import org.radix.hyperscale.utils.Numbers;
 
 public class ProgressRound
 {
@@ -21,7 +32,12 @@ public class ProgressRound
 	private State state;
 	private final long clock;
 	private final Epoch epoch;
+
 	private final long startedAt;
+	private volatile long proposeStartAt;
+	private volatile long transitionStartAt;
+	private volatile long voteStartAt;
+	private volatile long completedAt;
 
 	private final long driftClock;
 	private volatile long driftMilli;
@@ -34,23 +50,23 @@ public class ProgressRound
 	private volatile long proposalsTimeout;
 	private volatile int primariesProposed;
 
-	private volatile long transitionTimeout;
-
-	private final Set<Identity> voted;
+	private final Map<Identity, BlockVote> votes;
 	private final long voteThreshold;
+	private final long totalVotePower;
 	private volatile long voteWeight;
 	private volatile long voteTimeout;
 	
-	private final long totalVotePower;
-	private volatile long proposeStartAt;
-	private volatile long transitionStartAt;
-	private volatile long voteStartAt;
-	private volatile long completedAt;
+	private final QuorumCertificate view;
+	private volatile QuorumCertificate certificate;
 	
-	ProgressRound(final long clock, final Set<Identity> proposers, final long proposersVotePower, final long totalVotePower, final long driftClock)
+	ProgressRound(final long clock, final QuorumCertificate view, final Set<Identity> proposers, final long proposersVotePower, final long totalVotePower, final long driftClock)
 	{
 		this.startedAt = Time.getSystemTime();
 		this.completedAt = -1;
+
+		this.view = Objects.requireNonNull(view, "Local view QC is null");
+
+		Numbers.isNegative(clock, "Round clock is negative");
 
 		this.state = State.NONE;
 		this.clock = clock;
@@ -58,10 +74,16 @@ public class ProgressRound
 		this.totalVotePower = totalVotePower;
 		this.epoch = Epoch.from(clock / Ledger.definitions().proposalsPerEpoch());
 
+		Numbers.isNegative(proposersVotePower, "Primary proposers vote power is negative");
+		Numbers.isNegative(totalVotePower, "Total vote power is negative");
+		
 		this.voteTimeout = 0;
 		this.voteWeight = 0;
 		this.voteThreshold = ValidatorHandler.twoFPlusOne(totalVotePower);
-		this.voted = Sets.mutable.<Identity>ofInitialCapacity(8).asSynchronized();
+		this.votes = Maps.mutable.<Identity, BlockVote>ofInitialCapacity(8).asSynchronized();
+
+		Objects.requireNonNull(proposers, "Primary proposers set is null");
+		Numbers.isZero(proposers.size(), "Primary proposers is empty");
 
 		this.primariesProposed = 0;
 		this.proposalsTimeout = 0;
@@ -70,8 +92,6 @@ public class ProgressRound
 		this.proposals = new ArrayList<Hash>(proposers.size());
 		this.proposalWeight = 0;
 		this.proposalThreshold = ValidatorHandler.twoFPlusOne(proposersVotePower);
-	
-		this.transitionTimeout = 0;
 	}
 
 	public long clock() 
@@ -100,6 +120,11 @@ public class ProgressRound
 	public State getState()
 	{
 		return this.state;
+	}
+	
+	public QuorumCertificate getView()
+	{
+		return this.view;
 	}
 
 	/** Terminates this proposal round, fast forwarding to the completed state.
@@ -139,7 +164,6 @@ public class ProgressRound
 		{
 			this.state = State.TRANSITION;
 			this.transitionStartAt = Time.getSystemTime();
-			this.transitionTimeout = this.transitionStartAt + calculateDriftAdjustment(Ledger.definitions().transitionPhaseTimeout(TimeUnit.MILLISECONDS));
 		}
 		else if (this.state.equals(State.TRANSITION))
 		{
@@ -158,12 +182,12 @@ public class ProgressRound
 		return this.state;
 	}
 	
-	boolean vote(final Identity voter, final long votePower)
+	void vote(final BlockVote vote)
 	{
-		if (this.voted.add(voter) == false)
-			return false;
+		if (this.votes.putIfAbsent(vote.getOwner().getIdentity(), vote) != null)
+			throw new IllegalStateException("Vote already cast by "+vote.getOwner().getIdentity()+" for progress round "+this);
 		
-		this.voteWeight += votePower;
+		this.voteWeight += vote.getWeight();
 		
 		if (this.driftMilli != 0)
 		{
@@ -172,8 +196,6 @@ public class ProgressRound
 		}
 		else
 			this.driftMilli = System.currentTimeMillis();
-		
-		return true;
 	}
 	
 	public long getVoteWeight() 
@@ -209,7 +231,7 @@ public class ProgressRound
 	
 	public boolean hasVoted(final Identity identity) 
 	{
-		return this.voted.contains(identity);
+		return this.votes.containsKey(identity);
 	}
 	
 	public boolean isTransitionLatent()
@@ -333,6 +355,109 @@ public class ProgressRound
 	public long getDuration()
 	{
 		return (this.completedAt == -1 ? Time.getSystemTime() : this.completedAt) - this.proposeStartAt;
+	}
+	
+	boolean hasCertificate()
+	{
+		return this.certificate != null;
+	}
+	
+	QuorumCertificate buildCertificate() throws CryptoException
+	{
+	    synchronized(this)
+	    {
+	        if (this.certificate != null)
+	            throw new IllegalStateException("Quorum certificate is already constructed for progress round "+this);
+
+	        if (this.voteWeight < this.voteThreshold)
+	            throw new IllegalStateException("Can not build a certificate when vote weight of "+this.voteWeight+" is less than vote threshold "+this.voteThreshold);
+
+	        // Find a round proposal which has a quorum of votes
+	        Hash proposalWithQuorum = null;
+	        final MutableObjectLongMap<Hash> weights = ObjectLongMaps.mutable.ofInitialCapacity(this.proposers.size());
+	        
+	        // Calculate weights for all proposals
+	        for (final BlockVote blockVote : this.votes.values())
+	            weights.addToValue(blockVote.getBlock(), blockVote.getWeight());
+	        
+	        // Check if any proposal has reached the threshold
+	        for (Hash proposal : weights.keySet())
+	        {
+	            long weight = weights.get(proposal);
+	            if (weight >= this.voteThreshold)
+	            {
+	                proposalWithQuorum = proposal;
+	                break;
+	            }
+	        }
+	        
+	        // If no proposal has a quorum but we have surpassed vote threshold
+	        if (proposalWithQuorum == null)
+	        {
+	            // Check if it's mathematically impossible to reach a quorum
+	            long[] sortedWeights = weights.values().toSortedArray();
+	            
+	            // Calculate if the highest weighted proposal can reach the threshold
+	            long highestWeight = sortedWeights[sortedWeights.length - 1];
+	            long remainingPotentialVotes = this.totalVotePower - this.voteWeight;
+	            
+	            // If with all remaining potential votes, it's impossible to form a quorum maintain the current view
+	            if (highestWeight + remainingPotentialVotes < this.voteThreshold)
+	            {
+	            	this.certificate = this.view;
+	            	return this.certificate;
+	            }
+	            
+	            // Check if vote distribution makes quorum impossible
+	            long votesNeededForQuorum = this.voteThreshold;
+	            int proposalsWithWeight = 0;
+	            long totalPledgedWeight = 0;
+	            
+		        for (Hash proposal : weights.keySet())
+		        {
+		            long weight = weights.get(proposal);
+	                if (weight > 0) 
+	                {
+	                    proposalsWithWeight++;
+	                    totalPledgedWeight += weight;
+	                }
+	            }
+	            
+	            // If the votes are spread across too many proposals to ever reach quorum
+	            // This is true when removing any single proposal's votes would still leave
+	            // enough total votes, but no single proposal could get enough
+	            if (proposalsWithWeight >= 2 && totalPledgedWeight >= this.voteThreshold &&
+	                this.voteWeight - highestWeight >= this.voteThreshold / 2)
+	            {
+	            	this.certificate = this.view;
+	            	return this.certificate;
+	            }
+	        }
+
+	        // If no quorum and no impossibility detected, return null
+	        if (proposalWithQuorum == null)
+	            return null;
+
+	        // Have a quorum, collect the votes and create a certificate
+	        final Bloom signers = new Bloom(0.000001, this.votes.size());
+	        final List<BLSPublicKey> keys = new ArrayList<>(this.votes.size());
+	        final List<BLSSignature> signatures = new ArrayList<>(this.votes.size());
+	        for (final BlockVote blockVote : this.votes.values())
+	        {
+	            if (blockVote.getBlock().equals(proposalWithQuorum) == false)
+	                continue;
+
+	            keys.add(blockVote.getOwner());
+	            signers.add(blockVote.getOwner().getIdentity().toByteArray());
+	            signatures.add(blockVote.getSignature());
+	        }
+
+	        final BLSPublicKey key = BLS12381.aggregatePublicKey(keys);
+	        final BLSSignature signature = BLS12381.aggregateSignatures(signatures);
+	        final QuorumCertificate certificate = new QuorumCertificate(proposalWithQuorum, signers, key, signature);
+	        this.certificate = certificate;
+	        return certificate;
+	    }
 	}
 	
 	@Override 
