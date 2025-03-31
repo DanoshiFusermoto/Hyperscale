@@ -3,15 +3,20 @@ package org.radix.hyperscale.ledger;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
 import org.radix.hyperscale.Context;
 import org.radix.hyperscale.collections.Bloom;
+import org.radix.hyperscale.crypto.Hash;
 import org.radix.hyperscale.crypto.Identity;
 import org.radix.hyperscale.logging.Logger;
 import org.radix.hyperscale.logging.Logging;
@@ -87,75 +92,34 @@ final class SyncBranch
 		}
 	}
 	
-	BlockHeader commitable() throws IOException
-	{
-		this.lock.lock();
-		try
-		{
-			if (isCanonical() == false)
-				return null;
-			
-			// See if there is a section of the best branch that can be committed (any block that has 2f+1 agreement)
-			// Blocks to be committed require at least one "confirming" super block higher than it, thus there will always 
-			// be at least one super block in a pending branch
-			// TODO using pendingBlock.getHeader().getHeight() as the vote power timestamp possibly makes this weakly subjective and may cause issue in long branches
-			LinkedList<BlockHeader> supers = new LinkedList<BlockHeader>();
-			Iterator<BlockHeader> vertexIterator = this.headers.descendingIterator();
-			while(vertexIterator.hasNext())
-			{
-				BlockHeader vertex = vertexIterator.next();
-				if (vertex.getCertificate() == null)
-					continue;
-				
-				long weight = getVotePower(vertex.getHeight(), vertex.getCertificate().getSigners());
-				long total = getTotalVotePower(vertex.getHeight());
-				long threshold = getVotePowerThreshold(vertex.getHeight());
-				if (weight >= threshold)
-				{
-					if (supers.isEmpty() || supers.size() < Math.ceil(Math.log(size())))
-					{
-						supers.add(vertex);
-						syncLog.info(this.context.getName()+": Found possible commit super block with weight "+weight+"/"+total+" "+vertex);
-					}
-					else
-					{
-						syncLog.info(this.context.getName()+": Found commit at block with weight "+weight+"/"+total+" to commit list "+vertex);
-						return vertex;
-					}
-				}
-			}
-			
-			return null;
-		}
-		finally
-		{
-			this.lock.unlock();
-		}
-	}
-
 	List<BlockHeader> supers() throws IOException
 	{
 		this.lock.lock();
 		try
 		{
-			List<BlockHeader> supers = new ArrayList<BlockHeader>();
 			if (isCanonical() == false)
-				return null;
+				return Collections.emptyList();
 			
-			Iterator<BlockHeader> vertexIterator = this.headers.iterator();
+			final Set<Hash> views = new HashSet<Hash>();
+			final Map<Hash, BlockHeader> supers = new LinkedHashMap<Hash, BlockHeader>(4);
+			final Iterator<BlockHeader> vertexIterator = this.headers.descendingIterator();
 			while(vertexIterator.hasNext())
 			{
-				BlockHeader vertex = vertexIterator.next();
-				if (vertex.getCertificate() == null)
-					continue;
+				final BlockHeader vertex = vertexIterator.next();
+				views.add(vertex.getView().getBlock());
 				
-				long weight = getVotePower(vertex.getHeight(), vertex.getCertificate().getSigners());
-				long threshold = getVotePowerThreshold(vertex.getHeight());
-				if (weight >= threshold)
-					supers.add(vertex);
+				if (views.contains(vertex.getHash()))
+					supers.put(vertex.getHash(), vertex);
 			}
 			
-			return supers;
+			if (supers.isEmpty() == false)
+			{	
+				final List<BlockHeader> result = new ArrayList<BlockHeader>(supers.values());
+				Collections.reverse(result);
+				return result;
+			}
+			
+			return Collections.emptyList();
 		}
 		finally
 		{
