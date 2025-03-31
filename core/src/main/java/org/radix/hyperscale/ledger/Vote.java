@@ -143,31 +143,37 @@ abstract class Vote<KP extends KeyPair<?, K, S>, K extends PublicKey<S>, S exten
 		return this.owner;
 	}
 	
-	public final synchronized void sign(final KP key) throws CryptoException
+	public final void sign(final KP key) throws CryptoException
 	{
 		Objects.requireNonNull(key, "Key pair is null");
 		
-		if (this.signature != null)
-			throw new IllegalStateException("Vote "+getClass()+" is already signed "+this);
-
-		if (key.getPublicKey().equals(getOwner()) == false)
-			throw new CryptoException("Attempting to sign with key that doesn't match owner");
-		
-		this.signature = key.getPrivateKey().sign(getObject());
+		synchronized(this)
+		{
+			if (this.signature != null)
+				throw new IllegalStateException("Vote "+getClass()+" is already signed "+this);
+	
+			if (key.getPublicKey().equals(getOwner()) == false)
+				throw new CryptoException("Attempting to sign with key that doesn't match owner");
+			
+			this.signature = key.getPrivateKey().sign(getObject());
+		}
 	}
 
 	public final synchronized boolean verify(final K key) throws CryptoException
 	{
 		Objects.requireNonNull(key, "Public key is null");
 		
-		if (this.signature == null)
-			throw new CryptoException("Signature is not present");
-		
-		if (getOwner() == null)
-			return false;
-
-		if (key.equals(getOwner()) == false)
-			return false;
+		synchronized(this)
+		{
+			if (this.signature == null)
+				throw new CryptoException("Signature is not present");
+			
+			if (getOwner() == null)
+				return false;
+	
+			if (key.equals(getOwner()) == false)
+				return false;
+		}
 		
 		return key.verify(getObject(), this.signature);
 	}
@@ -177,26 +183,38 @@ abstract class Vote<KP extends KeyPair<?, K, S>, K extends PublicKey<S>, S exten
 		return true;
 	}
 	
-	public final synchronized S getSignature()
+	public final S getSignature()
 	{
-		return this.signature;
+		synchronized(this)
+		{
+			return this.signature;
+		}
 	}
 	
 	final long getWeight()
 	{
-		if (this.weight == -1)
-			throw new IllegalStateException("Vote weight has not been set");
-		
-		return this.weight;
+		synchronized(this)
+		{
+			if (this.weight == -1)
+				throw new IllegalStateException("Vote weight has not been set");
+			
+			return this.weight;
+		}
 	}
 	
 	final void setWeight(final long weight)
 	{
 		Numbers.isNegative(weight, "Vote weight is negative");
-		this.weight = weight;
+		
+		synchronized(this)
+		{
+			if (this.weight != -1)
+				throw new IllegalStateException("Vote weight has already been set");
+
+			this.weight = weight;
+		}
 	}
 
-	// TODO put back to final
 	@Override
 	public String toString()
 	{
