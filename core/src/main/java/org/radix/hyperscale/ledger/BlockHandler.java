@@ -107,7 +107,7 @@ public class BlockHandler implements Service
 			try
 			{
 				final BlockHeader head = BlockHandler.this.context.getLedger().getHead(); 
-				final ProgressRound progressRound = get(BlockHandler.this.progressClock.get());
+				final ProgressRound progressRound = getProgressRound(BlockHandler.this.progressClock.get());
 				
 				_processHeaders(progressRound);
 				_processVotes(progressRound, head);
@@ -615,7 +615,7 @@ public class BlockHandler implements Service
 			
 			try
 			{
-				final ProgressRound proposalRound = get(pendingBlock.getHeight());
+				final ProgressRound proposalRound = getProgressRound(pendingBlock.getHeight());
 				if (proposalRound.canPropose(pendingBlock.getHeader().getProposer()) == true)
 				{
 					final long roundVotePower = this.context.getLedger().getValidatorHandler().getVotePower(proposalRound.epoch(), pendingBlock.getHeader().getProposer());
@@ -1023,7 +1023,7 @@ public class BlockHandler implements Service
 					}
 
 					// Get progress round for this block vote 
-					final ProgressRound voteRound = get(blockVote.getHeight());
+					final ProgressRound voteRound = getProgressRound(blockVote.getHeight());
 
 					// Find or create block vote collector
 					final BlockVoteCollector blockVoteCollector = this.blockVoteCollectors.computeIfAbsent(blockVote.getHeight(), h -> new BlockVoteCollector(this.context, voteRound));
@@ -1279,7 +1279,7 @@ public class BlockHandler implements Service
 			final long nextProgressRoundClock = this.progressClock.incrementAndGet();
 			this.shardClock.compareAndSet(progressRound.clock(), nextProgressRoundClock);
 			
-			final ProgressRound nextProgressRound = get(nextProgressRoundClock);
+			final ProgressRound nextProgressRound = getProgressRound(nextProgressRoundClock);
 			this.context.getEvents().post(new ProgressPhaseEvent(nextProgressRound));
 
 			if (blocksLog.hasLevel(Logging.INFO))
@@ -1359,7 +1359,7 @@ public class BlockHandler implements Service
 		return this.pendingBlocks.size();
 	}
 	
-	private ProgressRound get(final long clock)
+	private ProgressRound getProgressRound(final long clock)
 	{
 		ProgressRound progressRound;
 		
@@ -1410,7 +1410,7 @@ public class BlockHandler implements Service
 		}
 
 		// Progress round is not available yet, postpone
-		final ProgressRound voteRound = get(blockVote.getHeight());
+		final ProgressRound voteRound = getProgressRound(blockVote.getHeight());
 		
 		// Apply the vote to the progress round.  
 		// The vote should be applied even if the pending block is not yet know to ensure responsiveness and liveness of progress rounds 
@@ -1458,23 +1458,26 @@ public class BlockHandler implements Service
 			if (blocksLog.hasLevel(Logging.INFO))
 				blocksLog.info(BlockHandler.this.context.getName()+": "+blockVote.getOwner().toString(12)+" voted on block "+blockVote.getHeight()+":"+blockVote.getBlock()+" "+blockVote.getHash());
 	
-			if (preVoteWeight < voteRound.getVoteThreshold() && voteRound.getVoteWeight() >= voteRound.getVoteThreshold())
+			if (voteRound.getVoteWeight() >= voteRound.getVoteThreshold() && 
+				(preVoteWeight < voteRound.getVoteThreshold() || voteRound.hasCertificate() == false))
 			{
 				final QuorumCertificate certificate = voteRound.buildCertificate();
-				if (certificate == null)
-					blocksLog.error(this.context.getName()+": Expected to construct view quorum certificate for progress round "+voteRound);
-				
-				// A new view certificate was created
-				if (certificate.equals(voteRound.getView()) == false)
+				if (certificate != null)
 				{
-					final PendingBlock certificateBlock = this.pendingBlocks.get(certificate.getBlock());
-					certificateBlock.setAsSuper();
+					// A new view certificate was created
+					if (certificate.equals(voteRound.getView()) == false)
+					{
+						final PendingBlock certificateBlock = this.pendingBlocks.get(certificate.getBlock());
+						certificateBlock.setAsSuper();
 					
-					if (blocksLog.hasLevel(Logging.INFO))
-						blocksLog.info(this.context.getName()+": Pending block is now a super "+certificateBlock.toString());
+						if (blocksLog.hasLevel(Logging.INFO))
+							blocksLog.info(this.context.getName()+": Pending block is now a super "+certificateBlock.toString());
 					
-					this.progressView = certificate;
+						this.progressView = certificate;
+					}
 				}
+				else 
+					blocksLog.warn(this.context.getName()+": Expected to construct view quorum certificate for progress round "+voteRound);
 			}
 		}
 		finally
@@ -1632,9 +1635,14 @@ public class BlockHandler implements Service
 		
 		final Entry<BlockHeader, StateAccumulator> ledgerState = BlockHandler.this.context.getLedger().current();
 
+		// Get the round to be build on (current-1)
+		final ProgressRound buildRound = this.progressRounds.get(progressRound.clock()-1);
+		if (buildRound == null)
+			throw new IllegalStateException("Build round "+(progressRound.clock()-1)+" is not found");
+		
 		// Select a branch to extend
 		BlockHeader buildableHeader;
-		PendingBranch selectedBranch = selectBranchToExtend(progressRound);
+		PendingBranch selectedBranch = selectBranchToExtend(buildRound);
 		if (selectedBranch == null)
 		{
 			// Special case for Genesis
@@ -1645,7 +1653,7 @@ public class BlockHandler implements Service
 			}
 			else
 			{
-				blocksLog.warn(this.context.getName()+": No branch selected at "+progressRound.clock()+" with ledger head "+ledgerState.getKey());
+				blocksLog.warn(this.context.getName()+": No branch selected at "+buildRound.clock()+" with ledger head "+ledgerState.getKey());
 	
 				// TODO secondaries?
 				
@@ -1654,7 +1662,7 @@ public class BlockHandler implements Service
 		}
 		else
 		{
-			final PendingBlock buildableBlock = selectedBranch.getBlockAtHeight(progressRound.clock()-1);
+			final PendingBlock buildableBlock = selectedBranch.getBlockAtHeight(buildRound.clock());
 			if (buildableBlock.isConstructed())
 				buildableHeader = buildableBlock.getHeader();
 			else
@@ -1663,7 +1671,7 @@ public class BlockHandler implements Service
 		
 		if (buildableHeader == null)
 		{
-			blocksLog.warn(this.context.getName()+": No buildable header available at "+progressRound.clock()+" on selected branch "+selectedBranch);
+			blocksLog.warn(this.context.getName()+": No buildable header available at "+buildRound.clock()+" on selected branch "+selectedBranch);
 			return null;
 		}
 
@@ -2009,7 +2017,7 @@ public class BlockHandler implements Service
 		
 		if (this.progressClock.get() == pendingBlock.getHeight())
 		{
-			final ProgressRound progressRound = get(pendingBlock.getHeight());
+			final ProgressRound progressRound = getProgressRound(pendingBlock.getHeight());
 	
 			final long roundVotePower = this.context.getLedger().getValidatorHandler().getVotePower(progressRound.epoch(), pendingBlock.getHeader().getProposer());
 			if (progressRound.propose(pendingBlock.getHash(), pendingBlock.getHeader().getProposer(), roundVotePower) == false)
@@ -2395,7 +2403,7 @@ public class BlockHandler implements Service
 	    return totalVotePower;
 	}
 	
-	private PendingBranch selectSuperBranch(final long height)
+	private PendingBranch selectSuperBranch(final ProgressRound round, final QuorumCertificate view)
 	{
 	    final List<PendingBranch> candidateBranches;
 	    synchronized(this.pendingBranches) 
@@ -2406,8 +2414,11 @@ public class BlockHandler implements Service
 	        candidateBranches = new ArrayList<PendingBranch>();
 	        for (final PendingBranch pendingBranch : this.pendingBranches)
 	        {
-	        	final PendingBlock pendingBlock = pendingBranch.getBlockAtHeight(height);
+	        	final PendingBlock pendingBlock = pendingBranch.getBlockAtHeight(round.clock());
 	        	if (pendingBlock == null)
+	        		continue;
+	        	
+	        	if (pendingBlock.getHeader().getView().intersects(view) == false)
 	        		continue;
 	        	
 	        	candidateBranches.add(pendingBranch);
@@ -2437,7 +2448,7 @@ public class BlockHandler implements Service
 	    long bestBranchStrength = 0;
 	    for (final PendingBranch branch : filteredCandidates)
 	    {
-	        long strength = calculateBranchVoteStrength(branch, height);
+	        long strength = calculateBranchVoteStrength(branch, round.clock());
 	        if (strength > bestBranchStrength)
 	        {
 	            bestBranchStrength = strength;
@@ -2457,23 +2468,23 @@ public class BlockHandler implements Service
 	        }
 
 	        // Pick highest work proposal among these branches
-	        final PendingBranch selected = findHighestWorkBranch(consensusBranches, height);
+	        final PendingBranch selected = findHighestWorkBranch(consensusBranches, round.clock());
 	        if (selected != null)
 	            return selected;
 	    }
 	    
 	    // Fallback: No supers exist or no valid blocks building on branches with vote power
-	    return findHighestWorkBranch(candidateBranches, height);
+	    return findHighestWorkBranch(candidateBranches, round.clock());
 	}
 
 	private PendingBranch selectBranchToVote(final ProgressRound round) 
 	{
-		return selectSuperBranch(round.clock());
+		return selectSuperBranch(round, round.getView());
 	}
 
 	private PendingBranch selectBranchToExtend(final ProgressRound round) 
 	{
-		return selectSuperBranch(round.clock()-1);
+		return selectSuperBranch(round, round.getView());
 	}
 
 	private PendingBranch selectBranchWithQuorum(final ProgressRound round)
@@ -2732,8 +2743,12 @@ public class BlockHandler implements Service
 				BlockHandler.this.buildClock.set(event.getHead().getHeight());
 				BlockHandler.this.buildLock = false;
 				
-				ProgressRound progressRound = get(BlockHandler.this.progressClock.get());
+				ProgressRound progressRound = getProgressRound(BlockHandler.this.progressClock.get());
 				blocksLog.info(BlockHandler.this.context.getName()+": Progress round post sync is "+progressRound.toString());
+				
+				// Directly create and insert the "previous" build round
+				ProgressRound previousRound = new ProgressRound(event.getHead());
+				BlockHandler.this.progressRounds.put(previousRound.clock(), previousRound);
 				
 				// TODO meh ... getting head from event, but accumulator from ledger because the accumulator use is referenced based and the 
 				// 		event carries a sync accumulator which gets reset and causes all manner of locking issues if used for this initial branch
