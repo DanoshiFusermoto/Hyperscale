@@ -257,8 +257,8 @@ public class SyncHandler implements Service
 	private final Map<AbstractConnection, SyncInventoryTask> inventoryTasks;
 	private final SortedSetMultimap<AbstractConnection, Hash> blockInventories;
 	
-	private volatile boolean isPrepared;
 	private volatile boolean isSynced;
+	private volatile boolean isPrepared;
 	private volatile boolean isSingleton;
 	
 	private BlockHeader syncHead;
@@ -564,6 +564,7 @@ public class SyncHandler implements Service
 				@Override
 				public void process(final SyncBlockMessage syncBlockMessage, final AbstractConnection connection)
 				{
+					SyncHandler.this.lock.lock();
 					try
 					{
 						if (SyncHandler.this.isPrepared == false)
@@ -572,6 +573,12 @@ public class SyncHandler implements Service
 							return;
 						}
 	
+						if (SyncHandler.this.isSynced == true)
+						{
+							syncLog.warn(SyncHandler.this.context.getName()+": Received SyncBlockMessage, but not out of sync");
+							return;
+						}
+
 						if (syncBlockMessage.getBlock().getHeader().getHeight() <= SyncHandler.this.syncHead.getHeight())
 						{
 							syncLog.warn(SyncHandler.this.context.getName()+": Block is old "+syncBlockMessage.getBlock().getHeader()+" from "+connection);
@@ -593,26 +600,22 @@ public class SyncHandler implements Service
 							return;
 						}
 						
-						SyncHandler.this.lock.lock();
-						try
+						SyncHandler.this.blocks.put(syncBlockMessage.getBlock().getHash(), syncBlockMessage.getBlock());
+						if (SyncHandler.this.blocksRequested.remove(syncBlockMessage.getBlock().getHash()) == null)
 						{
-							SyncHandler.this.blocks.put(syncBlockMessage.getBlock().getHash(), syncBlockMessage.getBlock());
-							if (SyncHandler.this.blocksRequested.remove(syncBlockMessage.getBlock().getHash()) == null)
-							{
-								syncLog.error(SyncHandler.this.context.getName()+": Received unrequested block "+syncBlockMessage.getBlock().getHeader()+" from "+connection);
-								connection.disconnect("Received unrequested block "+syncBlockMessage.getBlock().getHeader());
-								return;
-							}
-						}
-						finally
-						{
-							SyncHandler.this.lock.unlock();
-							SyncHandler.this.syncProcessorLatch.release();
+							syncLog.error(SyncHandler.this.context.getName()+": Received unrequested block "+syncBlockMessage.getBlock().getHeader()+" from "+connection);
+							connection.disconnect("Received unrequested block "+syncBlockMessage.getBlock().getHeader());
+							return;
 						}
 					}
 					catch (Exception ex)
 					{
 						syncLog.error(SyncHandler.this.context.getName()+": ledger.messages.block.sync "+connection, ex);
+					}
+					finally
+					{
+						SyncHandler.this.lock.unlock();
+						SyncHandler.this.syncProcessorLatch.release();
 					}
 				}
 			});
@@ -701,6 +704,7 @@ public class SyncHandler implements Service
 				@Override
 				public void process(final SyncBlockInventoryMessage syncBlockInventoryMessage, final AbstractConnection connection)
 				{
+					SyncHandler.this.lock.lock();
 					try
 					{
 						if (SyncHandler.this.isPrepared == false)
@@ -714,33 +718,29 @@ public class SyncHandler implements Service
 						else if (syncLog.hasLevel(Logging.DEBUG))
 							syncLog.debug(SyncHandler.this.context.getName()+": Received block header inventory "+syncBlockInventoryMessage.getInventory()+" from " + connection);
 
-						SyncHandler.this.lock.lock();
-						try
+						final SyncInventoryTask syncInventoryTask = SyncHandler.this.inventoryTasks.get(connection);
+						if (syncInventoryTask == null || syncInventoryTask.requestSeq != syncBlockInventoryMessage.getResponseSeq())
 						{
-							final SyncInventoryTask syncInventoryTask = SyncHandler.this.inventoryTasks.get(connection);
-							if (syncInventoryTask == null || syncInventoryTask.requestSeq != syncBlockInventoryMessage.getResponseSeq())
-							{
-								syncLog.error(SyncHandler.this.context.getName()+": Received unrequested inventory "+syncBlockInventoryMessage.getResponseSeq()+" with "+syncBlockInventoryMessage.getInventory().size()+" items from "+connection);
-								connection.disconnect("Received unrequested inventory "+syncBlockInventoryMessage.getResponseSeq()+" with "+syncBlockInventoryMessage.getInventory().size()+" items from "+connection);
-								return;
-							}
-							
-							if (syncBlockInventoryMessage.getInventory().isEmpty() == false)
-							{
-								SyncHandler.this.blockInventories.putAll(connection, syncBlockInventoryMessage.getInventory());
-								SyncHandler.this.syncProcessorLatch.release();
-							}
-							
-							SyncHandler.this.inventoryTasks.remove(connection, syncInventoryTask);
+							syncLog.error(SyncHandler.this.context.getName()+": Received unrequested inventory "+syncBlockInventoryMessage.getResponseSeq()+" with "+syncBlockInventoryMessage.getInventory().size()+" items from "+connection);
+							connection.disconnect("Received unrequested inventory "+syncBlockInventoryMessage.getResponseSeq()+" with "+syncBlockInventoryMessage.getInventory().size()+" items from "+connection);
+							return;
 						}
-						finally
+						
+						if (syncBlockInventoryMessage.getInventory().isEmpty() == false)
 						{
-							SyncHandler.this.lock.unlock();
+							SyncHandler.this.blockInventories.putAll(connection, syncBlockInventoryMessage.getInventory());
+							SyncHandler.this.syncProcessorLatch.release();
 						}
+						
+						SyncHandler.this.inventoryTasks.remove(connection, syncInventoryTask);
 					}
 					catch (Exception ex)
 					{
 						syncLog.error(SyncHandler.this.context.getName()+": ledger.messages.block.header.inv "+connection, ex);
+					}
+					finally
+					{
+						SyncHandler.this.lock.unlock();
 					}
 				}
 			});
@@ -1751,12 +1751,12 @@ public class SyncHandler implements Service
 		}
 		finally
 		{
-			reset();
-			
 			this.isSynced = true;
 			this.context.getNode().setHead(this.syncHead);
 			this.context.getNode().setSynced(true);
 
+			reset();
+			
 			this.lock.unlock();
 		}
     }
