@@ -88,7 +88,9 @@ public final class Block extends ExtendedObject implements CompoundPrimitive
 		super();
 	}
 	
-	Block(final BlockHeader header, final Collection<Atom> accepted, final Collection<Atom> unaccepted, final Collection<ExecutionTimeout> unexecuted, final Collection<AtomCertificate> certificates, final Collection<CommitTimeout> uncommitted, final Collection<PolyglotPackage> packages)
+	Block(final BlockHeader header, final Collection<Atom> accepted, final Collection<Atom> unaccepted, 
+									final Collection<ExecutionTimeout> unexecuted, final Collection<AtomCertificate> certificates, 
+									final Collection<CommitTimeout> uncommitted, final Collection<PolyglotPackage> packages)
 	{
 		super();
 
@@ -113,17 +115,18 @@ public final class Block extends ExtendedObject implements CompoundPrimitive
 	}
 
 	public Block(final long height, final Hash previous, final long difficulty, final UInt256 work,
-				 final long nonce, final long index, final Identity proposer, 
+				 final long nonce, final long index, final Identity proposer, final QuorumCertificate certificate,
 			     final Collection<Atom> accepted, final Collection<Atom> unaccepted, 
 			     final Collection<ExecutionTimeout> unexecuted, final Collection<AtomCertificate> certificates, 
 			     final Collection<CommitTimeout> uncommitted, final Collection<Hash> executables, final Collection<Hash> latent,
 			     final Collection<PolyglotPackage> packages)
 	{
-		this(height, previous, difficulty, work, nonce, index, Time.getLedgerTimeMS(), proposer, 
+		this(height, previous, difficulty, work, nonce, index, Time.getLedgerTimeMS(), proposer, certificate,
 			 accepted, unaccepted, unexecuted, certificates, uncommitted, executables, latent, packages);
 	}
 	
-	public Block(final long height, final Hash previous, final long difficulty, final UInt256 work, final long nonce, final long index, final long timestamp, final Identity proposer, 
+	public Block(final long height, final Hash previous, final long difficulty, final UInt256 work, 
+				 final long nonce, final long index, final long timestamp, final Identity proposer, final QuorumCertificate certificate, 
 				 final Collection<Atom> accepted, final Collection<Atom> unaccepted, 
 				 final Collection<ExecutionTimeout> unexecuted, final Collection<AtomCertificate> certificates, 
 				 final Collection<CommitTimeout> uncommitted, final Collection<Hash> executables, final Collection<Hash> latent, 
@@ -161,7 +164,7 @@ public final class Block extends ExtendedObject implements CompoundPrimitive
 		inventory.put(InventoryType.EXECUTABLE, executables.isEmpty() ? Collections.emptyList() : new ArrayList<Hash>(executables));
 		inventory.put(InventoryType.LATENT, latent.isEmpty() ? Collections.emptyList() : new ArrayList<Hash>(latent));
 
-		this.header = new BlockHeader(height, previous, difficulty, work, nonce, index, inventory, timestamp, proposer);
+		this.header = new BlockHeader(height, previous, difficulty, work, nonce, index, inventory, timestamp, proposer, certificate);
 	}
 	
 	private <T extends Hashable> List<Hash> createHashList(Collection<T> collection) 

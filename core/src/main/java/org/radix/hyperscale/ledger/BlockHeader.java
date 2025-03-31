@@ -140,14 +140,14 @@ public final class BlockHeader extends Serializable implements Comparable<BlockH
 	@DsonOutput(Output.ALL)
 	private Hash inventoryMerkle;
 
+	@JsonProperty("view")
+	@DsonOutput(Output.ALL)
+	private QuorumCertificate view;
+
 	@JsonProperty("signature")
 	@DsonOutput(value = {Output.API, Output.WIRE, Output.PERSIST})
 	private BLSSignature signature;
 	
-	@JsonProperty("certificate")
-	@DsonOutput(value = {Output.API, Output.WIRE, Output.PERSIST})
-	private BlockCertificate certificate;
-
 	private final transient MutableObjectLongMap<Hash> indexes;
 	
 	private transient UInt256 localWork;
@@ -166,7 +166,8 @@ public final class BlockHeader extends Serializable implements Comparable<BlockH
 		this.indexes = ObjectLongMaps.mutable.empty();
 	}
 	
-	BlockHeader(final long height, final Hash previous, final long difficulty, final UInt256 previousWork, final long nonce, final long index, final Map<InventoryType, Collection<Hash>> inventory, final long timestamp, final Identity proposer)
+	BlockHeader(final long height, final Hash previous, final long difficulty, final UInt256 previousWork, final long nonce, final long index, 
+			    final Map<InventoryType, Collection<Hash>> inventory, final long timestamp, final Identity proposer, final QuorumCertificate view)
 	{
 		super();
 		
@@ -176,6 +177,7 @@ public final class BlockHeader extends Serializable implements Comparable<BlockH
 		Numbers.isNegative(difficulty, "Difficulty is negative");
 		Objects.requireNonNull(inventory, "Inventory is null");
 		Objects.requireNonNull(previous, "Previous proposal is null");
+		Objects.requireNonNull(view, "Quorum certificate is null");
 		
 		if (height == 0 && previous.equals(Hash.ZERO) == false)
 			throw new IllegalArgumentException("Previous proposal hash must be ZERO for genesis");
@@ -195,6 +197,9 @@ public final class BlockHeader extends Serializable implements Comparable<BlockH
 		this.index = index;
 		this.timestamp = timestamp;
 		this.nonce = nonce;
+		
+		// TODO needs validation?
+		this.view = view;
 
 		this.inventory = new EnumMap<InventoryType, LinkedHashSet<Hash>>(InventoryType.class);
 		inventory.forEach((type, items) -> BlockHeader.this.inventory.put(type, items.isEmpty() ? EMPTY_INVENTORY_SET : new LinkedHashSet<Hash>(items)));
@@ -427,21 +432,9 @@ public final class BlockHeader extends Serializable implements Comparable<BlockH
 		return this.previous;
 	}
 	
-	public final BlockCertificate getCertificate()
+	public final QuorumCertificate getView()
 	{
-		return this.certificate;
-	}
-
-	final void setCertificate(final BlockCertificate certificate)
-	{
-		Objects.requireNonNull(certificate, "Certificate is null");
-		if (certificate.getBlock().equals(getHash()) == false)
-			throw new IllegalArgumentException("Certificate "+certificate.getHash()+" is not for block "+this.getHash());
-		
-		this.certificate = certificate;
-
-		// Changed a serialized property so flush the DSON cache
-		flushCachedDsonOutput();
+		return this.view;
 	}
 
 	@Override
@@ -451,16 +444,19 @@ public final class BlockHeader extends Serializable implements Comparable<BlockH
 	}
 
 	@Override
-	public boolean equals(Object other) 
+	public boolean equals(final Object other) 
 	{
-		if (other == null || (other instanceof BlockHeader) == false)
+		if (other == null)
 			return false;
 		
 		if (other == this)
 			return true;
 
-		if (((BlockHeader) other).getHash().equals(getHash()))
-			return true;
+		if (other instanceof BlockHeader header)
+		{
+			if (header.getHash().equals(getHash()))
+				return true;
+		}
 		
 		return false;
 	}
