@@ -36,6 +36,16 @@ public final class QuorumCertificate extends VoteCertificate
 		super();
 	}
 	
+	QuorumCertificate(final Hash block)
+	{
+		super(CommitDecision.ACCEPT);
+		
+		Objects.requireNonNull(block, "Block is null");
+		Hash.notZero(block, "Block is ZERO");
+
+		this.block = block;
+	}
+
 	QuorumCertificate(final Hash block, final Bloom signers, final BLSPublicKey key, final BLSSignature signature)
 	{
 		super(CommitDecision.ACCEPT, signers, key, signature);
@@ -67,5 +77,19 @@ public final class QuorumCertificate extends VoteCertificate
 	protected Hash getTarget() throws CryptoException
 	{
 		return this.block;
+	}
+	
+	boolean intersects(final QuorumCertificate other)
+	{
+		if (other == this)
+			return true;
+		
+		if (other.getHash().equals(other.getHash()))
+			return true;
+		
+		if (other.getBlock().equals(other.getBlock()))
+			return true;
+		
+		return false;
 	}
 }
