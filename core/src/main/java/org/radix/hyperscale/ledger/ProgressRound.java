@@ -33,16 +33,15 @@ public class ProgressRound
 	private final long clock;
 	private final Epoch epoch;
 
-	private final long startedAt;
+	private final long createdAt;
 	private volatile long proposeStartAt;
 	private volatile long transitionStartAt;
 	private volatile long voteStartAt;
 	private volatile long completedAt;
 
-	private final long driftClock;
 	private volatile long driftMilli;
 
-	private final List<Hash> proposals;
+	private final Map<Hash, BlockHeader> proposals;
 	private final Set<Identity> proposed;
 	private final Set<Identity> proposers;
 	private final long proposalThreshold;
@@ -61,15 +60,15 @@ public class ProgressRound
 
 	ProgressRound(final BlockHeader head)
 	{
-		this.startedAt = head.getTimestamp();
-		this.completedAt = this.startedAt+Ledger.definitions().roundInterval();
+		this.createdAt = head.getTimestamp();
+		this.completedAt = this.createdAt+Ledger.definitions().roundInterval();
 
 		this.view = head.getView();
 		this.certificate = new QuorumCertificate(head.getHash());
 		
 		this.state = State.COMPLETED;
 		this.clock = head.getHeight();
-		this.driftClock = 0;
+		this.driftMilli = 0;
 		this.totalVotePower = 1;
 		this.epoch = Epoch.from(this.clock / Ledger.definitions().proposalsPerEpoch());
 
@@ -82,14 +81,14 @@ public class ProgressRound
 		this.proposalsTimeout = 0;
 		this.proposed = Sets.immutable.of(head.getProposer()).castToSet();
 		this.proposers = Sets.immutable.of(head.getProposer()).castToSet();
-		this.proposals = Collections.singletonList(head.getHash());
+		this.proposals = Maps.immutable.of(head.getHash(), head).castToMap();
 		this.proposalWeight = this.totalVotePower;
 		this.proposalThreshold = this.totalVotePower;
 	}
 	
-	ProgressRound(final long clock, final QuorumCertificate view, final Set<Identity> proposers, final long proposersVotePower, final long totalVotePower, final long driftClock)
+	ProgressRound(final long clock, final QuorumCertificate view, final Set<Identity> proposers, final long proposersVotePower, final long totalVotePower)
 	{
-		this.startedAt = Time.getSystemTime();
+		this.createdAt = Time.getSystemTime();
 		this.completedAt = -1;
 
 		this.view = Objects.requireNonNull(view, "Local view QC is null");
@@ -98,7 +97,7 @@ public class ProgressRound
 
 		this.state = State.NONE;
 		this.clock = clock;
-		this.driftClock = driftClock;
+		this.driftMilli = 0;
 		this.totalVotePower = totalVotePower;
 		this.epoch = Epoch.from(clock / Ledger.definitions().proposalsPerEpoch());
 
@@ -117,7 +116,7 @@ public class ProgressRound
 		this.proposalsTimeout = 0;
 		this.proposed = Sets.mutable.<Identity>ofInitialCapacity(proposers.size()).asSynchronized();
 		this.proposers = Sets.immutable.<Identity>ofAll(proposers).castToSet();
-		this.proposals = new ArrayList<Hash>(proposers.size());
+		this.proposals = Maps.mutable.<Hash, BlockHeader>ofInitialCapacity(proposers.size()).asSynchronized();
 		this.proposalWeight = 0;
 		this.proposalThreshold = ValidatorHandler.twoFPlusOne(proposersVotePower);
 	}
@@ -127,17 +126,12 @@ public class ProgressRound
 		return this.clock;
 	}
 
-	public long driftClock() 
+	public long driftMillis() 
 	{
-		return this.driftClock;
-	}
-
-	public long driftMilli() 
-	{
-		if (this.voteStartAt == 0)
+		if (this.proposeStartAt == 0)
 			return 0;
 		
-		return this.driftMilli - this.voteStartAt;
+		return this.driftMilli - this.proposeStartAt;
 	}
 
 	public Epoch epoch() 
@@ -166,27 +160,13 @@ public class ProgressRound
 		this.completedAt = Time.getSystemTime();
 	}
 	
-	long calculateDriftAdjustment(long timeoutDuration)
-	{
-		long adjustedTimeoutDuration = timeoutDuration;
-		
-		// Shard is ahead
-		if (this.driftClock > 0)
-			adjustedTimeoutDuration = (int) (timeoutDuration / (this.driftClock+1));
-		// Shard is behind 
-		else if (this.driftClock < 0)
-			adjustedTimeoutDuration = (int) (timeoutDuration * (Math.log(Math.abs(this.driftClock))+1));
-		
-		return adjustedTimeoutDuration;
-	}
-	
 	State stepState()
 	{
 		if (this.state.equals(State.NONE))
 		{
 			this.state = State.PROPOSING;
 			this.proposeStartAt = Time.getSystemTime();
-			this.proposalsTimeout = this.proposeStartAt + calculateDriftAdjustment(Ledger.definitions().proposalPhaseTimeout(TimeUnit.MILLISECONDS));
+			this.proposalsTimeout = this.proposeStartAt + Ledger.definitions().proposalPhaseTimeout(TimeUnit.MILLISECONDS);
 		}
 		else if (this.state.equals(State.PROPOSING))
 		{
@@ -197,7 +177,7 @@ public class ProgressRound
 		{
 			this.state = State.VOTING;
 			this.voteStartAt = Time.getSystemTime();
-			this.voteTimeout = this.voteStartAt + calculateDriftAdjustment(Ledger.definitions().votePhaseTimeout(TimeUnit.MILLISECONDS));
+			this.voteTimeout = this.voteStartAt + Ledger.definitions().votePhaseTimeout(TimeUnit.MILLISECONDS);
 		}
 		else if (this.state.equals(State.VOTING))
 		{
@@ -216,14 +196,6 @@ public class ProgressRound
 			throw new IllegalStateException("Vote already cast by "+vote.getOwner().getIdentity()+" for progress round "+this);
 		
 		this.voteWeight += vote.getWeight();
-		
-		if (this.driftMilli != 0)
-		{
-			long delta = (System.currentTimeMillis() - this.driftMilli);
-			this.driftMilli += (delta / 2); 
-		}
-		else
-			this.driftMilli = System.currentTimeMillis();
 	}
 	
 	public long getVoteWeight() 
@@ -270,27 +242,31 @@ public class ProgressRound
 		return Time.getSystemTime() > this.transitionStartAt + (Ledger.definitions().roundInterval() / 3);
 	}
 
-	boolean propose(final Hash proposal, final Identity identity, final long votePower)
+	boolean propose(final BlockHeader proposal, final long votePower)
 	{
 		// TODO penalties
-		if (canPropose(identity) == false)
+		if (canPropose(proposal.getProposer()) == false)
 			return false;
 		
-		if (this.proposed.add(identity) == false)
+		if (this.proposed.add(proposal.getProposer()) == false)
 			return false;
 
-		this.proposals.add(proposal);
+		this.proposals.put(proposal.getHash(), proposal);
 		this.proposalWeight += votePower;
 		
-		if (this.proposers.contains(identity))
+		if (this.proposers.contains(proposal.getProposer()))
 			this.primariesProposed++;
+		
+		// TODO f+1
+		if (this.driftMilli == 0)
+			this.driftMilli = proposal.getWitnessedAt();
 		
 		return true;
 	}
 	
 	List<Hash> getProposals()
 	{
-		return Collections.unmodifiableList(new ArrayList<Hash>(this.proposals));
+		return Collections.unmodifiableList(new ArrayList<Hash>(this.proposals.keySet()));
 	}
 	
 	public boolean hasProposals()
@@ -491,9 +467,9 @@ public class ProgressRound
 	@Override 
 	public String toString()
 	{
-		String output = Long.toString(this.clock)+":"+this.view.getHeight()+":"+this.driftClock;
+		String output = Long.toString(this.clock)+":"+this.view.getHeight();
 		if (this.state.equals(State.COMPLETED))
-			output += ":"+driftMilli();
+			output += ":"+driftMillis()+"ms";
 		if (this.completedAt > 0)
 			output += " "+this.completedAt+" "+getDuration()+"ms";
 		

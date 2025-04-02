@@ -157,12 +157,15 @@ public final class BlockHeader extends Serializable implements Comparable<BlockH
 	private transient Hash hash;
 	private transient int  size = -1;
 	
+	private final transient long witnessedAt; 
+	
 	private static LinkedHashSet<Hash> EMPTY_INVENTORY_SET = new LinkedHashSet<Hash>(0, 1.0f);
 	
 	BlockHeader()
 	{
 		super();
 
+		this.witnessedAt = System.currentTimeMillis();
 		this.indexes = ObjectLongMaps.mutable.empty();
 	}
 	
@@ -197,6 +200,8 @@ public final class BlockHeader extends Serializable implements Comparable<BlockH
 		this.index = index;
 		this.timestamp = timestamp;
 		this.nonce = nonce;
+
+		this.witnessedAt = System.currentTimeMillis();
 		
 		// TODO needs validation?
 		this.view = view;
@@ -297,6 +302,11 @@ public final class BlockHeader extends Serializable implements Comparable<BlockH
 	public long getTimestamp() 
 	{
 		return this.timestamp;
+	}
+	
+	public long getWitnessedAt()
+	{
+		return this.witnessedAt;
 	}
 	
 	public long getDifficulty()

@@ -221,7 +221,6 @@ public class BlockHandler implements Service
 
 	private volatile boolean buildLock;
 	private final AtomicLong buildClock;
-	private final AtomicLong shardClock;
 	private final AtomicLong progressClock;
 	private volatile QuorumCertificate progressView;
 	private final MutableLongObjectMap<ProgressRound> progressRounds;
@@ -244,7 +243,7 @@ public class BlockHandler implements Service
 
 		this.buildLock = true;
 		this.buildClock = new AtomicLong(-1);
-		this.shardClock = new AtomicLong(0);
+//		this.shardClock = new AtomicLong(0);
 		this.progressClock = new AtomicLong(0);
 		this.progressRounds = LongObjectMaps.mutable.<ProgressRound>empty().asSynchronized();
 		
@@ -619,7 +618,7 @@ public class BlockHandler implements Service
 				if (proposalRound.canPropose(pendingBlock.getHeader().getProposer()) == true)
 				{
 					final long roundVotePower = this.context.getLedger().getValidatorHandler().getVotePower(proposalRound.epoch(), pendingBlock.getHeader().getProposer());
-					if (proposalRound.propose(pendingBlock.getHash(), pendingBlock.getHeader().getProposer(), roundVotePower) == false)
+					if (proposalRound.propose(pendingBlock.getHeader(), roundVotePower) == false)
 						blocksLog.warn(this.context.getName()+": Progress round "+pendingBlock.getHeight()+" already has a proposal from "+pendingBlock.getHeader().getProposer());
 					else if (blocksLog.hasLevel(Logging.INFO))
 						blocksLog.info(this.context.getName()+": Seen proposal "+pendingBlock.getHash()+" for progress round "+proposalRound.clock()+" from "+pendingBlock.getHeader().getProposer());
@@ -1003,9 +1002,6 @@ public class BlockHandler implements Service
 			this.votesToVerify.forEach((h, bv) -> {
 				if (bv.getHeight() <= progressRound.clock())
 					votesToVerify.add(bv);
-				// TODO supermajority this check
-				else if (this.shardClock.get() < bv.getHeight())
-					this.shardClock.set(bv.getHeight());
 			});
 
 			if (votesToVerify.isEmpty() == false)
@@ -1233,19 +1229,16 @@ public class BlockHandler implements Service
 				progressRound.stepState();
 				
 				// Do the local vote here
-				// If the local instance shard is behind, don't cast a vote
-				if (progressRound.driftClock() <= 0)
+				// If the local instance is behind (views dont match) it will not vote
+				PendingBranch selectedBranch = selectBranchToVote(progressRound, progressRound.getView());
+				try 
 				{
-					PendingBranch selectedBranch = selectBranchToVote(progressRound, progressRound.getView());
-					try 
-					{
-						if (selectedBranch != null)
-							vote(progressRound, selectedBranch);
-					} 
-					catch (IOException | CryptoException | ValidationException ex) 
-					{
-						blocksLog.error(this.context.getName()+": Failed to cast vote on progress round "+progressRound+" to branch "+selectedBranch, ex);
-					}
+					if (selectedBranch != null)
+						vote(progressRound, selectedBranch);
+				} 
+				catch (IOException | CryptoException | ValidationException ex) 
+				{
+					blocksLog.error(this.context.getName()+": Failed to cast vote on progress round "+progressRound+" to branch "+selectedBranch, ex);
 				}
 				
 				this.context.getEvents().post(new ProgressPhaseEvent(progressRound));
@@ -1277,8 +1270,6 @@ public class BlockHandler implements Service
 				blocksLog.warn(this.context.getName()+": Absent proposers ["+absentProposers.stream().map(i -> i.toString(12)).collect(Collectors.joining(", "))+"] in progress round "+progressRound);								
 			
 			final long nextProgressRoundClock = this.progressClock.incrementAndGet();
-			this.shardClock.compareAndSet(progressRound.clock(), nextProgressRoundClock);
-			
 			final ProgressRound nextProgressRound = getProgressRound(nextProgressRoundClock);
 			this.context.getEvents().post(new ProgressPhaseEvent(nextProgressRound));
 
@@ -1286,20 +1277,25 @@ public class BlockHandler implements Service
 				blocksLog.info(this.context.getName()+": Progress round completed "+progressRound);
 
 			// Progress interval & delay
+			// If local replica is slow, then skip the wait delay if possible to attempt to catch up.  
+			// If it is fast, then it will naturally have to wait for a quorum or timeout, slowing it down.
 			final long targetRoundDuration = Math.max(Ledger.definitions().roundInterval(), Configuration.getDefault().get("ledger.liveness.delay", 0));
-			final long roundDelayDuration = (targetRoundDuration-progressRound.getDuration())+Math.min(progressRound.driftMilli()/2, 0);
+			final long roundDelayDuration = (targetRoundDuration-progressRound.getDuration());
+			final long roundDelayAdjustment = progressRound.driftMillis()/2;
+			final long adjustedRoundDelayDuration = roundDelayAdjustment+roundDelayDuration;
 			
-			// Too fast
-			if (roundDelayDuration > 0 && progressRound.driftClock() == 0)
+			// Within interval bounds
+			if (adjustedRoundDelayDuration >= 0)
 			{
 				try 
 				{
 					if (blocksLog.hasLevel(Logging.INFO))
-						blocksLog.info(this.context.getName()+": Round delay for "+progressRound.clock()+" of "+roundDelayDuration+"ms");
+						blocksLog.info(this.context.getName()+": Round delay for "+progressRound.clock()+" of "+adjustedRoundDelayDuration+"ms with duration "+progressRound.getDuration()+"ms / delay "+roundDelayDuration+"ms / adjustment "+roundDelayAdjustment+"ms");
 					
 					// TODO better way to implement this delay as simply sleeping costs potential 
 					// processing time which could be used to update / verify proposals and votes
-					Thread.sleep(roundDelayDuration);
+					if (adjustedRoundDelayDuration > 0)
+						Thread.sleep(roundDelayDuration+roundDelayAdjustment);
 				} 
 				catch (InterruptedException e) 
 				{
@@ -1313,8 +1309,8 @@ public class BlockHandler implements Service
 			{
 				if (blocksLog.hasLevel(Logging.INFO))
 				{
-					if (this.shardClock.get() > progressRound.clock())
-						blocksLog.info(this.context.getName()+": Skipping round delay for "+progressRound.clock()+" because shard clock is ahead "+this.shardClock.get());
+					if (roundDelayAdjustment < 0)
+						blocksLog.info(this.context.getName()+": Skipping round delay for "+progressRound.clock()+" because replica is behind "+adjustedRoundDelayDuration+"ms with duration "+progressRound.getDuration()+"ms / delay "+roundDelayDuration+"ms / adjustment "+roundDelayAdjustment+"ms");
 					else
 						blocksLog.info(this.context.getName()+": Skipping round delay for "+progressRound.clock()+" because of long round interval "+progressRound.getDuration()+"ms");
 				}
@@ -1387,7 +1383,7 @@ public class BlockHandler implements Service
 					nextProposers = Collections.emptySet(); // Forces a progress propose timeout
 				}
 				
-				return new ProgressRound(clock, this.progressView, nextProposers, nextProposersVotePower, nextTotalVotePower, this.shardClock.get()-this.progressClock.get());
+				return new ProgressRound(clock, this.progressView, nextProposers, nextProposersVotePower, nextTotalVotePower);
 			});
 		}
 		
@@ -1507,9 +1503,6 @@ public class BlockHandler implements Service
 		if (round.clock() != this.progressClock.get())
 			throw new ValidationException("Attempted to vote on progress round "+round.clock()+" but vote clock is "+this.progressClock.get());
 
-		if (round.driftClock() > 0)
-			throw new ValidationException("Attempted to vote on progress round "+round.clock()+" but shard clock is "+this.shardClock.get());
-
 		if (round.hasVoted(this.context.getNode().getIdentity()))
 		{
 			blocksLog.warn(this.context.getName()+": Progress vote is already cast in progress round "+round.clock()+" by "+this.context.getNode().getIdentity());
@@ -1569,8 +1562,9 @@ public class BlockHandler implements Service
 			return;
 		
 		// If the local instances shard is behind, don't build
-		if (progressRound.driftClock() > 0)
-			return;
+		// TODO with views
+//		if (progressRound.driftClock() > 0)
+//			return;
 		
 		boolean build = progressRound.canPropose(this.context.getNode().getIdentity()) == true;
 
@@ -2020,7 +2014,7 @@ public class BlockHandler implements Service
 			final ProgressRound progressRound = getProgressRound(pendingBlock.getHeight());
 	
 			final long roundVotePower = this.context.getLedger().getValidatorHandler().getVotePower(progressRound.epoch(), pendingBlock.getHeader().getProposer());
-			if (progressRound.propose(pendingBlock.getHash(), pendingBlock.getHeader().getProposer(), roundVotePower) == false)
+			if (progressRound.propose(pendingBlock.getHeader(), roundVotePower) == false)
 //				blocksLog.warn(this.context.getName()+": Progress round "+pendingBlock.getHeight()+" already has a proposal from "+pendingBlock.getHeader().getProposer());
 				throw new ValidationException("Progress round "+pendingBlock.getHeight()+" already has a proposal from "+pendingBlock.getHeader().getProposer());
 		}
@@ -2739,7 +2733,6 @@ public class BlockHandler implements Service
 
 				BlockHandler.this.progressView = event.getHead().getView(); 
 				BlockHandler.this.progressClock.set(event.getHead().getHeight()+1);
-				BlockHandler.this.shardClock.set(BlockHandler.this.progressClock.get());
 				BlockHandler.this.buildClock.set(event.getHead().getHeight());
 				BlockHandler.this.buildLock = false;
 				
