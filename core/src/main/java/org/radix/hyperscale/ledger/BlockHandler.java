@@ -1236,7 +1236,7 @@ public class BlockHandler implements Service
 				// If the local instance shard is behind, don't cast a vote
 				if (progressRound.driftClock() <= 0)
 				{
-					PendingBranch selectedBranch = selectBranchToVote(progressRound);
+					PendingBranch selectedBranch = selectBranchToVote(progressRound, progressRound.getView());
 					try 
 					{
 						if (selectedBranch != null)
@@ -1642,7 +1642,7 @@ public class BlockHandler implements Service
 		
 		// Select a branch to extend
 		BlockHeader buildableHeader;
-		PendingBranch selectedBranch = selectBranchToExtend(buildRound);
+		PendingBranch selectedBranch = selectBranchToExtend(buildRound, this.progressView);
 		if (selectedBranch == null)
 		{
 			// Special case for Genesis
@@ -2477,14 +2477,14 @@ public class BlockHandler implements Service
 	    return findHighestWorkBranch(candidateBranches, round.clock());
 	}
 
-	private PendingBranch selectBranchToVote(final ProgressRound round) 
+	private PendingBranch selectBranchToVote(final ProgressRound round, final QuorumCertificate view) 
 	{
-		return selectSuperBranch(round, round.getView());
+		return selectSuperBranch(round, view);
 	}
 
-	private PendingBranch selectBranchToExtend(final ProgressRound round) 
+	private PendingBranch selectBranchToExtend(final ProgressRound round, final QuorumCertificate view) 
 	{
-		return selectSuperBranch(round, round.getView());
+		return selectSuperBranch(round, view);
 	}
 
 	private PendingBranch selectBranchWithQuorum(final ProgressRound round)

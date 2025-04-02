@@ -491,13 +491,13 @@ public class ProgressRound
 	@Override 
 	public String toString()
 	{
-		String output = Long.toString(this.clock)+":"+this.driftClock;
+		String output = Long.toString(this.clock)+":"+this.view.getHeight()+":"+this.driftClock;
 		if (this.state.equals(State.COMPLETED))
 			output += ":"+driftMilli();
 		if (this.completedAt > 0)
 			output += " "+this.completedAt+" "+getDuration()+"ms";
 		
-		output += " (PI/PN) "+this.proposed.size()+"/"+this.proposers.size()+" (PW/PT) "+this.proposalWeight+"/"+this.proposalThreshold+" (VW/VT) "+this.voteWeight+"/"+this.voteThreshold+" (TW) "+this.totalVotePower+" (TM)";
+		output += " (PI/PN) "+this.proposed.size()+"/"+this.proposers.size()+" (PW/PT) "+this.proposalWeight+"/"+this.proposalThreshold+" (VW/VT) "+this.voteWeight+"/"+this.voteThreshold+" (TW) "+this.totalVotePower+" (TM) "+this.view.getBlock()+" (V)";
 		
 		return output;
 	}
