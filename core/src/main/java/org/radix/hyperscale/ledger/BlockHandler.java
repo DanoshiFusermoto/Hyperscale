@@ -1315,7 +1315,7 @@ public class BlockHandler implements Service
 				}
 			}
 			
-			nextProgressRound.start();
+			nextProgressRound.start(this.progressView);
 			this.blockProcessor.signal();
 			
 			this.context.getMetaData().increment("ledger.interval.progress", progressRound.getDuration());
@@ -1328,7 +1328,7 @@ public class BlockHandler implements Service
 	private void _decideCommit(final ProgressRound progressRound, final ProgressRound.State progressRoundPhase)
 	{
 		// Don't commit on phases where a proposal might be generated
-		if (progressRoundPhase.equals(ProgressRound.State.VOTING) || progressRoundPhase.equals(ProgressRound.State.TRANSITION))
+		if (progressRoundPhase.equals(ProgressRound.State.NONE) || progressRoundPhase.equals(ProgressRound.State.TRANSITION))
 			return;
 
 		try
@@ -1336,8 +1336,7 @@ public class BlockHandler implements Service
 			final PendingBranch selectedBranch = selectBranchWithQuorum(progressRound);
 			if (selectedBranch != null)
 			{
-				final int numSupers = Constants.MIN_COMMIT_SUPERS;
-				final PendingBlock commitTo = selectedBranch.commitable(numSupers);
+				final PendingBlock commitTo = selectedBranch.commitable(Constants.MIN_COMMIT_SUPERS);
 				if (commitTo != null)
 					commit(commitTo, selectedBranch);
 			}
@@ -1383,7 +1382,7 @@ public class BlockHandler implements Service
 					nextProposers = Collections.emptySet(); // Forces a progress propose timeout
 				}
 				
-				return new ProgressRound(this.context, clock, this.progressView, nextProposers, nextProposersVotePower, nextTotalVotePower);
+				return new ProgressRound(this.context, clock, nextProposers, nextProposersVotePower, nextTotalVotePower);
 			});
 		}
 		
@@ -2737,7 +2736,7 @@ public class BlockHandler implements Service
 				BlockHandler.this.buildLock = false;
 				
 				final ProgressRound progressRound = getProgressRound(BlockHandler.this.progressClock.get());
-				progressRound.start();
+				progressRound.start(BlockHandler.this.progressView);
 				
 				blocksLog.info(BlockHandler.this.context.getName()+": Progress round post sync is "+progressRound.toString());
 				

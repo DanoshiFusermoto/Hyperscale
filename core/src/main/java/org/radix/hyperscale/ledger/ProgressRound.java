@@ -59,7 +59,7 @@ public class ProgressRound
 	private volatile long voteWeight;
 	private volatile long voteTimeout;
 	
-	private final QuorumCertificate view;
+	private volatile QuorumCertificate view;
 	private volatile QuorumCertificate certificate;
 
 	ProgressRound(final Context context, final BlockHeader head)
@@ -94,15 +94,13 @@ public class ProgressRound
 		this.proposalThreshold = this.totalVotePower;
 	}
 	
-	ProgressRound(final Context context, final long clock, final QuorumCertificate view, final Set<Identity> proposers, final long proposersVotePower, final long totalVotePower)
+	ProgressRound(final Context context, final long clock, final Set<Identity> proposers, final long proposersVotePower, final long totalVotePower)
 	{
 		Objects.requireNonNull(context, "Context is null");
 		this.context = context;
 		
 		this.createdAt = Time.getSystemTime();
 		this.completedAt = -1;
-
-		this.view = Objects.requireNonNull(view, "Local view QC is null");
 
 		Numbers.isNegative(clock, "Round clock is negative");
 
@@ -158,12 +156,21 @@ public class ProgressRound
 	
 	public QuorumCertificate getView()
 	{
+		if (this.startedAt == 0)
+			throw new IllegalStateException("Progress round "+this.clock+" is not started");
+
 		return this.view;
 	}
 	
-	void start()
+	void start(final QuorumCertificate view)
 	{
+		Objects.requireNonNull(view, "Local view QC is null");
+		
+		if (this.startedAt != 0)
+			throw new IllegalStateException("Progress round "+this.clock+" is already started");
+		
 		this.startedAt = System.currentTimeMillis();
+		this.view = view;
 	}
 
 	/** Terminates this proposal round, fast forwarding to the completed state.
@@ -180,7 +187,7 @@ public class ProgressRound
 	State stepState()
 	{
 		if (this.startedAt == 0)
-			throw new IllegalStateException("Progress round "+this.clock+"is not started");
+			throw new IllegalStateException("Progress round "+this.clock+" is not started");
 		
 		if (this.state.equals(State.NONE))
 		{
