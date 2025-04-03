@@ -158,8 +158,8 @@ public class BlockHandler implements Service
 					progressRoundPhase = progressRoundEvent.getProgressPhase();
 					
 					// TODO local/secondary proposals on timeout
-					if (progressRoundPhase.equals(ProgressRound.State.PROPOSING))
-						prebuild(progressRound, ProgressRound.State.PROPOSING);
+					if (progressRoundPhase.equals(ProgressRound.State.NONE))
+						prebuild(progressRound, ProgressRound.State.NONE);
 					else if (progressRoundPhase.equals(ProgressRound.State.TRANSITION))
 					{
 						// Trigger secondaries proposal build
@@ -243,7 +243,6 @@ public class BlockHandler implements Service
 
 		this.buildLock = true;
 		this.buildClock = new AtomicLong(-1);
-//		this.shardClock = new AtomicLong(0);
 		this.progressClock = new AtomicLong(0);
 		this.progressRounds = LongObjectMaps.mutable.<ProgressRound>empty().asSynchronized();
 		
@@ -1282,7 +1281,7 @@ public class BlockHandler implements Service
 			final long targetRoundDuration = Math.max(Ledger.definitions().roundInterval(), Configuration.getDefault().get("ledger.liveness.delay", 0));
 			final long roundDelayDuration = (targetRoundDuration-progressRound.getDuration());
 			final long roundDelayAdjustment = progressRound.driftMillis()/2;
-			final long adjustedRoundDelayDuration = roundDelayAdjustment+roundDelayDuration;
+			final long adjustedRoundDelayDuration = roundDelayDuration+roundDelayAdjustment;
 			
 			// Within interval bounds
 			if (adjustedRoundDelayDuration >= 0)
@@ -1295,7 +1294,7 @@ public class BlockHandler implements Service
 					// TODO better way to implement this delay as simply sleeping costs potential 
 					// processing time which could be used to update / verify proposals and votes
 					if (adjustedRoundDelayDuration > 0)
-						Thread.sleep(roundDelayDuration+roundDelayAdjustment);
+						Thread.sleep(adjustedRoundDelayDuration);
 				} 
 				catch (InterruptedException e) 
 				{
@@ -1316,6 +1315,7 @@ public class BlockHandler implements Service
 				}
 			}
 			
+			nextProgressRound.start();
 			this.blockProcessor.signal();
 			
 			this.context.getMetaData().increment("ledger.interval.progress", progressRound.getDuration());
@@ -1383,7 +1383,7 @@ public class BlockHandler implements Service
 					nextProposers = Collections.emptySet(); // Forces a progress propose timeout
 				}
 				
-				return new ProgressRound(clock, this.progressView, nextProposers, nextProposersVotePower, nextTotalVotePower);
+				return new ProgressRound(this.context, clock, this.progressView, nextProposers, nextProposersVotePower, nextTotalVotePower);
 			});
 		}
 		
@@ -2736,11 +2736,13 @@ public class BlockHandler implements Service
 				BlockHandler.this.buildClock.set(event.getHead().getHeight());
 				BlockHandler.this.buildLock = false;
 				
-				ProgressRound progressRound = getProgressRound(BlockHandler.this.progressClock.get());
+				final ProgressRound progressRound = getProgressRound(BlockHandler.this.progressClock.get());
+				progressRound.start();
+				
 				blocksLog.info(BlockHandler.this.context.getName()+": Progress round post sync is "+progressRound.toString());
 				
 				// Directly create and insert the "previous" build round
-				ProgressRound previousRound = new ProgressRound(event.getHead());
+				final ProgressRound previousRound = new ProgressRound(BlockHandler.this.context, event.getHead());
 				BlockHandler.this.progressRounds.put(previousRound.clock(), previousRound);
 				
 				// TODO meh ... getting head from event, but accumulator from ledger because the accumulator use is referenced based and the 

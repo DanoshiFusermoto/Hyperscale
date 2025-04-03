@@ -12,6 +12,7 @@ import org.eclipse.collections.api.factory.Maps;
 import org.eclipse.collections.api.factory.Sets;
 import org.eclipse.collections.api.map.primitive.MutableObjectLongMap;
 import org.eclipse.collections.impl.factory.primitive.ObjectLongMaps;
+import org.radix.hyperscale.Context;
 import org.radix.hyperscale.collections.Bloom;
 import org.radix.hyperscale.crypto.CryptoException;
 import org.radix.hyperscale.crypto.Hash;
@@ -28,12 +29,15 @@ public class ProgressRound
 	{
 		NONE, PROPOSING, TRANSITION, VOTING, COMPLETED
 	}
+
+	private final Context context;
 	
-	private State state;
 	private final long clock;
 	private final Epoch epoch;
 
 	private final long createdAt;
+	private volatile State state;
+	private volatile long startedAt;
 	private volatile long proposeStartAt;
 	private volatile long transitionStartAt;
 	private volatile long voteStartAt;
@@ -58,9 +62,13 @@ public class ProgressRound
 	private final QuorumCertificate view;
 	private volatile QuorumCertificate certificate;
 
-	ProgressRound(final BlockHeader head)
+	ProgressRound(final Context context, final BlockHeader head)
 	{
+		Objects.requireNonNull(context, "Context is null");
+		this.context = context;
+
 		this.createdAt = head.getTimestamp();
+		this.startedAt = this.createdAt;
 		this.completedAt = this.createdAt+Ledger.definitions().roundInterval();
 
 		this.view = head.getView();
@@ -86,8 +94,11 @@ public class ProgressRound
 		this.proposalThreshold = this.totalVotePower;
 	}
 	
-	ProgressRound(final long clock, final QuorumCertificate view, final Set<Identity> proposers, final long proposersVotePower, final long totalVotePower)
+	ProgressRound(final Context context, final long clock, final QuorumCertificate view, final Set<Identity> proposers, final long proposersVotePower, final long totalVotePower)
 	{
+		Objects.requireNonNull(context, "Context is null");
+		this.context = context;
+		
 		this.createdAt = Time.getSystemTime();
 		this.completedAt = -1;
 
@@ -128,10 +139,11 @@ public class ProgressRound
 
 	public long driftMillis() 
 	{
-		if (this.proposeStartAt == 0)
+		if (this.startedAt == 0)
 			return 0;
-		
-		return this.driftMilli - this.proposeStartAt;
+
+		// Need to be careful here if the phase in which proposals are generated is changed
+		return this.driftMilli - this.startedAt;
 	}
 
 	public Epoch epoch() 
@@ -148,6 +160,11 @@ public class ProgressRound
 	{
 		return this.view;
 	}
+	
+	void start()
+	{
+		this.startedAt = System.currentTimeMillis();
+	}
 
 	/** Terminates this proposal round, fast forwarding to the completed state.
 	 * 
@@ -162,6 +179,9 @@ public class ProgressRound
 	
 	State stepState()
 	{
+		if (this.startedAt == 0)
+			throw new IllegalStateException("Progress round "+this.clock+"is not started");
+		
 		if (this.state.equals(State.NONE))
 		{
 			this.state = State.PROPOSING;
@@ -258,7 +278,7 @@ public class ProgressRound
 			this.primariesProposed++;
 		
 		// TODO f+1
-		if (this.driftMilli == 0)
+		if (this.driftMilli == 0 && proposal.getProposer().equals(this.context.getNode().getIdentity()) == false)
 			this.driftMilli = proposal.getWitnessedAt();
 		
 		return true;
