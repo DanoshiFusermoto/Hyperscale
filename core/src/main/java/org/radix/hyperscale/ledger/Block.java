@@ -37,8 +37,9 @@ import com.google.common.primitives.Longs;
 @StateContext("block")
 public final class Block extends ExtendedObject implements CompoundPrimitive
 {
-	public static final long toHeight(Hash block)
+	public static final long toHeight(final Hash block)
 	{
+		Objects.requireNonNull(block, "Block is null");
 		return Longs.fromByteArray(block.toByteArray());
 	}
 	
@@ -311,5 +312,11 @@ public final class Block extends ExtendedObject implements CompoundPrimitive
 		}
 		
 		return this.size;
+	}
+
+	@Override
+	public String toString()
+	{
+		return super.toString()+" height="+getHeader().getHeight();
 	}
 }

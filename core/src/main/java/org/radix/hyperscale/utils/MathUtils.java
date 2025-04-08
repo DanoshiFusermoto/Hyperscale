@@ -26,6 +26,16 @@ public class MathUtils
 		return (Long.SIZE - 1) - Long.numberOfLeadingZeros(value);
 	}
 
+	public static final int sqr(int value)
+	{
+		return value * value;
+	}
+
+	public static final long sqr(long value)
+	{
+		return value * value;
+	}
+
 	public static final int roundUpBase2(int value)
 	{
 		value--;

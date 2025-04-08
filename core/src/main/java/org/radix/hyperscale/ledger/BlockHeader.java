@@ -540,14 +540,19 @@ public final class BlockHeader extends Serializable implements Comparable<BlockH
 		return true;
 	}
 
-	public final boolean isAheadOf(final BlockHeader other, final int limit)
+	public final boolean isAheadOf(final BlockHeader other)
+	{
+		return isAheadOf(other, 0);
+	}
+
+	public final boolean isAheadOf(final BlockHeader other, final int minDelta)
 	{
 		Objects.requireNonNull(other, "Block header is null");
 
 		long thisHeight = this.getHeight();
 		long otherHeight = other.getHeight();
 		long heightDelta = thisHeight - otherHeight;
-		if (heightDelta >= limit)
+		if (heightDelta >= minDelta)
 			return true;
 		
 		return false;
