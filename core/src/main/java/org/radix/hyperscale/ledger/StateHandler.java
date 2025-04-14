@@ -142,22 +142,24 @@ public final class StateHandler implements Service
 			if (StateHandler.this.context.getNode().isSynced() == false)
 				return;
 
-			try
-			{
-				if (stateLog.hasLevel(Logging.DEBUG))
-					stateLog.debug(StateHandler.this.context.getName()+": Executing atom "+pendingAtomToExecute);
-
-            	StateHandler.this.executorService.submit(() -> StateHandler.this.execute(pendingAtomToExecute));
-			}
-			catch (Exception ex)
-			{
-				stateLog.error(StateHandler.this.context.getName()+": Error executing "+pendingAtomToExecute, ex);
-					
-				// TODO review if allowing atoms that throw any exception on provisioning should be allowed to simply commit-timeout
-				// 		or is it better to have a more explicit means of dealing with exceptions that might not be relevant to the 
-				//		execution of state.
-				// StateHandler.this.context.getEvents().post(new AtomExceptionEvent(pendingAtom, ex));
-			}
+			StateHandler.this.executorService.submit(() -> {
+				try
+				{
+					if (stateLog.hasLevel(Logging.DEBUG))
+						stateLog.debug(StateHandler.this.context.getName()+": Executing atom "+pendingAtomToExecute);
+	
+	            	StateHandler.this.execute(pendingAtomToExecute);
+				}
+				catch (Exception ex)
+				{
+					stateLog.error(StateHandler.this.context.getName()+": Error executing "+pendingAtomToExecute, ex);
+						
+					// TODO review if allowing atoms that throw any exception on provisioning should be allowed to simply commit-timeout
+					// 		or is it better to have a more explicit means of dealing with exceptions that might not be relevant to the 
+					//		execution of state.
+					// StateHandler.this.context.getEvents().post(new AtomExceptionEvent(pendingAtom, ex));
+				}
+			});
 		}
 		
 		@Override
@@ -780,7 +782,7 @@ public final class StateHandler implements Service
 						continue;
 					}
 						
-					this.process(pendingAtom, stateCertificateToProcess);
+					process(pendingAtom, stateCertificateToProcess);
 					if (stateLog.hasLevel(Logging.DEBUG))
 						stateLog.debug(this.context.getName()+": Processed state certificate "+stateCertificateToProcess.getAddress()+" with for atom "+stateCertificateToProcess.getAtom());
 						
@@ -861,7 +863,7 @@ public final class StateHandler implements Service
 		Objects.requireNonNull(certificate, "State certificate is null");
 
 		// Dont provision local state certificates as will be generated locally
-		if (ShardMapper.equal(this.context.getLedger().numShardGroups(Epoch.from(certificate.getBlock())), certificate.getAddress(), this.context.getNode().getIdentity()) == false)
+		if (ShardMapper.equal(this.context.getLedger().numShardGroups(certificate.getBlock()), certificate.getAddress(), this.context.getNode().getIdentity()) == false)
 			pendingAtom.provision(certificate);
 		
 		this.context.getMetaData().increment("ledger.pool.state.certificates");
@@ -887,7 +889,7 @@ public final class StateHandler implements Service
 			this.stateProcessor.signal();
 	}
 
-	void execute(final PendingAtom pendingAtom)
+	void execute(final PendingAtom pendingAtom) throws ValidationException
 	{
 		try
 		{
@@ -898,9 +900,13 @@ public final class StateHandler implements Service
 			if (pendingAtom.getStatus().current(AtomStatus.State.FINALIZING))
 				this.context.getEvents().post(new AtomExecutedEvent(pendingAtom));
 		}
+		
+		// Perform a finalization attempt here in the case that all state certificates 
+		// were already received and this replica is simply an observer
+		tryFinalize(pendingAtom);
 	}
 
-	private boolean tryFinalize(final PendingAtom pendingAtom) throws IOException, CryptoException, ValidationException
+	private boolean tryFinalize(final PendingAtom pendingAtom) throws ValidationException
 	{
 		// Don't build atom certificate from state certificates until executed
 		if (pendingAtom.getStatus().current(AtomStatus.State.FINALIZING) == false)

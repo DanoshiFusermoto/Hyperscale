@@ -18,7 +18,6 @@ import org.eclipse.collections.api.map.MutableMap;
 import org.radix.hyperscale.Constants;
 import org.radix.hyperscale.Context;
 import org.radix.hyperscale.Universe;
-import org.radix.hyperscale.crypto.CryptoException;
 import org.radix.hyperscale.crypto.Hash;
 import org.radix.hyperscale.crypto.Hashable;
 import org.radix.hyperscale.exceptions.ValidationException;
@@ -502,6 +501,9 @@ public final class PendingAtom implements Hashable, StateAddressable
 			this.executeLatentAt = this.acceptedAt + TimeUnit.SECONDS.toMillis(Constants.ATOM_EXECUTE_LATENT_SECONDS);
 			this.executeTimeoutAt = this.acceptedAt + TimeUnit.SECONDS.toMillis(Constants.ATOM_EXECUTE_TIMEOUT_SECONDS);
 			
+			if (atomsLog.hasLevel(Logging.INFO))
+				atomsLog.info(this.context.getName()+": Pending atom "+getHash()+" accepted into block "+header.getHeight()+":"+header.getHash());
+			
 			clearTimeout();
 		}
 	}
@@ -513,7 +515,7 @@ public final class PendingAtom implements Hashable, StateAddressable
 			this.status.set(AtomStatus.State.PROVISIONED);
 
 			if (atomsLog.hasLevel(Logging.INFO))
-				atomsLog.info(this.context.getName()+": Pending atom "+this.getHash()+" is provisioned");
+				atomsLog.info(this.context.getName()+": Pending atom "+getHash()+" is provisioned");
 		}
 	}
 
@@ -545,7 +547,7 @@ public final class PendingAtom implements Hashable, StateAddressable
 				else
 					completedVia = ": UNKNOWN COMPLETION CONDITIONAL";
 				
-				atomsLog.info(this.context.getName()+": Pending atom "+this.getHash()+" is completed "+completedVia);
+				atomsLog.info(this.context.getName()+": Pending atom "+getHash()+" is completed "+completedVia);
 			}
 			
 			clearTimeout();
@@ -574,7 +576,7 @@ public final class PendingAtom implements Hashable, StateAddressable
 		synchronized(this)
 		{
 			if (isProvisioned())
-				throw new IllegalStateException("Atom "+getHash()+" is already PROVISIONED when loading package "+pakage);
+				throw new IllegalStateException("Pending atom "+getHash()+" is already PROVISIONED when loading package "+pakage);
 			
 			this.stateMachine.load(pakage);
 			if (this.stateMachine.isProvisioned() && isProvisioned() == false)
@@ -1176,43 +1178,74 @@ public final class PendingAtom implements Hashable, StateAddressable
 			{
 				// Debug conditionals to check timeouts should actually be triggered
 				boolean falsePositive = false;
+				boolean checkedInputs = false;
+				boolean checkedOutputs = false;
+				PendingState missingInput = null;
+				PendingState missingOutput = null;
 				if (timeout instanceof CommitTimeout)
 				{
 					falsePositive = true;
-					for (final PendingState pendingState : getStates())
-					{
-						if (pendingState.getStateOutput() == null)
-						{
-							falsePositive = false;
-							break;
-						}
-					}
-
-					atomStatusLog.error(this.context.getName()+": "+timeout.getClass().getSimpleName()+" for "+getHash()+" but has all state outputs");
-					
-					if (this.certificate == null)
-						falsePositive = false;
-					else
-						atomStatusLog.error(this.context.getName()+": "+timeout.getClass().getSimpleName()+" for "+getHash()+" but has atom certificate");
-
-				}
-				else if (timeout instanceof ExecutionLatentTimeout)
-				{
-					falsePositive = true;
+					checkedInputs = true;
+					checkedOutputs = true;
 					for (final PendingState pendingState : getStates())
 					{
 						if (pendingState.getStateInput() == null)
 						{
 							falsePositive = false;
+							missingInput = pendingState;
 							break;
 						}
 					}
 
-					atomStatusLog.error(this.context.getName()+": "+timeout.getClass().getSimpleName()+" for "+getHash()+" but has all state inputs");
+					for (final PendingState pendingState : getStates())
+					{
+						if (pendingState.getStateOutput() == null)
+						{
+							falsePositive = false;
+							missingOutput = pendingState;
+							break;
+						}
+					}
+
+					if (this.certificate == null)
+						falsePositive = false;
+					else
+						atomStatusLog.error(this.context.getName()+": "+timeout.getClass().getSimpleName()+" for "+getHash()+" but has atom certificate "+this.certificate.getHash());
+
+				}
+				else if (timeout instanceof ExecutionLatentTimeout)
+				{
+					falsePositive = true;
+					checkedInputs = true;
+					for (final PendingState pendingState : getStates())
+					{
+						if (pendingState.getStateInput() == null)
+						{
+							falsePositive = false;
+							missingInput = pendingState;
+							break;
+						}
+					}
 				}
 	
+				if (checkedInputs)
+				{
+					if (missingInput == null)
+						atomStatusLog.error(this.context.getName()+": "+timeout.getClass().getSimpleName()+" for "+getHash()+" but has all state inputs");
+					else
+						atomStatusLog.error(this.context.getName()+": "+timeout.getClass().getSimpleName()+" for "+getHash()+" is missing state input "+missingInput);
+				}
+				
+				if (checkedOutputs)
+				{
+					if (missingOutput == null)
+						atomStatusLog.error(this.context.getName()+": "+timeout.getClass().getSimpleName()+" for "+getHash()+" but has all state outputs");
+					else
+						atomStatusLog.error(this.context.getName()+": "+timeout.getClass().getSimpleName()+" for "+getHash()+" is missing state output "+missingOutput);
+				}
+
 				if (falsePositive)
-					atomStatusLog.error(this.context.getName()+": "+timeout.getClass().getSimpleName()+" for "+getHash()+" but is false positive");
+					atomStatusLog.error(this.context.getName()+": "+timeout.getClass().getSimpleName()+" for "+getHash()+" is false positive");
 			
 				setTimeout(timeout);
 			}
@@ -1260,7 +1293,7 @@ public final class PendingAtom implements Hashable, StateAddressable
 		}
 	}
 	
-	AtomCertificate tryFinalize() throws CryptoException, IOException, ValidationException
+	AtomCertificate tryFinalize() throws ValidationException
 	{
 		synchronized(this)
 		{
@@ -1270,7 +1303,7 @@ public final class PendingAtom implements Hashable, StateAddressable
 				return this.certificate;
 			}
 			
-			if (this.status.before(AtomStatus.State.EXECUTING))
+			if (this.status.before(AtomStatus.State.FINALIZING))
 			{
 				stateLog.warn(this.context.getName()+": Attempted to create atom certificate for "+getHash()+" when status "+this.status.current());
 				return null;
@@ -1279,22 +1312,23 @@ public final class PendingAtom implements Hashable, StateAddressable
 			// TODO where does the validation of received certificates from other shard groups go? 
 			//	    and what does it do?
 			
-			if (this.pendingStates.allSatisfy(PendingState::isFinalized) == false)
-				return null;
-
-			// Investigate possibility of creating an atom certificate.  All state references / certificates must have been created.
 			final List<StateOutput> stateOutputs;
 			CommitDecision decision = CommitDecision.ACCEPT;
 			synchronized(this.pendingStates)
 			{
+				if (this.pendingStates.allSatisfy(PendingState::isFinalized) == false)
+					return null;
+
 				stateOutputs = new ArrayList<StateOutput>(this.pendingStates.size());
+
+				// Investigate possibility of creating an atom certificate.  All state references / certificates must have been created.
 				for (final PendingState pendingState : this.pendingStates.values())
 				{
 					// Check existence of and decisions on the write substates
 					if (pendingState.getStateLockMode().equals(StateLockMode.WRITE))
 					{
 						if (pendingState.isFinalized() == false)
-							return null;
+							throw new IllegalArgumentException("Write locked pending state output "+pendingState.getAddress()+" is not finalized as expected");
 						
 						if (pendingState.getStateOutput() instanceof StateCertificate stateCertificate)
 						{

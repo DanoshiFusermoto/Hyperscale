@@ -1,13 +1,11 @@
 package org.radix.hyperscale.ledger;
 
 import java.io.IOException;
-import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
-import java.util.Map.Entry;
 
 import org.eclipse.collections.api.factory.Sets;
 import org.radix.hyperscale.Configuration;
@@ -21,7 +19,6 @@ import org.radix.hyperscale.crypto.Identity;
 import org.radix.hyperscale.crypto.bls12381.BLS12381;
 import org.radix.hyperscale.crypto.bls12381.BLSPublicKey;
 import org.radix.hyperscale.crypto.bls12381.BLSSignature;
-import org.radix.hyperscale.database.vamos.LockMode;
 import org.radix.hyperscale.exceptions.ValidationException;
 import org.radix.hyperscale.ledger.primitives.StateCertificate;
 import org.radix.hyperscale.ledger.primitives.StateInput;
@@ -32,7 +29,6 @@ import org.radix.hyperscale.ledger.sme.SubstateLog;
 import org.radix.hyperscale.ledger.sme.StateMachineStatus.State;
 import org.radix.hyperscale.logging.Logger;
 import org.radix.hyperscale.logging.Logging;
-import org.radix.hyperscale.utils.Base58;
 import org.radix.hyperscale.utils.Numbers;
 
 public final class PendingState implements Hashable, StateAddressable
@@ -140,7 +136,7 @@ public final class PendingState implements Hashable, StateAddressable
 			throw new IllegalArgumentException("State output is not for atom "+this.atom.getHash());
 
 		if (stateOutput.getAddress().equals(this.address) == false)
-			throw new IllegalArgumentException("Input substate is not for state address "+this.address);
+			throw new IllegalArgumentException("Output substate is not for state address "+this.address);
 
 		synchronized(this)
 		{
@@ -294,7 +290,7 @@ public final class PendingState implements Hashable, StateAddressable
 		return this.stateOutput != null;
 	}
 	
-	StateOutput tryFinalize() throws IOException, CryptoException
+	<T extends StateOutput> T tryFinalize() throws IOException, CryptoException
 	{
 		synchronized(this)
 		{
@@ -357,7 +353,7 @@ public final class PendingState implements Hashable, StateAddressable
 			}
 			
 			this.stateOutput = stateOutput;
-			return stateOutput;
+			return (T) stateOutput;
 		}
 	}
 
