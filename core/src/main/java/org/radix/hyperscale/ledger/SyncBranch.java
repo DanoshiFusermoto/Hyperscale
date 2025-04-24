@@ -52,7 +52,7 @@ final class SyncBranch
 			
 			this.headers.add(header);
 			if (syncLog.hasLevel(Logging.DEBUG))
-				syncLog.debug(context.getName()+": Pushed block header "+header+" to branch on "+this.root);
+				syncLog.debug(this.context.getName()+": Pushed block header "+header+" to branch on "+this.root);
 			
 			Collections.sort(this.headers, (h1, h2) -> (int) (h1.getHeight() - h2.getHeight()));
 			
@@ -106,7 +106,7 @@ final class SyncBranch
 			while(vertexIterator.hasNext())
 			{
 				final BlockHeader vertex = vertexIterator.next();
-				views.add(vertex.getView().getBlock());
+				views.add(vertex.getView().getCurrent());
 				
 				if (views.contains(vertex.getHash()))
 					supers.put(vertex.getHash(), vertex);
