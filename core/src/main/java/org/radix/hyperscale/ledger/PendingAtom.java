@@ -728,16 +728,16 @@ public final class PendingAtom implements Hashable, StateAddressable
 			}
 			catch(StateMachineExecutionException smex)
 			{
-				this.status.thrown(smex);
-	
 				if (atomsLog.hasLevel(Logging.DEBUG))
 					atomsLog.debug(this.context.getName()+": Atom "+getHash()+" executed with exception");
+
+				this.status.thrown(smex);
 			}
 			catch(Exception ex)
 			{
-				this.status.thrown(ex);
-	
 				atomsLog.warn(this.context.getName()+": Atom "+getHash()+" executed with exception which should be wrapped in a StateMachineException", ex);
+
+				this.status.thrown(ex);
 			}
 		}
 	}
@@ -1281,7 +1281,7 @@ public final class PendingAtom implements Hashable, StateAddressable
 		synchronized(this)
 		{
 			if (this.timeout != null)
-				throw new IllegalStateException("Atom timeout is already set "+this.timeout);
+				throw new IllegalStateException("Atom timeout "+this.timeout.getClass().getSimpleName()+" is already set when processing "+timeout);
 			
 			if (Objects.requireNonNull(timeout).getAtom().equals(getHash()) == false)
 				throw new IllegalArgumentException("Atom timeout "+timeout.getHash()+" does not reference "+getHash());

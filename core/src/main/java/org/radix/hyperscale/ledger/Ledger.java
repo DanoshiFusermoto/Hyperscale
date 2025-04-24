@@ -320,8 +320,8 @@ public final class Ledger implements Service, LedgerInterface
 				this.head.set(header);
 				ledgerLog.info(Ledger.this.context.getName()+": Setting ledger head as "+header);
 
-				if (header.equals(Universe.get().getGenesis().getHeader()) == false && header.getCertificate() == null)
-					ledgerLog.warn(Ledger.this.context.getName()+": Ledger head "+header+" does not have a certificate!");
+				if (header.equals(Universe.get().getGenesis().getHeader()) == false && header.getView() == null)
+					ledgerLog.warn(Ledger.this.context.getName()+": Ledger head "+header+" does not have a view certificate!");
 				
 				this.epoch.set(Epoch.from(header));
 				ledgerLog.info(Ledger.this.context.getName()+": Setting ledger epoch as "+this.epoch.get().getClock());
@@ -606,6 +606,11 @@ public final class Ledger implements Service, LedgerInterface
 		}
 	}
 
+	public int numShardGroups(final Hash proposal)
+	{
+		return numShardGroups(Epoch.from(proposal));
+	}
+
 	public int numShardGroups(final long epoch)
 	{
 		return numShardGroups(Epoch.from(epoch));
@@ -801,14 +806,14 @@ public final class Ledger implements Service, LedgerInterface
 				Ledger.this.headLock.writeLock().unlock();
 			}
 			
-			ledgerLog.info(Ledger.this.context.getName()+": Synced "+(block.getHeader().getCertificate() != null ? "super" : "")+" block with "+block.getHeader().getInventorySize(InventoryType.ACCEPTED)+" atoms "+
-																																				block.getHeader().getInventorySize(InventoryType.UNACCEPTED)+" unaccepted "+
-																																				block.getHeader().getInventorySize(InventoryType.COMMITTED)+" certificates "+
-																																				(block.getHeader().getInventorySize(InventoryType.UNEXECUTED)+block.getHeader().getInventory(InventoryType.UNCOMMITTED).size())+" timeouts "+
-																																				block.getHeader().getInventorySize(InventoryType.EXECUTABLE)+" executable signals "+
-																																				block.getHeader().getInventorySize(InventoryType.LATENT)+" latent signals "+
-																																				block.getHeader().getInventorySize(InventoryType.PACKAGES)+" packages "+
-																																				block.getHeader());
+			ledgerLog.info(Ledger.this.context.getName()+": Synced block with "+block.getHeader().getInventorySize(InventoryType.ACCEPTED)+" atoms "+
+																				block.getHeader().getInventorySize(InventoryType.UNACCEPTED)+" unaccepted "+
+																				block.getHeader().getInventorySize(InventoryType.COMMITTED)+" certificates "+
+																				(block.getHeader().getInventorySize(InventoryType.UNEXECUTED)+block.getHeader().getInventory(InventoryType.UNCOMMITTED).size())+" timeouts "+
+																				block.getHeader().getInventorySize(InventoryType.EXECUTABLE)+" executable signals "+
+																				block.getHeader().getInventorySize(InventoryType.LATENT)+" latent signals "+
+																				block.getHeader().getInventorySize(InventoryType.PACKAGES)+" packages "+
+																				block.getHeader());
 			stats(block);
 		}
 
@@ -821,8 +826,8 @@ public final class Ledger implements Service, LedgerInterface
 				ledgerLog.info(Ledger.this.context.getName()+": "+Ledger.this.context.getLedger().getStateAccumulator().locked().size()+" locked in accumulator "+Ledger.this.context.getLedger().getStateAccumulator().checksum());
 			
 			Ledger.this.context.getMetaData().increment("ledger.session.blocks");
-			if (block.getHeader().getCertificate() != null)
-				Ledger.this.context.getMetaData().increment("ledger.session.blocks.supers");
+//			if (block.getHeader().getCertificate() != null)
+//				Ledger.this.context.getMetaData().increment("ledger.session.blocks.supers");
 			
 			double avgShardsTouched = 1;
 			double shardsTouchedFactor = 1;
@@ -935,7 +940,17 @@ public final class Ledger implements Service, LedgerInterface
 			{
 				if (ledgerLog.hasLevel(Logging.INFO))
 				{
-					ledgerLog.info(Ledger.this.context.getName()+": Committed "+(blockCommittedEvent.getPendingBlock().getHeader().getCertificate() != null ? "super" : "")+" block with "+blockCommittedEvent.getPendingBlock().getHeader().getInventorySize(InventoryType.ACCEPTED)+" atoms "+
+					final PendingBlock.SUPR superType = blockCommittedEvent.getPendingBlock().isSuper();
+					final String superText;
+					switch(superType)
+					{
+						case INTR: superText = ""; break;
+						case SOFT: superText = "soft super"; break;
+						case HARD: superText = "hard super"; break;
+						default: superText = "unknown";
+					}
+					
+					ledgerLog.info(Ledger.this.context.getName()+": Committed "+superText+" block with "+blockCommittedEvent.getPendingBlock().getHeader().getInventorySize(InventoryType.ACCEPTED)+" atoms "+
 																				 blockCommittedEvent.getPendingBlock().getHeader().getInventorySize(InventoryType.UNACCEPTED)+" unaccepted "+
 																				 blockCommittedEvent.getPendingBlock().getHeader().getInventorySize(InventoryType.COMMITTED)+" certificates "+
 																				 (blockCommittedEvent.getPendingBlock().getHeader().getInventorySize(InventoryType.UNEXECUTED)+blockCommittedEvent.getPendingBlock().getHeader().getInventory(InventoryType.UNCOMMITTED).size())+" timeouts "+
@@ -963,13 +978,21 @@ public final class Ledger implements Service, LedgerInterface
 			ledgerLog.log(Ledger.this.context.getName()+": Sync status acquired, loading state accumulator");
 			ledgerLog.log(Ledger.this.context.getName()+":    Sync accumulator checksum is "+event.getAccumulator().checksum());
 
-			Ledger.this.headLock.writeLock().lock();
+			Ledger.this.lock.writeLock().lock();
 			try
 			{
-				Ledger.this.stateAccumulator.reset();
-				Ledger.this.stateAccumulator.lock(event.getAccumulator());
-				Ledger.this.head.set(event.getHead());
-				Ledger.this.epoch.set(Epoch.from(event.getHead()));
+				Ledger.this.headLock.writeLock().lock();
+				try
+				{
+					Ledger.this.stateAccumulator.reset();
+					Ledger.this.stateAccumulator.lock(event.getAccumulator());
+					Ledger.this.head.set(event.getHead());
+					Ledger.this.epoch.set(Epoch.from(event.getHead()));
+				}
+				finally
+				{
+					Ledger.this.headLock.writeLock().unlock();
+				}
 				
 				if (event.getHead().getHash().equals(Universe.get().getGenesis().getHash()) == true)
 					Ledger.this.context.getNode().setProgressing(true);
@@ -983,22 +1006,31 @@ public final class Ledger implements Service, LedgerInterface
 			}
 			finally
 			{
-				Ledger.this.headLock.writeLock().unlock();
+				Ledger.this.lock.writeLock().unlock();
 			}
 		}
 		
 		@Subscribe
 		public void on(final SyncLostEvent event) 
 		{
-			Ledger.this.headLock.writeLock().lock();
+			Ledger.this.lock.writeLock().lock();
 			try
 			{
 				ledgerLog.log(Ledger.this.context.getName()+": Sync status lost, flushing state accumulator");
-				Ledger.this.stateAccumulator.reset();
+		
+				Ledger.this.headLock.writeLock().lock();
+				try
+				{
+					Ledger.this.stateAccumulator.reset();
+				}
+				finally
+				{
+					Ledger.this.headLock.writeLock().unlock();
+				}
 			}
 			finally
 			{
-				Ledger.this.headLock.writeLock().unlock();
+				Ledger.this.lock.writeLock().unlock();
 			}
 		}
 	};
