@@ -470,27 +470,54 @@ public class GossipHandler implements Service
 		});
 		
 		this.eventQueue = new PriorityBlockingQueue<GossipEvent>(this.context.getConfiguration().get("ledger.gossip.message.queue", 1<<12), new Comparator<GossipEvent>() {
-			@Override
-			public int compare(final GossipEvent m1, final GossipEvent m2) 
-			{
-				if (m1.isUrgent() == true && m2.isUrgent() == false)
-					return -1;
-				if (m1.isUrgent() == false && m2.isUrgent() == true)
-					return 1;
-				
-				if (m1.getMessage().getTimestamp() / Constants.BROADCAST_POLL_TIMEOUT < m2.getMessage().getTimestamp() / Constants.BROADCAST_POLL_TIMEOUT)
-					return -1;
-				if (m1.getMessage().getTimestamp() / Constants.BROADCAST_POLL_TIMEOUT > m2.getMessage().getTimestamp() / Constants.BROADCAST_POLL_TIMEOUT)
-					return 1;
-				
-				if (m1.getConnection().getLatency() > m2.getConnection().getLatency())
-					return -1;
-				if (m1.getConnection().getLatency() < m2.getConnection().getLatency())
-					return 1;
+            final long AGE_THRESHOLD = Constants.BROADCAST_POLL_TIMEOUT;
 
-				return 0;
-			}
-		});
+            @Override
+	        public int compare(final GossipEvent m1, final GossipEvent m2) 
+            {
+	            // Calculate logical age of events
+	            long logicalAge1 = System.currentTimeMillis() - m1.getMessage().getTimestamp();
+	            long logicalAge2 = System.currentTimeMillis() - m2.getMessage().getTimestamp();
+	            
+	            // If m1 is old enough, it gains priority regardless of urgency
+	            if (m1.isUrgent() == false && logicalAge1 > AGE_THRESHOLD && m2.isUrgent())
+	                return -1;
+	            
+	            // If m2 is old enough, it gains priority regardless of urgency
+	            if (m2.isUrgent() == false && logicalAge2 > AGE_THRESHOLD && m1.isUrgent())
+	                return 1;
+	            
+	            if (m1.isUrgent() && m2.isUrgent() == false)
+	                return -1;
+
+	            if (m1.isUrgent() == false && m2.isUrgent())
+	                return 1;
+	            
+	            // For messages of the same urgency, prioritize based on logical timestamp
+	            // (accounting for connection latency)
+	            long logicalTimestamp1 = m1.getMessage().getTimestamp() + m1.getConnection().getLatency();
+	            long logicalTimestamp2 = m2.getMessage().getTimestamp() + m2.getConnection().getLatency();
+	            
+	            // Bucket by BROADCAST_POLL_TIMEOUT for timestamp-based priority
+	            long timstampBucket1 = logicalTimestamp1 / Constants.BROADCAST_POLL_TIMEOUT;
+	            long timstampBucket2 = logicalTimestamp2 / Constants.BROADCAST_POLL_TIMEOUT;
+	            
+	            if (timstampBucket1 < timstampBucket2)
+	                return -1;
+
+	            if (timstampBucket1 > timstampBucket2)
+	                return 1;
+	            
+	            // For messages in the same time bucket, prioritize high latency connections
+	            if (m1.getConnection().getLatency() > m2.getConnection().getLatency())
+	                return -1;
+
+	            if (m1.getConnection().getLatency() < m2.getConnection().getLatency())
+	                return 1;
+	            
+	            return 0;
+	        }
+	    });
 	}
 
 	@Override
