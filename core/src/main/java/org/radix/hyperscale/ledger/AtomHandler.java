@@ -61,6 +61,7 @@ import org.radix.hyperscale.ledger.events.SyncAcquiredEvent;
 import org.radix.hyperscale.ledger.exceptions.SyncStatusException;
 import org.radix.hyperscale.ledger.messages.SubmitAtomsMessage;
 import org.radix.hyperscale.ledger.messages.SyncAcquiredMessage;
+import org.radix.hyperscale.ledger.messages.SyncAcquiredMessageProcessor;
 import org.radix.hyperscale.ledger.primitives.Atom;
 import org.radix.hyperscale.ledger.primitives.AtomCertificate;
 import org.radix.hyperscale.ledger.primitives.StateOutput;
@@ -79,7 +80,6 @@ import org.radix.hyperscale.network.GossipFilter;
 import org.radix.hyperscale.network.GossipInventory;
 import org.radix.hyperscale.network.GossipReceiver;
 import org.radix.hyperscale.network.MessageProcessor;
-import org.radix.hyperscale.network.messages.InventoryMessage;
 
 import com.google.common.eventbus.Subscribe;
 import com.sleepycat.je.OperationStatus;
@@ -89,7 +89,7 @@ public class AtomHandler implements Service, LedgerInterface
 	private static final Logger syncLog = Logging.getLogger("sync");
 	private static final Logger atomsLog = Logging.getLogger("atoms");
 	
-	private static final int ATOMS_PROCESS_BATCH_SIZE = 128;
+	private static final int ATOMS_PROCESS_BATCH_SIZE = 64;
 	
 	private static final boolean SKIP_EXECUTION_SIGNALS = false;
 	
@@ -266,7 +266,7 @@ public class AtomHandler implements Service, LedgerInterface
 			}
 		});
 				
-		this.context.getNetwork().getMessaging().register(SyncAcquiredMessage.class, this.getClass(), new MessageProcessor<SyncAcquiredMessage>()
+		this.context.getNetwork().getMessaging().register(SyncAcquiredMessage.class, this.getClass(), new SyncAcquiredMessageProcessor(this.context)
 		{
 			@Override
 			public void process(final SyncAcquiredMessage syncAcquiredMessage, final AbstractConnection connection)
@@ -276,8 +276,8 @@ public class AtomHandler implements Service, LedgerInterface
 					if (atomsLog.hasLevel(Logging.DEBUG))
 						atomsLog.debug(AtomHandler.this.context.getName()+": Atom pool inventory request from "+connection);
 
-					// TODO will cause problems when pool is BIG
-					final Set<Hash> pendingAtomInventory = new HashSet<Hash>();
+					// TODO will cause problems when pool is very big
+					final Set<Hash> deferredPendingAtomInventory = new HashSet<Hash>();
 					AtomHandler.this.pendingAtoms.forEach((hash, pendingAtom) -> {
 						if (pendingAtom.getStatus().before(AtomStatus.State.PREPARED))
 							return;
@@ -285,9 +285,11 @@ public class AtomHandler implements Service, LedgerInterface
 						if (syncAcquiredMessage.containsPending(pendingAtom.getHash()) == true)
 							return;
 
-	                	pendingAtomInventory.add(pendingAtom.getHash());
+						deferredPendingAtomInventory.add(pendingAtom.getHash());
 					});
 
+					int broadcastedPendingAtomCount = 0;
+					final Set<Hash> pendingAtomInventory = new HashSet<Hash>();
 					long syncInventoryHeight = Math.max(1, syncAcquiredMessage.getHead().getHeight() - Constants.SYNC_INVENTORY_HEAD_OFFSET);
 					while (syncInventoryHeight <= AtomHandler.this.context.getLedger().getHead().getHeight())
 					{
@@ -299,22 +301,19 @@ public class AtomHandler implements Service, LedgerInterface
 								return;
 							
 							pendingAtomInventory.add(ir.getHash());
+							deferredPendingAtomInventory.remove(ir.getHash());
 						});
+						
+						broadcastedPendingAtomCount += broadcastSyncInventory(pendingAtomInventory, Atom.class, Constants.MAX_REQUEST_INVENTORY_ITEMS, connection);
 
 						syncInventoryHeight++;
 					}
 					
-					if (syncLog.hasLevel(Logging.DEBUG))
-						syncLog.debug(AtomHandler.this.context.getName()+": Broadcasting sync atoms "+pendingAtomInventory.size()+" / "+pendingAtomInventory+" to "+connection);
-					else
-						syncLog.log(AtomHandler.this.context.getName()+": Broadcasting "+pendingAtomInventory.size()+" sync atoms to "+connection);
+					// Send any remaining (also now send the deferred)
+					broadcastedPendingAtomCount += broadcastSyncInventory(pendingAtomInventory, Atom.class, 0, connection);
+					broadcastedPendingAtomCount += broadcastSyncInventory(deferredPendingAtomInventory, Atom.class, 0, connection);
 
-					while(pendingAtomInventory.isEmpty() == false)
-					{
-						InventoryMessage pendingAtomInventoryMessage = new InventoryMessage(pendingAtomInventory, 0, Math.min(Constants.MAX_BROADCAST_INVENTORY_ITEMS, pendingAtomInventory.size()), Atom.class);
-						AtomHandler.this.context.getNetwork().getMessaging().send(pendingAtomInventoryMessage, connection);
-						pendingAtomInventoryMessage.asInventory().forEach(a -> pendingAtomInventory.remove(a.getHash()));
-					}
+					syncLog.log(AtomHandler.this.context.getName()+": Broadcasted "+broadcastedPendingAtomCount+" atom to "+connection);
 				}
 				catch (Exception ex)
 				{
@@ -522,13 +521,20 @@ public class AtomHandler implements Service, LedgerInterface
 				
 				timeoutScheduleIterator.remove();
 				
-				final AtomTimeout timeout = timeoutEntry.getKey().tryTimeout(timestamp);
-				if (timeout != null)
+				try
 				{
-//					if(atomsLog.hasLevel(Logging.DEBUG))
-						atomsLog.warn(this.context.getName()+": Timeout "+timeout.getClass().getSimpleName()+" is triggered at "+timestamp+" for "+timeoutEntry.getKey().getHash()+" with status "+timeoutEntry.getKey().getStatus().current());
-
-					AtomHandler.this.context.getEvents().post(new AtomTimeoutEvent(timeoutEntry.getKey(), timeout));
+					final AtomTimeout timeout = timeoutEntry.getKey().tryTimeout(timestamp);
+					if (timeout != null)
+					{
+	//					if(atomsLog.hasLevel(Logging.DEBUG))
+							atomsLog.warn(this.context.getName()+": Timeout "+timeout.getClass().getSimpleName()+" is triggered at "+timestamp+" for "+timeoutEntry.getKey().getHash()+" with status "+timeoutEntry.getKey().getStatus().current());
+	
+						AtomHandler.this.context.getEvents().post(new AtomTimeoutEvent(timeoutEntry.getKey(), timeout));
+					}
+				}
+				catch (Exception ex)
+				{
+					atomsLog.error(this.context.getName()+": Error processing atom timeout for "+timeoutEntry.getKey().getHash(), ex);
 				}
 			}
 		}

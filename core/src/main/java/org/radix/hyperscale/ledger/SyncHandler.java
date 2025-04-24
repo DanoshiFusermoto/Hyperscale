@@ -62,6 +62,7 @@ import org.radix.hyperscale.network.MessageProcessor;
 import org.radix.hyperscale.network.StandardConnectionFilter;
 import org.radix.hyperscale.network.events.DisconnectedEvent;
 import org.radix.hyperscale.network.messages.NodeMessage;
+import org.radix.hyperscale.utils.MathUtils;
 
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.LinkedHashMultimap;
@@ -77,6 +78,11 @@ public class SyncHandler implements Service
 	private static final Logger syncLog = Logging.getLogger("sync");
 	
 	private static final boolean MULTIPLE_SYNC_BLOCK_REQUESTS = true;
+	
+	static 
+	{
+		syncLog.setLevel(Logging.INFO);
+	}
 	
 	enum SyncStatus
 	{
@@ -139,7 +145,7 @@ public class SyncHandler implements Service
 				if (SyncHandler.this.blocksRequested.containsKey(this.requestedBlock) == false)
 					return true;
 				
-				return !Long.valueOf(this.requestSeq).equals(SyncHandler.this.blocksRequested.get(this.requestedBlock));
+				return Long.valueOf(this.requestSeq).equals(SyncHandler.this.blocksRequested.get(this.requestedBlock)) == false;
 			}
 			finally
 			{
@@ -313,7 +319,7 @@ public class SyncHandler implements Service
 						{
 							if (syncPeers.isEmpty() == false)
 							{
-								final int numSyncBlockRequestsPerPeer = MULTIPLE_SYNC_BLOCK_REQUESTS ? Math.max(1, Constants.DEFAULT_TCP_CONNECTIONS_OUT_SYNC / syncPeers.size()) : 1;
+								final int numSyncBlockRequestsPerPeer = MULTIPLE_SYNC_BLOCK_REQUESTS ? Math.max(1, MathUtils.sqr(Constants.DEFAULT_TCP_CONNECTIONS_OUT_SYNC) / syncPeers.size()) : 1;
 								for (AbstractConnection syncPeer : syncPeers)
 								{
 									if (SyncHandler.this.blockInventories.containsKey(syncPeer) == false)
@@ -370,101 +376,115 @@ public class SyncHandler implements Service
 										syncLog.error(SyncHandler.this.context.getName()+": Inventory management of "+syncPeer+" failed", ex);
 									}
 	
-									try
+									// Fetch some blocks if block cache is below threshold?
+									if (SyncHandler.this.blocks.size() < Constants.MAX_BROADCAST_INVENTORY_ITEMS)
 									{
-										synchronized(SyncHandler.this.blockInventories)
+										try
 										{
-											if (SyncHandler.this.blockInventories.get(syncPeer).isEmpty() == false)
+											synchronized(SyncHandler.this.blockInventories)
 											{
-												final Iterator<Hash> inventoryIterator = SyncHandler.this.blockInventories.get(syncPeer).iterator();
-												while(inventoryIterator.hasNext())
+												if (SyncHandler.this.blockInventories.get(syncPeer).isEmpty() == false)
 												{
-													Hash block = inventoryIterator.next();
-													if (SyncHandler.this.blocksRequested.containsKey(block))
-														continue;
-												
-													if (SyncHandler.this.blocks.containsKey(block))
-														continue;
-
-													if (SyncHandler.this.request(syncPeer, block))
+													final Iterator<Hash> inventoryIterator = SyncHandler.this.blockInventories.get(syncPeer).iterator();
+													while(inventoryIterator.hasNext())
 													{
-														numRequestTasksAvailable--;
+														Hash block = inventoryIterator.next();
+														if (SyncHandler.this.blocksRequested.containsKey(block))
+															continue;
 													
-														if (numRequestTasksAvailable == 0)
-															break;
+														if (SyncHandler.this.blocks.containsKey(block))
+															continue;
+	
+														if (SyncHandler.this.request(syncPeer, block))
+														{
+															numRequestTasksAvailable--;
+														
+															if (numRequestTasksAvailable == 0)
+																break;
+														}
 													}
 												}
 											}
 										}
-									}
-									catch (Exception ex)
-									{
-										syncLog.error(SyncHandler.this.context.getName()+": Block request from "+syncPeer+" failed", ex);
+										catch (Exception ex)
+										{
+											syncLog.error(SyncHandler.this.context.getName()+": Block request from "+syncPeer+" failed", ex);
+										}
 									}
 								}
 							}
 							
 							// Find best committable branch //
-							int bestBranchSupers = 0;
-							SyncBranch bestBranch = null;
-							final List<Block> sortedBlocks = new ArrayList<Block>(SyncHandler.this.blocks.values());
-							Collections.sort(sortedBlocks, Collections.reverseOrder());
-							for(int i = 0 ; i < sortedBlocks.size() ; i++)
+							final List<Block> syncBlocks;
+							synchronized(SyncHandler.this.blocks)
 							{
-								final Block block = sortedBlocks.get(i);
+								syncBlocks = new ArrayList<Block>(SyncHandler.this.blocks.values());
+								Collections.sort(syncBlocks, Collections.reverseOrder());
+							}
+
+							// Find a canonical branch section
+							final List<Block> branchBlocks = new ArrayList<Block>();
+
+							// Should be in highest order
+							int lastHeight = -1;
+							for(int i = 0 ; i < syncBlocks.size() ; i++)
+							{
+								final Block syncBlock = syncBlocks.get(i);
 								
-								if (block.getHeader().getHeight() <= SyncHandler.this.syncHead.getHeight())
+								// Stale?
+								if (syncBlock.getHeader().getHeight() <= SyncHandler.this.syncHead.getHeight())
 								{
-									SyncHandler.this.blocks.remove(block.getHash());
+									SyncHandler.this.blocks.remove(syncBlock.getHash());
 									continue;
 								}
-								
-								Block branchBlock = block;
-								final SyncBranch syncBranch = new SyncBranch(SyncHandler.this.context, SyncHandler.this.syncHead);
-								syncBranch.push(block.getHeader());
-								while(branchBlock.getHeader().getPrevious().equals(syncBranch.getRoot().getHash()) == false)
+
+								// Check duplicates / forks
+								if (syncBlock.getHeader().getHeight() == lastHeight)
 								{
-									if (SyncHandler.this.blocksRequested.containsKey(branchBlock.getHeader().getPrevious()))
-										break;
-									
-									final Block prevBranchBlock = SyncHandler.this.blocks.get(branchBlock.getHeader().getPrevious());
-									if (prevBranchBlock == null)
-									{
-										if (syncLog.hasLevel(Logging.DEBUG))
-											syncLog.warn(SyncHandler.this.context.getName()+": Previous sync block "+branchBlock.getHeader().getPrevious()+" of "+branchBlock.getHeader().toString()+" is not known");
-										
-										break;
-									}
-									
-									syncBranch.push(prevBranchBlock.getHeader());
-									branchBlock = prevBranchBlock;
-								}
-								
-								final List<BlockHeader> supers = syncBranch.supers();
-								if (supers.size() < Constants.MIN_COMMIT_SUPERS)
+									syncLog.fatal(SyncHandler.this.context.getName()+": Detected competing blocks at "+syncBlock.getHeader().getHeight());
 									continue;
-								
-								if (bestBranch == null || supers.size() > bestBranchSupers)
+								}
+
+								if (SyncHandler.this.blocksRequested.containsKey(syncBlock.getHeader().getPrevious()))
 								{
-									bestBranchSupers = supers.size();
-									bestBranch = syncBranch;
+									// Cant be canonical, clear branch
+									branchBlocks.clear();
+									continue;
+								}
 									
+								final boolean atRoot = syncBlock.getHeader().getPrevious().equals(SyncHandler.this.syncHead.getHash());
+								final Block prevSyncBlock = SyncHandler.this.blocks.get(syncBlock.getHeader().getPrevious());
+								if (prevSyncBlock == null && atRoot == false)
+								{
 									if (syncLog.hasLevel(Logging.DEBUG))
-										syncLog.debug(SyncHandler.this.context.getName()+": Switching to branch "+bestBranch.getRoot()+" -> "+bestBranch.getHigh()+" as sync candidate");
+										syncLog.warn(SyncHandler.this.context.getName()+": Previous sync block "+syncBlock.getHeader().getPrevious()+" of "+syncBlock.getHeader().toString()+" is not yet known");
+										
+									// Cant be canonical, clear branch
+									branchBlocks.clear();
+									continue;
 								}
+								
+								branchBlocks.add(syncBlock);
+								
+								if (atRoot == true)
+									break;
 							}
 							
-							if (bestBranch != null)
+							// Add discovered sync blocks to branch and determine a commit
+							if (branchBlocks.isEmpty() == false)
 							{
-								syncLog.info(SyncHandler.this.context.getName()+": Selected branch "+bestBranch.getRoot()+" -> "+bestBranch.getHigh()+" as sync candidate");
+								final SyncBranch syncBranch = new SyncBranch(SyncHandler.this.context, SyncHandler.this.syncHead);
+								for (final Block branchBlock : branchBlocks)
+									syncBranch.push(branchBlock.getHeader());
 								
-								// Ensure there is a branch to commit
-								if (bestBranch.isCanonical() == false)
+								syncLog.info(SyncHandler.this.context.getName()+": Discovered sync branch "+syncBranch.getRoot()+" -> "+syncBranch.getHigh()+" as commit candidate");
+
+								if (syncBranch.isCanonical() == false)
 								{
 									syncLog.fatal(SyncHandler.this.context.getName()+": Selected branch in range:");
-									syncLog.fatal(SyncHandler.this.context.getName()+":   R: "+bestBranch.getRoot());
-									syncLog.fatal(SyncHandler.this.context.getName()+":   L: "+bestBranch.getLow());
-									syncLog.fatal(SyncHandler.this.context.getName()+":   H: "+bestBranch.getHigh());
+									syncLog.fatal(SyncHandler.this.context.getName()+":   R: "+syncBranch.getRoot());
+									syncLog.fatal(SyncHandler.this.context.getName()+":   L: "+syncBranch.getLow());
+									syncLog.fatal(SyncHandler.this.context.getName()+":   H: "+syncBranch.getHigh());
 									syncLog.fatal(SyncHandler.this.context.getName()+":   does not link to "+SyncHandler.this.syncHead);
 									Thread.sleep(1000);
 								}
@@ -472,11 +492,11 @@ public class SyncHandler implements Service
 								{
 									try
 									{
-										commit(bestBranch);
+										commit(syncBranch);
 									}
 									catch (Exception ex)
 									{
-										syncLog.error(SyncHandler.this.context.getName()+": Commit of branch with head "+bestBranch.getHigh()+" failed, resetting", ex);
+										syncLog.error(SyncHandler.this.context.getName()+": Commit of branch with head "+syncBranch.getHigh()+" failed, resetting", ex);
 										SyncHandler.this.reset();
 									}
 								}
@@ -487,12 +507,11 @@ public class SyncHandler implements Service
 							{
 								for (final AbstractConnection connection : syncPeers)
 								{
-									if (SyncHandler.this.syncHead.isAheadOf(connection.getNode().getHead(), 1))
+									if (SyncHandler.this.syncHead.isAheadOf(connection.getNode().getHead()))
 										continue;
 									
 									if (SyncHandler.this.inventoryTasks.containsKey(connection) == false &&
-										(SyncHandler.this.blockInventories.containsKey(connection) == false || 
-										 SyncHandler.this.blockInventories.get(connection).size() < Constants.MAX_BROADCAST_INVENTORY_ITEMS || bestBranch == null))
+										(SyncHandler.this.blockInventories.containsKey(connection) == false || SyncHandler.this.blockInventories.get(connection).size() < Constants.MAX_BROADCAST_INVENTORY_ITEMS))
 									{
 										SyncInventoryTask syncInventoryTask = null;
 										Hash highestInventory = SyncHandler.this.syncHead.getHash();
@@ -591,7 +610,7 @@ public class SyncHandler implements Service
 							return;
 						}
 	
-						if (syncLog.hasLevel(Logging.DEBUG))
+//						if (syncLog.hasLevel(Logging.DEBUG))
 							syncLog.info(SyncHandler.this.context.getName()+": Block "+syncBlockMessage.getBlock().getHeader().getHash()+" from "+connection);
 						
 						if (syncBlockMessage.getBlock().getHeader().getView() == null)
@@ -630,7 +649,7 @@ public class SyncHandler implements Service
 						if (syncLog.hasLevel(Logging.DEBUG))
 							syncLog.debug(SyncHandler.this.context.getName()+": Block request for "+getSyncBlockMessage.getBlock()+" from "+connection);
 						
-						final Block block = SyncHandler.this.context.getLedger().getLedgerStore().get(getSyncBlockMessage.getBlock(), Block.class);
+						Block block = SyncHandler.this.context.getLedger().getLedgerStore().get(getSyncBlockMessage.getBlock(), Block.class);
 						if (block == null)
 						{
 							syncLog.error(SyncHandler.this.context.getName()+": Requested block "+getSyncBlockMessage.getBlock()+" not found for "+connection);
@@ -823,7 +842,7 @@ public class SyncHandler implements Service
 			this.requestTasks.put(connection, syncRequestTask);
 			Executor.getInstance().schedule(syncRequestTask);
 			
-			if (syncLog.hasLevel(Logging.DEBUG))
+//			if (syncLog.hasLevel(Logging.DEBUG))
 				syncLog.info(SyncHandler.this.context.getName()+": Requesting block "+block+" from "+connection);
 	
 			GetSyncBlockMessage getBlockMessage = new GetSyncBlockMessage(block); 
@@ -1053,18 +1072,32 @@ public class SyncHandler implements Service
 	{
 		// TODO limited validation here currently, just accepts blocks and atoms almost on faith
 		// TODO remove reference to ledger StateAccumulator and use a local instance with a push on sync
+		final List<BlockHeader> supers = branch.supers();
+		if (supers.size() < Constants.MIN_COMMIT_SUPERS)
+			return;
+
+        BlockHeader previousSuper = null;
+        BlockHeader superToCommit = null;
+        for (final BlockHeader zuper : supers)
+        {
+            if (previousSuper != null && previousSuper.getHash().equals(zuper.getPrevious())) 
+                superToCommit = previousSuper;
+            
+            previousSuper = zuper;
+        }
+        
+        if (superToCommit == null)
+        	return;
+		
+        final Hash commitBlocksTo = superToCommit.getView().getCommittable();
 		final List<Block> committedBlocks = new ArrayList<Block>();
 		final List<PendingAtom> committedAtoms = new ArrayList<PendingAtom>();
 		final List<CommitOperation> commitOperations = new ArrayList<CommitOperation>();
 
-		final List<BlockHeader> supers = branch.supers();
 		final Iterator<BlockHeader> blockHeaderIterator = branch.getHeaders().iterator();
 		while(blockHeaderIterator.hasNext())
 		{
 			final BlockHeader header = blockHeaderIterator.next();
-			if (header.equals(supers.getLast()))
-				break;
-			
 			final Block block = this.blocks.get(header.getHash());
 			
 			// Persist the packages contained in block, may have already been seen but not committed
@@ -1225,6 +1258,9 @@ public class SyncHandler implements Service
 
 			// Create state vote collector for this block
 			createStateVoteCollector(block);
+			
+			if (block.getHeader().getHash().equals(commitBlocksTo))
+				break;
 		}
 		
 		// Remove any state vote collectors made stale by this branch portion
@@ -1233,10 +1269,14 @@ public class SyncHandler implements Service
 		for (Block committedBlock : committedBlocks)
 		{
 			this.syncHead = committedBlock.getHeader(); 
+			this.blocks.remove(committedBlock.getHash());
 			
 			// TODO Probably need to catch exceptions on this from synchronous listeners
 			this.context.getEvents().post(new SyncBlockEvent(committedBlock)); 
 		}
+		
+		if (syncLog.hasLevel(Logging.INFO))
+			syncLog.info(SyncHandler.this.context.getName()+": Committed blocks in range "+committedBlocks.getFirst()+" -> "+committedBlocks.getLast());
 
 		this.syncProcessorLatch.release();
 	}
@@ -1408,7 +1448,7 @@ public class SyncHandler implements Service
 						strongestPeer = syncPeer;
 				}
 				
-				if (strongestPeer != null && syncTip.isInRange(strongestPeer.getNode().getHead(), Constants.OOS_RESOLVED_LIMIT_BLOCKS) == true)
+				if (strongestPeer != null && syncTip.isAheadOf(strongestPeer.getNode().getHead()) == true)
 					syncStatus = SyncStatus.SYNCED;
 			}
 			
@@ -1484,46 +1524,41 @@ public class SyncHandler implements Service
 		final long voteThreshold = this.context.getLedger().getValidatorHandler().getVotePowerThreshold(epoch, localShardGroupID);
 
 		// Create state vote collectors //
-		final Multimap<Integer, PendingAtom> atomsByStateCount = LinkedHashMultimap.create();
+		final Multimap<ShardGroupID, PendingState> atomsByShardGroup = LinkedHashMultimap.create();
 		for (final Hash atom : block.getHeader().getInventory(InventoryType.ACCEPTED))
 		{
 			final PendingAtom pendingAtom = this.atoms.get(atom);
 			if (pendingAtom == null)
-				throw new IllegalStateException("Pending atom "+atom+" not found for block "+block.getHeader());
+				throw new IllegalStateException("Pending atom "+atom+" required for SVC creation not found in proposal "+block.getHeader());
 			
-			if (StateVoteCollector.DEBUG_SIMPLE_UNGROUPED)
-				atomsByStateCount.put(Integer.MAX_VALUE, pendingAtom);
-			else
-				atomsByStateCount.put(pendingAtom.numStateAddresses(null), pendingAtom);
+			if (pendingAtom.getStatus().before(AtomStatus.State.ACCEPTED))
+				throw new IllegalStateException("Pending atom "+pendingAtom+" is not ACCEPTED for SVC creation in proposal "+block.getHeader());
+
+			pendingAtom.forStates(StateLockMode.WRITE, pendingState -> {
+				final ShardGroupID provisionShardGroupID = ShardMapper.toShardGroup(pendingState.getAddress(), numShardGroups);
+				if (provisionShardGroupID.equals(localShardGroupID) == false)
+					return;
+
+				if (StateVoteCollector.DEBUG_SIMPLE_UNGROUPED)
+					atomsByShardGroup.put(ShardGroupID.from(0), pendingState);
+				else
+					atomsByShardGroup.put(provisionShardGroupID, pendingState);
+			});
 		}
 		
-		for (final Integer stateCount : atomsByStateCount.keySet())
+		for (final ShardGroupID shardGroupID : atomsByShardGroup.keySet())
 		{
-			final List<PendingState> stateVoteCollectorStates = new ArrayList<PendingState>();
-			for (final PendingAtom pendingAtom : atomsByStateCount.get(stateCount))
-			{
-				if (pendingAtom.getStatus().before(AtomStatus.State.ACCEPTED))
-					throw new IllegalStateException("Pending atom "+pendingAtom+" is not ACCEPTED");
-				
-				pendingAtom.forStates(StateLockMode.WRITE, pendingState -> {
-					final ShardGroupID provisionShardGroupID = ShardMapper.toShardGroup(pendingState.getAddress(), numShardGroups);
-					if (provisionShardGroupID.equals(localShardGroupID) == false)
-						return;
-
-					stateVoteCollectorStates.add(pendingState);
-				});
-			}
-
+			final List<PendingState> stateVoteCollectorStates = new ArrayList<PendingState>(atomsByShardGroup.get(shardGroupID));
 			if (stateVoteCollectorStates.isEmpty() == false)
 			{
 				if (syncLog.hasLevel(Logging.DEBUG))
-					syncLog.debug(this.context.getName()+": Creating StateVoteCollector for proposal "+block.toString()+" with state keys "+stateVoteCollectorStates.stream().map(sk -> sk.getAddress()).collect(Collectors.toList()));
-
+					syncLog.debug(this.context.getName()+": Creating StateVoteCollector for proposal "+block.getHeader()+" with state keys "+stateVoteCollectorStates.stream().map(sk -> sk.getAddress()).collect(Collectors.toList()));
+				
 				final StateVoteCollector stateVoteCollector = new StateVoteCollector(this.context, block.getHash(), stateVoteCollectorStates, votePower, voteThreshold);
-				this.stateVoteCollectors.put(block.getHash(), stateVoteCollector);
-				for (PendingState pendingState : stateVoteCollectorStates)
+				for (final PendingState pendingState : stateVoteCollectorStates)
 					pendingState.setStateVoteCollector(stateVoteCollector);
-
+				this.stateVoteCollectors.put(block.getHash(), stateVoteCollector);
+				
 				this.context.getMetaData().increment("ledger.pool.state.vote.collectors.total");
 				stateVoteCollectorStates.clear();
 			}

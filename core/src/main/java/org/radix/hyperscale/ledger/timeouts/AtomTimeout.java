@@ -41,6 +41,6 @@ public abstract class AtomTimeout extends ExtendedObject implements Primitive
 	@Override
 	public String toString()
 	{
-		return super.toString()+" "+getClass().getSimpleName()+" "+getAtom();
+		return super.toString()+" atom="+getAtom();
 	}
 }

@@ -6,6 +6,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -45,6 +46,7 @@ import org.radix.hyperscale.ledger.events.ProgressPhaseEvent;
 import org.radix.hyperscale.ledger.events.StateCertificateConstructedEvent;
 import org.radix.hyperscale.ledger.events.SyncAcquiredEvent;
 import org.radix.hyperscale.ledger.messages.SyncAcquiredMessage;
+import org.radix.hyperscale.ledger.messages.SyncAcquiredMessageProcessor;
 import org.radix.hyperscale.ledger.primitives.StateCertificate;
 import org.radix.hyperscale.ledger.timeouts.AtomTimeout;
 import org.radix.hyperscale.logging.Logger;
@@ -54,7 +56,6 @@ import org.radix.hyperscale.network.GossipFetcher;
 import org.radix.hyperscale.network.GossipFilter;
 import org.radix.hyperscale.network.GossipInventory;
 import org.radix.hyperscale.network.GossipReceiver;
-import org.radix.hyperscale.network.MessageProcessor;
 import org.radix.hyperscale.network.messages.InventoryMessage;
 import org.radix.hyperscale.time.Time;
 
@@ -87,8 +88,6 @@ public final class StatePool implements Service
 			_collateStateVoteBlocks(head);
 			
 			_processStateVoteBlocks();
-			
-			_attemptDelayedVotes(head);
 
 			_castVotesAndCollect();
 		}
@@ -106,7 +105,6 @@ public final class StatePool implements Service
 		}
 	};
 
-	private final Map<Hash, PendingState> votesToCastDelayed;
 	private final MappedBlockingQueue<Hash, PendingState> votesToCastQueue;
 
 	private final Map<Hash, StateVoteBlock> voteBlocksToCollect;
@@ -120,7 +118,6 @@ public final class StatePool implements Service
 		this.context = Objects.requireNonNull(context, "Context is null");
 		
 		this.votesToCastQueue = new MappedBlockingQueue<Hash, PendingState>(this.context.getConfiguration().get("ledger.state.queue", 1<<14));
-		this.votesToCastDelayed = new ConcurrentHashMap<Hash, PendingState>();
 		
 		this.voteBlocksToCollect = new ConcurrentHashMap<Hash, StateVoteBlock>();
 		this.voteBlocksToProcessQueue = new MappedBlockingQueue<Hash, StateVoteBlock>(this.context.getConfiguration().get("ledger.state.queue", 1<<14));
@@ -254,7 +251,7 @@ public final class StatePool implements Service
 		});
 		
 		// SYNC //
-		this.context.getNetwork().getMessaging().register(SyncAcquiredMessage.class, this.getClass(), new MessageProcessor<SyncAcquiredMessage>()
+		this.context.getNetwork().getMessaging().register(SyncAcquiredMessage.class, this.getClass(), new SyncAcquiredMessageProcessor(this.context)
 		{
 			@Override
 			public void process(final SyncAcquiredMessage syncAcquiredMessage, final AbstractConnection connection)
@@ -275,7 +272,7 @@ public final class StatePool implements Service
 					if (statePoolLog.hasLevel(Logging.DEBUG))
 						statePoolLog.debug(StatePool.this.context.getName()+": State pool inventory request from "+connection);
 					
-					final Set<Hash> stateVoteBlockInventory = new HashSet<Hash>();
+					final Set<Hash> deferredStateVoteBlockInventory = new HashSet<Hash>();
 					StatePool.this.context.getLedger().getAtomHandler().getAll().forEach(pa -> {
 						if (pa.getStatus().after(State.NONE) == false)
 							return;
@@ -285,7 +282,7 @@ public final class StatePool implements Service
 							if (svb.getOwner().getIdentity().equals(connection.getNode().getIdentity()))
 								return;
 							
-							stateVoteBlockInventory.add(svb.getHash());
+							deferredStateVoteBlockInventory.add(svb.getHash());
 						});
 					});
 					
@@ -295,10 +292,12 @@ public final class StatePool implements Service
 							if (svb.getOwner().getIdentity().equals(connection.getNode().getIdentity()))
 								return;
 							
-							stateVoteBlockInventory.add(svb.getHash());
+							deferredStateVoteBlockInventory.add(svb.getHash());
 						});
 					});
 					
+					int broadcastedStateVoteBlockCount = 0;
+					final Set<Hash> stateVoteBlockInventory = new LinkedHashSet<Hash>();
 					long syncInventoryHeight = Math.max(1, syncAcquiredMessage.getHead().getHeight() - Constants.SYNC_INVENTORY_HEAD_OFFSET);
 					while (syncInventoryHeight <= StatePool.this.context.getLedger().getHead().getHeight())
 					{
@@ -307,22 +306,19 @@ public final class StatePool implements Service
 								return;
 							
 							stateVoteBlockInventory.add(ir.getHash());
+							deferredStateVoteBlockInventory.remove(ir.getHash());
 						});
 						
+						broadcastedStateVoteBlockCount += broadcastSyncInventory(stateVoteBlockInventory, StateVoteBlock.class, Constants.MAX_REQUEST_INVENTORY_ITEMS, connection);
+
 						syncInventoryHeight++;
 					}
 
-					if (syncLog.hasLevel(Logging.DEBUG))
-						syncLog.debug(StatePool.this.context.getName()+": Broadcasting state vote blocks "+stateVoteBlockInventory.size()+" / "+stateVoteBlockInventory+" to "+connection);
-					else
-						syncLog.log(StatePool.this.context.getName()+": Broadcasting "+stateVoteBlockInventory.size()+" state vote blocks to "+connection);
+					// Send any remaining (also now send the deferred)
+					broadcastedStateVoteBlockCount += broadcastSyncInventory(stateVoteBlockInventory, StateVoteBlock.class, 0, connection);
+					broadcastedStateVoteBlockCount += broadcastSyncInventory(deferredStateVoteBlockInventory, StateVoteBlock.class, 0, connection);
 
-					while(stateVoteBlockInventory.isEmpty() == false)
-					{
-						InventoryMessage stateVoteInventoryMessage = new InventoryMessage(stateVoteBlockInventory, 0, Math.min(Constants.MAX_BROADCAST_INVENTORY_ITEMS, stateVoteBlockInventory.size()), StateVoteBlock.class);
-						StatePool.this.context.getNetwork().getMessaging().send(stateVoteInventoryMessage, connection);
-						stateVoteBlockInventory.removeAll(stateVoteInventoryMessage.asInventory().stream().map(ii -> ii.getHash()).collect(Collectors.toList()));
-					}
+					syncLog.log(StatePool.this.context.getName()+": Broadcasted "+broadcastedStateVoteBlockCount+" state vote blocks to "+connection);
 				}
 				catch (Exception ex)
 				{
@@ -377,13 +373,7 @@ public final class StatePool implements Service
 					final int numShardGroups = StatePool.this.context.getLedger().numShardGroups(epoch);
 					final ShardGroupID localShardGroupID = ShardMapper.toShardGroup(StatePool.this.context.getNode().getIdentity(), numShardGroups);
 					final long voteThreshold = StatePool.this.context.getLedger().getValidatorHandler().getVotePowerThreshold(epoch, localShardGroupID);
-					final StateVoteBlockCollector stateVoteBlockCollector = this.stateVoteBlockCollectors.compute(svb.getID(), (id, svbc) -> {
-						if (svbc != null)
-							return svbc;
-						
-						return new StateVoteBlockCollector(this.context, svb.getID(), svb.getBlock(), voteThreshold, Time.getSystemTime());
-						
-					});
+					final StateVoteBlockCollector stateVoteBlockCollector = this.stateVoteBlockCollectors.computeIfAbsent(svb.getID(), s -> new StateVoteBlockCollector(this.context, svb.getID(), svb.getBlock(), voteThreshold, Time.getSystemTime()));
 					
 					// TODO Currently ignoring SVBs once a super majority is known.  Perhaps the wrong approach, especially
 					//		if some form of slashing is to be implemented to penalise those that have not voted for an extended
@@ -606,38 +596,6 @@ public final class StatePool implements Service
 		}
 	}
 	
-	private void _attemptDelayedVotes(final BlockHeader head)
-	{
-		if (this.votesToCastDelayed.isEmpty() == false)
-		{
-			final List<Hash> voteToCastDelayedRemovals = new ArrayList<Hash>();
-			this.votesToCastDelayed.forEach((h,ps) -> 
-			{
-				try
-				{
-					// Check that a state vote collector exists 
-					final StateVoteCollector stateVoteCollector = ps.getStateVoteCollector();
-					if (stateVoteCollector == null)
-					{
-						// If null could be a delayed SVC creation, how delayed is it?
-						if (statePoolLog.hasLevel(Logging.DEBUG) && head.getHeight() - ps.getHeight() > 1)
-							statePoolLog.warn(this.context.getName()+": Pending state "+ps+" is delayed for "+(head.getHeight() - ps.getHeight())+" blocks");
-						
-						return;
-					}
-
-					this.votesToCastQueue.put(ps.getHash(), ps);
-					voteToCastDelayedRemovals.add(h);
-				}
-				catch (Exception ex)
-				{
-					statePoolLog.error(this.context.getName()+": Maintenence of delayed local state vote failed for "+ps.getAddress()+" for atom "+ps.getAtom()+" in block "+ps.getBlockHeader(), ex);
-				}
-			});
-			this.votesToCastDelayed.keySet().removeAll(voteToCastDelayedRemovals);
-		}
-	}
-	
 	private void _castVotesAndCollect()
 	{
 		if (this.votesToCastQueue.isEmpty() == false)
@@ -696,43 +654,38 @@ public final class StatePool implements Service
 		final long voteThreshold = this.context.getLedger().getValidatorHandler().getVotePowerThreshold(epoch, localShardGroupID);
 
 		// Create state vote collectors //
-		Multimap<Integer, PendingAtom> atomsByStateCount = LinkedHashMultimap.create();
-		for (Hash atom : pendingBlock.getHeader().getInventory(InventoryType.ACCEPTED))
+		final Multimap<ShardGroupID, PendingState> atomsByShardGroup = LinkedHashMultimap.create();
+		for (final Hash atom : pendingBlock.getHeader().getInventory(InventoryType.ACCEPTED))
 		{
-			PendingAtom pendingAtom = pendingBlock.get(InventoryType.ACCEPTED, atom);
+			final PendingAtom pendingAtom = pendingBlock.get(InventoryType.ACCEPTED, atom);
 			if (pendingAtom == null)
 				throw new IllegalStateException("Pending atom "+atom+" required for SVC creation not found in proposal "+pendingBlock.toString());
 			
-			if (StateVoteCollector.DEBUG_SIMPLE_UNGROUPED)
-				atomsByStateCount.put(Integer.MAX_VALUE, pendingAtom);
-			else
-				atomsByStateCount.put(pendingAtom.numStateAddresses(null), pendingAtom);
+			if (pendingAtom.getStatus().before(AtomStatus.State.ACCEPTED))
+				throw new IllegalStateException("Pending atom "+pendingAtom+" is not ACCEPTED for SVC creation in proposal "+pendingBlock.toString());
+
+			pendingAtom.forStates(StateLockMode.WRITE, pendingState -> {
+				final ShardGroupID provisionShardGroupID = ShardMapper.toShardGroup(pendingState.getAddress(), numShardGroups);
+				if (provisionShardGroupID.equals(localShardGroupID) == false)
+					return;
+
+				if (StateVoteCollector.DEBUG_SIMPLE_UNGROUPED)
+					atomsByShardGroup.put(ShardGroupID.from(0), pendingState);
+				else
+					atomsByShardGroup.put(provisionShardGroupID, pendingState);
+			});
 		}
 
-		for (Integer stateCount : atomsByStateCount.keySet())
+		for (final ShardGroupID shardGroupID : atomsByShardGroup.keySet())
 		{
-			List<PendingState> stateVoteCollectorStates = new ArrayList<PendingState>();
-			for (PendingAtom pendingAtom : atomsByStateCount.get(stateCount))
-			{
-				if (pendingAtom.getStatus().before(AtomStatus.State.ACCEPTED))
-					throw new IllegalStateException("Pending atom "+pendingAtom+" is not ACCEPTED for SVC creation in proposal "+pendingBlock.toString());
-
-				pendingAtom.forStates(StateLockMode.WRITE, pendingState -> {
-					ShardGroupID provisionShardGroupID = ShardMapper.toShardGroup(pendingState.getAddress(), numShardGroups);
-					if (provisionShardGroupID.equals(localShardGroupID) == false)
-						return;
-
-					stateVoteCollectorStates.add(pendingState);
-				});
-			}
-
+			final List<PendingState> stateVoteCollectorStates = new ArrayList<PendingState>(atomsByShardGroup.get(shardGroupID));
 			if (stateVoteCollectorStates.isEmpty() == false)
 			{
 				if (statePoolLog.hasLevel(Logging.DEBUG))
 					statePoolLog.debug(this.context.getName()+": Creating StateVoteCollector for proposal "+pendingBlock.toString()+" with state keys "+stateVoteCollectorStates.stream().map(sk -> sk.getAddress()).collect(Collectors.toList()));
 				
 				final StateVoteCollector stateVoteCollector = new StateVoteCollector(this.context, pendingBlock.getHash(), stateVoteCollectorStates, votePower, voteThreshold);
-				for (PendingState pendingState : stateVoteCollectorStates)
+				for (final PendingState pendingState : stateVoteCollectorStates)
 					pendingState.setStateVoteCollector(stateVoteCollector);
 				this.stateVoteCollectors.put(pendingBlock.getHash(), stateVoteCollector);
 				
@@ -763,21 +716,11 @@ public final class StatePool implements Service
 			
 			final StateVoteCollector stateVoteCollector = pendingState.getStateVoteCollector();
 			if (stateVoteCollector == null)
-			{
-				this.votesToCastDelayed.put(pendingState.getHash(), pendingState);
-				
-				if (statePoolLog.hasLevel(Logging.DEBUG))
-					statePoolLog.warn(this.context.getName()+": SVC not found for voting on state "+pendingState.getAddress()+" in pending atom "+pendingAtom.getHash());
-			}
+				statePoolLog.error(this.context.getName()+": SVC not found for voting on state "+pendingState.getAddress()+" in pending atom "+pendingAtom.getHash());
 			else if (stateVoteCollector.hasVoted(pendingState) == false)
-			{
 				this.votesToCastQueue.put(pendingState.getHash(), pendingState);
-			}
-			else
-			{
-				if (statePoolLog.hasLevel(Logging.DEBUG))
-					statePoolLog.debug(this.context.getName()+": State vote collector already has vote for pending state "+pendingState);
-			}
+			else if (statePoolLog.hasLevel(Logging.DEBUG))
+				statePoolLog.debug(this.context.getName()+": State vote collector already has vote for pending state "+pendingState);
 		}
 
 		this.voteProcessor.signal();
@@ -962,12 +905,10 @@ public final class StatePool implements Service
 		if (pendingState.isFinalized() == true)
 			return false;
 		
-		StateCertificate stateCertificate = (StateCertificate) pendingState.tryFinalize();
+		final StateCertificate stateCertificate = pendingState.tryFinalize();
 		if (stateCertificate != null)
 		{
-			if (statePoolLog.hasLevel(Logging.DEBUG))
-				statePoolLog.debug(this.context.getName()+": State certificate "+stateCertificate.getHash()+" constructed for "+stateCertificate.getObject()+":"+stateCertificate.getAtom());
-			else if (statePoolLog.hasLevel(Logging.INFO))
+			if (statePoolLog.hasLevel(Logging.INFO))
 				statePoolLog.info(this.context.getName()+": State certificate "+stateCertificate.getHash()+" constructed for "+stateCertificate.getObject()+":"+stateCertificate.getAtom());
 
 			StatePool.this.context.getEvents().post(new StateCertificateConstructedEvent(stateCertificate, pendingState));
@@ -1124,7 +1065,6 @@ public final class StatePool implements Service
 		{
 			statePoolLog.log(StatePool.this.context.getName()+": Sync status acquired, preparing state pool");
 			StatePool.this.votesToCastQueue.clear();
-			StatePool.this.votesToCastDelayed.clear();
 			StatePool.this.voteBlocksToCollect.clear();
 			StatePool.this.voteBlocksToProcessQueue.clear();
 			StatePool.this.stateVoteCollectors.clear();
@@ -1153,7 +1093,6 @@ public final class StatePool implements Service
 		{
 			statePoolLog.log(StatePool.this.context.getName()+": Sync status lost, flushing state pool");
 			StatePool.this.votesToCastQueue.clear();
-			StatePool.this.votesToCastDelayed.clear();
 			StatePool.this.voteBlocksToCollect.clear();
 			StatePool.this.voteBlocksToProcessQueue.clear();
 			StatePool.this.stateVoteCollectors.clear();

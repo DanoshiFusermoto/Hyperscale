@@ -249,7 +249,7 @@ public final class StateVoteCollector
 			else
 			{
 				voteMerkleTree = null;
-				voteMerkleHash = Hash.ZERO;
+				voteMerkleHash = this.block;
 				rootMerkleProofAudit = Collections.singletonList(MerkleProof.from(voteMerkleHash, Branch.ROOT));
 			}
 			
@@ -283,10 +283,9 @@ public final class StateVoteCollector
 			StateVoteBlock stateVoteBlock = new StateVoteBlock(this.ID, completedStateVotes);
 
 			if (statePoolLog.hasLevel(Logging.INFO))
-			{
 				statePoolLog.info(this.context.getName()+": Created state vote block "+stateVoteBlock);
-				statePoolLog.info(this.context.getName()+": 						 "+completedStateVotes);
-			}
+			if (statePoolLog.hasLevel(Logging.DEBUG))
+				statePoolLog.debug(this.context.getName()+": 						 "+completedStateVotes);
 				
 			return stateVoteBlock;
 		}
@@ -327,13 +326,12 @@ public final class StateVoteCollector
 				return new StateVote(pendingState.getAddress(), pendingState.getAtom().getHash(), pendingState.getBlockHeader().getHash(),
 							  		 pendingState.getAtom().getExecutionDigest(), this.context.getNode().getKeyPair().getPublicKey(), votePower);
 			});
-			
-			if (this.isLatent && statePoolLog.hasLevel(Logging.INFO))
-				statePoolLog.info(this.context.getName()+": Voted on latent state vote collector "+pendingState.getAddress()+" in "+toString());
 		}
 
-		if (statePoolLog.hasLevel(Logging.INFO))
-			statePoolLog.info(this.context.getName()+": Voted "+this.votes.get(pendingState.getHash())+" in state vote collector "+toString());
+		if (this.isLatent && statePoolLog.hasLevel(Logging.INFO))
+			statePoolLog.info(this.context.getName()+": Voted on latent state vote collector "+pendingState.getAddress()+" in "+toString());
+		else if (statePoolLog.hasLevel(Logging.DEBUG))
+			statePoolLog.debug(this.context.getName()+": Voted "+this.votes.get(pendingState.getHash())+" in state vote collector "+toString());
 	}
 	
 	boolean remove(final PendingState state)
