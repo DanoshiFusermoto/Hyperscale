@@ -40,6 +40,8 @@ public final class PendingBlock implements Hashable
 	
 	private static final int DEFAULT_STATE_LOCKS_PER_ATOM = 4;
 	private static final int STATE_LOCKS_PER_ATOM_MULTIPLIER = 2;
+	
+	public static enum SUPR {INTR, SOFT, HARD};
 
 	private final Context context;
 	private	final long 	  witnessedAt;
@@ -50,7 +52,8 @@ public final class PendingBlock implements Hashable
 	
 	private volatile boolean 	unbranched;
 	private volatile boolean 	applied;
-	private volatile boolean	_super;
+	private volatile SUPR		_super;
+	private volatile boolean	committable;
 	private volatile Throwable	thrown;
 	
 	private final Map<Hash, PendingAtom> accepted;
@@ -77,7 +80,7 @@ public final class PendingBlock implements Hashable
 		this.witnessedAt = Time.getLedgerTimeMS();
 		this.unbranched = true;
 		this.applied = false;
-		this._super = false;
+		this._super = SUPR.INTR;
 
 		this.accepted = Maps.mutable.ofInitialCapacity(header.getInventorySize(InventoryType.ACCEPTED));
 		this.unaccepted = Maps.mutable.ofInitialCapacity(header.getInventorySize(InventoryType.UNACCEPTED));
@@ -201,6 +204,19 @@ public final class PendingBlock implements Hashable
 		this.applied = true;
 		
 		this.context.getEvents().post(new BlockAppliedEvent(this));
+	}
+
+	boolean isCommittable()
+	{
+		return this.committable;
+	}
+	
+	void setCommittable()
+	{
+		if (this.committable)
+			return;
+		
+		this.committable = true;
 	}
 
 	public Throwable thrown()
@@ -978,14 +994,19 @@ public final class PendingBlock implements Hashable
 		return this.witnessedAt;
 	}
 	
-	boolean isSuper()
+	SUPR isSuper()
 	{
 		return this._super;
 	}
 	
-	public void setAsSuper()
+	public void setSuper(final SUPR supr)
 	{
-		this._super = true;
+		Objects.requireNonNull(supr, "Super type is null");
+		
+		if (this._super.ordinal() >  supr.ordinal())
+			throw new IllegalStateException("Can not downgrade pending block "+this+" super status from "+this._super+" to "+supr);
+		
+		this._super = supr;
 	}
 
 	/**

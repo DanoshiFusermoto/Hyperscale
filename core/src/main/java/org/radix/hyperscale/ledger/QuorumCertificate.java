@@ -23,73 +23,103 @@ public final class QuorumCertificate extends VoteCertificate
 	static 
 	{
 		NULL = new QuorumCertificate();
-		NULL.block = Hash.ZERO;
+		NULL.current = Hash.ZERO;
+		NULL.previous = Hash.ZERO;
+		NULL.committable = Hash.ZERO;
 	}
 	
-	@JsonProperty("block")
+	@JsonProperty("current")
 	@DsonOutput(Output.ALL)
-	private Hash block;
+	private Hash current;
 	
+	@JsonProperty("previous")
+	@DsonOutput(Output.ALL)
+	private Hash previous;
+
+	@JsonProperty("head")
+	@DsonOutput(Output.ALL)
+	private Hash committable;
+
 	@SuppressWarnings("unused") 
 	private QuorumCertificate()
 	{
 		super();
 	}
 	
-	QuorumCertificate(final Hash block)
+	QuorumCertificate(final Hash current, final QuorumCertificate extend, final Hash committable)
 	{
 		super(CommitDecision.ACCEPT);
 		
-		Objects.requireNonNull(block, "Block is null");
-		Hash.notZero(block, "Block is ZERO");
+		Objects.requireNonNull(current, "Current is null");
+		Objects.requireNonNull(extend, "Extend is null");
+		Objects.requireNonNull(committable, "Committable is null");
+		Hash.notZero(current, "Current is ZERO");
+		Hash.notZero(committable, "Committable is ZERO");
 
-		this.block = block;
+		this.current = current;
+		this.previous = extend.current;
+		this.committable = committable;
 	}
 
-	QuorumCertificate(final Hash block, final Bloom signers, final BLSPublicKey key, final BLSSignature signature)
+	QuorumCertificate(final Hash current, final QuorumCertificate extend, final Hash committable, final Bloom signers, final BLSPublicKey key, final BLSSignature signature)
 	{
 		super(CommitDecision.ACCEPT, signers, key, signature);
-		
-		Objects.requireNonNull(block, "Block is null");
-		Hash.notZero(block, "Block is ZERO");
 
-		this.block = block;
+		Objects.requireNonNull(current, "Current is null");
+		Objects.requireNonNull(extend, "Extend is null");
+		Objects.requireNonNull(committable, "Committable is null");
+		Hash.notZero(current, "Current is ZERO");
+		Hash.notZero(committable, "Committable is ZERO");
+
+		this.current = current;
+		this.previous = extend.current;
+		this.committable = committable;
 	}
 
-	public Hash getBlock()
+	public Hash getCurrent()
 	{
-		return this.block;
+		return this.current;
 	}
 	
+	public Hash getPrevious()
+	{
+		return this.previous;
+	}
+
+	public Hash getCommittable()
+	{
+		return this.committable;
+	}
+
+	// TODO hacky
+	public Hash updateCommittable(final Hash committable)
+	{
+		final Hash prevCommittable = this.committable;
+		this.committable = committable;
+		return prevCommittable;
+	}
+
 	public long getHeight()
 	{
-		return Block.toHeight(this.block);
+		return Block.toHeight(this.current);
 	}
 
 	@SuppressWarnings("unchecked")
 	@Override
 	public <T> T getObject()
 	{
-		return (T) this.block;
+		return (T) this.current;
 	}
 
 	@Override
 	protected Hash getTarget() throws CryptoException
 	{
-		return this.block;
+		return this.current;
 	}
 	
-	boolean intersects(final QuorumCertificate other)
+	@Override
+	public String toString()
 	{
-		if (other == this)
-			return true;
-		
-		if (other.getHash().equals(other.getHash()))
-			return true;
-		
-		if (other.getBlock().equals(other.getBlock()))
-			return true;
-		
-		return false;
+		return "current="+Block.toHeight(this.current)+":"+this.current+" previous="+Block.toHeight(this.previous)+":"+this.previous+" committable="+Block.toHeight(this.committable)+":"+this.committable;
 	}
 }

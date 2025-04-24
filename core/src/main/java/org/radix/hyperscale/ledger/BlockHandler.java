@@ -18,6 +18,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import org.eclipse.collections.api.factory.Maps;
@@ -43,6 +44,7 @@ import org.radix.hyperscale.exceptions.ValidationException;
 import org.radix.hyperscale.executors.LatchedProcessor;
 import org.radix.hyperscale.executors.PollingProcessor;
 import org.radix.hyperscale.ledger.BlockHeader.InventoryType;
+import org.radix.hyperscale.ledger.PendingBlock.SUPR;
 import org.radix.hyperscale.ledger.PendingBranch.Type;
 import org.radix.hyperscale.ledger.Substate.NativeField;
 import org.radix.hyperscale.ledger.events.BlockAppliedEvent;
@@ -53,6 +55,7 @@ import org.radix.hyperscale.ledger.events.ProgressPhaseEvent;
 import org.radix.hyperscale.ledger.events.SyncAcquiredEvent;
 import org.radix.hyperscale.ledger.exceptions.LockException;
 import org.radix.hyperscale.ledger.messages.SyncAcquiredMessage;
+import org.radix.hyperscale.ledger.messages.SyncAcquiredMessageProcessor;
 import org.radix.hyperscale.ledger.primitives.Atom;
 import org.radix.hyperscale.ledger.primitives.AtomCertificate;
 import org.radix.hyperscale.ledger.sme.PolyglotPackage;
@@ -67,8 +70,6 @@ import org.radix.hyperscale.network.GossipFetcher;
 import org.radix.hyperscale.network.GossipFilter;
 import org.radix.hyperscale.network.GossipInventory;
 import org.radix.hyperscale.network.GossipReceiver;
-import org.radix.hyperscale.network.MessageProcessor;
-import org.radix.hyperscale.network.messages.InventoryMessage;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.eventbus.Subscribe;
@@ -107,7 +108,7 @@ public class BlockHandler implements Service
 			try
 			{
 				final BlockHeader head = BlockHandler.this.context.getLedger().getHead(); 
-				final ProgressRound progressRound = getProgressRound(BlockHandler.this.progressClock.get());
+				final ProgressRound progressRound = getProgressRound(BlockHandler.this.progressClock.get(), false);
 				
 				_processHeaders(progressRound);
 				_processVotes(progressRound, head);
@@ -115,7 +116,15 @@ public class BlockHandler implements Service
 				_updateBlocks(head);
 				_updateBranches(head);
 				
-				_livenessTick(progressRound);
+				_livenessTick(progressRound, head);
+				
+				// Set the delay based on the maturity of the current phase
+				if (progressRound.phaseMaturityAt() > 0)
+				{
+					long ephemeralDelay = progressRound.phaseMaturityAt() - System.currentTimeMillis();
+					if (ephemeralDelay > 0)
+						setEphemeralDelay(ephemeralDelay, TimeUnit.MILLISECONDS);
+				}
 			}
 			finally
 			{
@@ -143,7 +152,7 @@ public class BlockHandler implements Service
 		@Override
 		public void process() throws InterruptedException
 		{
-			final ProgressPhaseEvent progressRoundEvent = BlockHandler.this.progressPhaseQueue.poll(1, TimeUnit.SECONDS);
+			final ProgressPhaseEvent progressRoundEvent = BlockHandler.this.progressPhaseQueue.poll(Ledger.definitions().roundInterval() / ProgressRound.State.values().length, TimeUnit.MILLISECONDS);
 			if (BlockHandler.this.context.getNode().isSynced() == false)
 				return;
 			
@@ -158,12 +167,12 @@ public class BlockHandler implements Service
 					progressRoundPhase = progressRoundEvent.getProgressPhase();
 					
 					// TODO local/secondary proposals on timeout
-					if (progressRoundPhase.equals(ProgressRound.State.NONE))
-						prebuild(progressRound, ProgressRound.State.NONE);
+					if (progressRoundPhase.equals(ProgressRound.State.PROPOSING))
+						prebuild(progressRound, ProgressRound.State.PROPOSING);
 					else if (progressRoundPhase.equals(ProgressRound.State.TRANSITION))
 					{
 						// Trigger secondaries proposal build
-						if (progressRound.isProposalsLatent() && progressRound.getProposers().isEmpty())
+						if (progressRound.getProposers().isEmpty())
 							prebuild(progressRound, ProgressRound.State.TRANSITION);
 					}
 				}
@@ -311,8 +320,8 @@ public class BlockHandler implements Service
 				
 				for (final BlockHeader header : headers)
 				{
-					if (blocksLog.hasLevel(Logging.DEBUG))
-						blocksLog.debug(BlockHandler.this.context.getName()+": Block header received "+header+" for "+header.getProposer());
+					if (blocksLog.hasLevel(Logging.INFO))
+						blocksLog.info(BlockHandler.this.context.getName()+": Received block header "+header+" for "+header.getProposer());
 	
 					final Epoch epoch = Epoch.from(header);
 					final int numShardGroups = BlockHandler.this.context.getLedger().numShardGroups(epoch);
@@ -438,8 +447,8 @@ public class BlockHandler implements Service
 
 				for (final BlockVote blockVote : blockVotes)
 				{
-					if (blocksLog.hasLevel(Logging.DEBUG))
-						blocksLog.debug(BlockHandler.this.context.getName()+": Block vote received "+blockVote.getHash()+" for "+blockVote.getHeight()+"@"+blockVote.getBlock()+" by "+blockVote.getOwner());
+					if (blocksLog.hasLevel(Logging.INFO))
+						blocksLog.info(BlockHandler.this.context.getName()+": Received block vote "+blockVote.getHash()+" for "+blockVote.getHeight()+"@"+blockVote.getBlock()+" by "+blockVote.getOwner());
 		
 					final Epoch epoch = Epoch.from(blockVote.getBlock());
 					final int numShardGroups = BlockHandler.this.context.getLedger().numShardGroups(epoch);
@@ -497,7 +506,7 @@ public class BlockHandler implements Service
 		});
 
 		// SYNC //
-		this.context.getNetwork().getMessaging().register(SyncAcquiredMessage.class, this.getClass(), new MessageProcessor<SyncAcquiredMessage>()
+		this.context.getNetwork().getMessaging().register(SyncAcquiredMessage.class, this.getClass(), new SyncAcquiredMessageProcessor(this.context)
 		{
 			@Override
 			public void process(final SyncAcquiredMessage syncAcquiredMessage, final AbstractConnection connection)
@@ -507,44 +516,38 @@ public class BlockHandler implements Service
 					if (blocksLog.hasLevel(Logging.DEBUG))
 						blocksLog.debug(BlockHandler.this.context.getName()+": Block pool inventory request from "+connection);
 					
+					int broadcastedBlockVoteCount = 0;
+					int broadcastedBlockHeaderCount = 0;
 					final Set<Hash> blockVoteInventory = new LinkedHashSet<Hash>();
 					final Set<Hash> pendingBlockInventory = new LinkedHashSet<Hash>();
-					BlockHandler.this.pendingBlocks.forEach((h, pb) -> pendingBlockInventory.add(pb.getHash()));
+					
+					// Deferred to broadcast last
+					final Set<Hash> deferredPendingBlockInventory = new LinkedHashSet<Hash>();
+					BlockHandler.this.pendingBlocks.forEach((h, pb) -> deferredPendingBlockInventory.add(pb.getHash()));
 					
 					long syncInventoryHeight = Math.max(1, syncAcquiredMessage.getHead().getHeight() - Constants.SYNC_INVENTORY_HEAD_OFFSET);
 					while (syncInventoryHeight <= BlockHandler.this.context.getLedger().getHead().getHeight())
 					{
 						Hash syncBlockHash = BlockHandler.this.context.getLedger().getLedgerStore().getSyncBlock(syncInventoryHeight);
 						pendingBlockInventory.add(syncBlockHash);
+						deferredPendingBlockInventory.remove(syncBlockHash);
 						
 						BlockHandler.this.context.getLedger().getLedgerStore().getSyncInventory(syncInventoryHeight, BlockHeader.class).forEach(bh -> pendingBlockInventory.add(bh.getHash()));
 						BlockHandler.this.context.getLedger().getLedgerStore().getSyncInventory(syncInventoryHeight, BlockVote.class).forEach(bv -> blockVoteInventory.add(bv.getHash()));
+						
+						broadcastedBlockHeaderCount += broadcastSyncInventory(pendingBlockInventory, BlockHeader.class, Constants.MAX_REQUEST_INVENTORY_ITEMS, connection);
+						broadcastedBlockVoteCount += broadcastSyncInventory(blockVoteInventory, BlockVote.class, Constants.MAX_REQUEST_INVENTORY_ITEMS, connection);
+						
 						syncInventoryHeight++;
 					}
 					
-					if (syncLog.hasLevel(Logging.DEBUG))
-						syncLog.debug(BlockHandler.this.context.getName()+": Broadcasting blocks "+pendingBlockInventory.size()+" / "+pendingBlockInventory+" to "+connection);
-					else
-						syncLog.log(BlockHandler.this.context.getName()+": Broadcasting "+pendingBlockInventory.size()+" blocks to "+connection);
+					// Send any remaining (also now send the deferred)
+					broadcastedBlockHeaderCount += broadcastSyncInventory(pendingBlockInventory, BlockHeader.class, 0, connection);
+					broadcastedBlockVoteCount += broadcastSyncInventory(blockVoteInventory, BlockVote.class, 0, connection);
+					broadcastedBlockHeaderCount += broadcastSyncInventory(deferredPendingBlockInventory, BlockHeader.class, 0, connection);
 
-					while(pendingBlockInventory.isEmpty() == false)
-					{
-						InventoryMessage pendingBlockInventoryMessage = new InventoryMessage(pendingBlockInventory, 0, Math.min(Constants.MAX_BROADCAST_INVENTORY_ITEMS, pendingBlockInventory.size()), BlockHeader.class);
-						BlockHandler.this.context.getNetwork().getMessaging().send(pendingBlockInventoryMessage, connection);
-						pendingBlockInventory.removeAll(pendingBlockInventoryMessage.asInventory().stream().map(ii -> ii.getHash()).collect(Collectors.toList()));
-					}
-
-					if (syncLog.hasLevel(Logging.DEBUG))
-						syncLog.debug(BlockHandler.this.context.getName()+": Broadcasting block votes "+blockVoteInventory.size()+" / "+blockVoteInventory+" to "+connection);
-					else if (syncLog.hasLevel(Logging.INFO))
-						syncLog.log(BlockHandler.this.context.getName()+": Broadcasting "+blockVoteInventory.size()+" block votes to "+connection);
-
-					while(blockVoteInventory.isEmpty() == false)
-					{
-						InventoryMessage blockVoteInventoryMessage = new InventoryMessage(blockVoteInventory, 0, Math.min(Constants.MAX_BROADCAST_INVENTORY_ITEMS, pendingBlockInventory.size()), BlockVote.class);
-						BlockHandler.this.context.getNetwork().getMessaging().send(blockVoteInventoryMessage, connection);
-						blockVoteInventory.removeAll(blockVoteInventoryMessage.asInventory().stream().map(ii -> ii.getHash()).collect(Collectors.toList()));
-					}
+					syncLog.log(BlockHandler.this.context.getName()+": Broadcasted "+broadcastedBlockHeaderCount+" blocks to "+connection);
+					syncLog.log(BlockHandler.this.context.getName()+": Broadcasted "+broadcastedBlockVoteCount+" block votes to "+connection);
 				}
 				catch (Exception ex)
 				{
@@ -567,7 +570,6 @@ public class BlockHandler implements Service
 		buildAndCommitThread.setDaemon(true);
 		buildAndCommitThread.setName(this.context.getName()+" Commit Processor");
 		buildAndCommitThread.start();
-
 	}
 
 	@Override
@@ -613,14 +615,14 @@ public class BlockHandler implements Service
 			
 			try
 			{
-				final ProgressRound proposalRound = getProgressRound(pendingBlock.getHeight());
+				final ProgressRound proposalRound = getProgressRound(pendingBlock.getHeight(), false);
 				if (proposalRound.canPropose(pendingBlock.getHeader().getProposer()) == true)
 				{
 					final long roundVotePower = this.context.getLedger().getValidatorHandler().getVotePower(proposalRound.epoch(), pendingBlock.getHeader().getProposer());
 					if (proposalRound.propose(pendingBlock.getHeader(), roundVotePower) == false)
 						blocksLog.warn(this.context.getName()+": Progress round "+pendingBlock.getHeight()+" already has a proposal from "+pendingBlock.getHeader().getProposer());
 					else if (blocksLog.hasLevel(Logging.INFO))
-						blocksLog.info(this.context.getName()+": Seen proposal "+pendingBlock.getHash()+" for progress round "+proposalRound.clock()+" from "+pendingBlock.getHeader().getProposer());
+						blocksLog.info(this.context.getName()+": Seen proposal "+pendingBlock.getHash()+" "+pendingBlock.getHeader().getView()+" for progress round "+proposalRound.clock()+" from "+pendingBlock.getHeader().getProposer());
 				}
 				
 				if (pendingBlock.isConstructed() == false)
@@ -896,7 +898,7 @@ public class BlockHandler implements Service
 			
 			try
 			{
-				if (pendingBlock.isUnbranched() && pendingBlock.isConstructed())
+				if (pendingBlock.isUnbranched()) // && pendingBlock.isConstructed())
 					updateBranchesWith(pendingBlock);
 			}
 			catch (Exception ex)
@@ -939,7 +941,7 @@ public class BlockHandler implements Service
 	{
 		final List<BlockHeader> headersToVerify = new ArrayList<BlockHeader>(this.headersToVerify.size());
 		BlockHandler.this.headersToVerify.forEach((h, bh) -> {
-			if (bh.getHeight() <= progressRound.clock() + 1)
+			if (bh.getHeight() <= progressRound.clock())
 				headersToVerify.add(bh);
 		});
 
@@ -953,16 +955,7 @@ public class BlockHandler implements Service
 				try
 				{
 					BlockInsertStatus status = insert(headerToVerify);
-/*					if (status.equals(BlockInsertStatus.SUCCESS))
-					{
-						// Header for this round already has a certificate?  Shortcut the round.
-						// Even if the proposal isn't fully constructed yet, there is a quorum, therefore 
-						// there is no point lingering in the current round and the local instance is clearly
-						// behind the majority of the network.
-						if (headerToVerify.getHeight() == progressRound.clock() && headerToVerify.getCertificate() != null)
-							progressRound.terminate();
-					}
-					else */ if (status.equals(BlockInsertStatus.POSTPONED))
+					if (status.equals(BlockInsertStatus.POSTPONED))
 						headersToVerifyIterator.remove();
 				}
 				catch (IOException ex)
@@ -1003,48 +996,57 @@ public class BlockHandler implements Service
 					votesToVerify.add(bv);
 			});
 
-			if (votesToVerify.isEmpty() == false)
+			synchronized(this.votesToVerify)
 			{
-				for(final BlockVote blockVote : votesToVerify)
+				final Iterator<BlockVote> votesToVerifyIterator = this.votesToVerify.values().iterator();
+				while (votesToVerifyIterator.hasNext())
 				{
+					final BlockVote blockVote = votesToVerifyIterator.next();
+					
+					// Early
+					if (blockVote.getHeight() > progressRound.clock())
+						continue;
+
+					// Stale
 					if (blockVote.getHeight() <= head.getHeight())
 					{
-						if (this.votesToVerify.remove(blockVote.getHash()) == null)
-							blocksLog.warn(this.context.getName()+": Stale block vote remove failed "+blockVote.getHash()+" for "+blockVote.getHeight()+"@"+blockVote.getBlock());
-						else if (blocksLog.hasLevel(Logging.DEBUG))
+						votesToVerifyIterator.remove();
+						if (blocksLog.hasLevel(Logging.DEBUG))
 							blocksLog.debug(this.context.getName()+": Removed stale block vote "+blockVote.getHash()+" for "+blockVote.getHeight()+"@"+blockVote.getBlock());
 						
 						continue;
 					}
 
-					// Get progress round for this block vote 
-					final ProgressRound voteRound = getProgressRound(blockVote.getHeight());
-
-					// Find or create block vote collector
-					final BlockVoteCollector blockVoteCollector = this.blockVoteCollectors.computeIfAbsent(blockVote.getHeight(), h -> new BlockVoteCollector(this.context, voteRound));
-					if (blockVoteCollector.hasVoted(blockVote.getOwner().getIdentity()) == false)
+					try
 					{
-						try
+						// Get progress round for this block vote 
+						final ProgressRound voteRound = getProgressRound(blockVote.getHeight(), false);
+
+						// Find or create block vote collector
+						final BlockVoteCollector blockVoteCollector = this.blockVoteCollectors.computeIfAbsent(blockVote.getHeight(), h -> new BlockVoteCollector(this.context, voteRound));
+						if (blockVoteCollector.hasVoted(blockVote.getOwner().getIdentity()) == false)
 						{
 							final long roundVotePower = this.context.getLedger().getValidatorHandler().getVotePower(voteRound.epoch(), blockVote.getOwner().getIdentity());
 							if (roundVotePower == 0)
 								blocksLog.warn(this.context.getName()+": Vote power is zero in epoch "+voteRound.epoch()+" for "+blockVote.getOwner().toString(12));
-							
+								
 							blockVote.setWeight(roundVotePower);
 							blockVoteCollector.vote(blockVote);
 						}
-						catch (IOException ioex)
+						else
 						{
-							blocksLog.warn(this.context.getName()+": Failed to pre-process block vote "+blockVote.getHash()+" in progress round "+voteRound.clock()+" for "+blockVote.getOwner().toString(12));
+							// TODO penalties for extra voting
+							blocksLog.warn(this.context.getName()+": Block vote "+blockVote.getHash()+" already seen in progress round "+voteRound.clock()+" for "+blockVote.getOwner().toString(12));
 						}
 					}
-					else
+					catch (Exception ex)
 					{
-						// TODO penalties for extra voting
-						blocksLog.warn(this.context.getName()+": Block vote "+blockVote.getHash()+" already seen in progress round "+voteRound.clock()+" for "+blockVote.getOwner().toString(12));
+						blocksLog.error(this.context.getName()+": Pre-processing of block vote failed for "+blockVote.getHash()+" for block "+blockVote.getBlock()+" by "+blockVote.getOwner(), ex);
 					}
-					
-					this.votesToVerify.remove(blockVote.getHash());
+					finally
+					{
+						votesToVerifyIterator.remove();
+					}
 				}
 			}
 		}
@@ -1143,7 +1145,8 @@ public class BlockHandler implements Service
 					}
 					catch (Exception ex)
 					{
-						blocksLog.error(this.context.getName()+": Maintenence of delayed block vote failed for "+delayedBlockVote.getHash()+" for block "+delayedBlockVote.getBlock()+" by "+delayedBlockVote.getOwner(), ex);
+						votesToCountDelayedIterator.remove();
+						blocksLog.error(this.context.getName()+": Processing of delayed block vote failed for "+delayedBlockVote.getHash()+" for block "+delayedBlockVote.getBlock()+" by "+delayedBlockVote.getOwner(), ex);
 					}
 				}
 				
@@ -1162,7 +1165,7 @@ public class BlockHandler implements Service
 	
 	// LIVENESS PIPELINE //
 	// TODO separate out 
-	private void _livenessTick(final ProgressRound progressRound)
+	private void _livenessTick(final ProgressRound progressRound, final BlockHeader head)
 	{
 		if (progressRound.getState().equals(ProgressRound.State.NONE))
 		{
@@ -1173,13 +1176,15 @@ public class BlockHandler implements Service
 
 		if (progressRound.getState().equals(ProgressRound.State.PROPOSING))
 		{
-			if (progressRound.isProposalsLatent() || progressRound.isProposalsCompleted())
+			if (progressRound.isProposalsTimedout() || progressRound.isProposalsCompleted())
 			{
-				if (progressRound.isProposalsLatent())
-					blocksLog.warn(this.context.getName()+": Proposal phase latent "+progressRound);
+				if (progressRound.isProposalsTimedout())
+					blocksLog.warn(this.context.getName()+": Proposal phase timed out "+progressRound);
 				else if (blocksLog.hasLevel(Logging.INFO))
 					blocksLog.info(this.context.getName()+": Proposal phase completed "+progressRound);
 
+				_updateViewQC(progressRound, head);
+				
 				progressRound.stepState();
 				this.context.getEvents().post(new ProgressPhaseEvent(progressRound));
 			}
@@ -1192,7 +1197,8 @@ public class BlockHandler implements Service
 			final long transitionThreshold = progressRound.getProposeThreshold();
 			long constructedVotePower = 0;
 
-			// Must have constructed proposals to proceed to the next phase
+			// Must have constructed proposals to proceed to VOTING phase
+			// Check happens if all primaries proposed or this TRANSITION phase is latent
 			if (progressRound.isTransitionLatent() || progressRound.isFullyProposed())
 			{
 				for(final Hash proposal : progressRound.getProposals())
@@ -1215,32 +1221,46 @@ public class BlockHandler implements Service
 				}
 			}
 			
-			// Phase can proceed if the constructed proposal threshold is met, or if the transition phase is latent
-			// and there is at least ONE constructed proposal.
-			// TODO might be improvements possible here by considering primary and secondary proposers separately
-			if ((progressRound.isTransitionLatent() && constructedVotePower > 0) || constructedVotePower >= transitionThreshold)
+			if (progressRound.isTransitionLatent())
 			{
-				if (progressRound.isTransitionLatent())
-					blocksLog.warn(this.context.getName()+": Transition phase latent "+progressRound);
-				else if (blocksLog.hasLevel(Logging.INFO))
-					blocksLog.info(this.context.getName()+": Transition phase completed "+progressRound);
-
-				progressRound.stepState();
-				
-				// Do the local vote here
-				// If the local instance is behind (views dont match) it will not vote
-				PendingBranch selectedBranch = selectBranchToVote(progressRound, progressRound.getView());
-				try 
+				// Phase can proceed if the constructed proposals satisfy 2f+1 threshold, or if the transition phase 
+				// is latent and there is at least ONE constructed proposal.
+				// TODO might be improvements possible here by considering primary and secondary proposers separately
+				if (constructedVotePower > 0 || constructedVotePower >= transitionThreshold)
 				{
-					if (selectedBranch != null)
-						vote(progressRound, selectedBranch);
-				} 
-				catch (IOException | CryptoException | ValidationException ex) 
-				{
-					blocksLog.error(this.context.getName()+": Failed to cast vote on progress round "+progressRound+" to branch "+selectedBranch, ex);
+					if (progressRound.isTransitionLatent())
+						blocksLog.warn(this.context.getName()+": Transition phase latent "+progressRound);
+					else if (blocksLog.hasLevel(Logging.INFO))
+						blocksLog.info(this.context.getName()+": Transition phase completed "+progressRound);
+	
+					progressRound.stepState();
+					
+					// Do the local vote here
+					// If the local instance is behind (views dont match) it will not vote
+					PendingBranch selectedBranch = selectBranchToVote(progressRound, progressRound.getView());
+					try 
+					{
+						if (selectedBranch != null)
+							vote(progressRound, selectedBranch);
+					} 
+					catch (IOException | CryptoException | ValidationException ex) 
+					{
+						blocksLog.error(this.context.getName()+": Failed to cast vote on progress round "+progressRound+" to branch "+selectedBranch, ex);
+					}
+					
+					this.context.getEvents().post(new ProgressPhaseEvent(progressRound));
 				}
-				
-				this.context.getEvents().post(new ProgressPhaseEvent(progressRound));
+				// Transition phase is latent, nothing constructed, therefore nothing locally proposed as a 
+				// primary or secondary proposer either!
+				//
+				// Local instance could be latent, trigger a view update which hopefully in turn triggers a commit.
+				else if (progressRound.canTransitionUpdate())
+				{
+					blocksLog.warn(this.context.getName()+": Transition phase for progress round "+progressRound.clock()+" is stalled, liveness lost, triggering view update");
+					_updateViewQC(progressRound, head);
+					progressRound.transitionUpdated();
+					this.blockProcessor.signal();
+				}
 			}
 
 			return;
@@ -1248,7 +1268,7 @@ public class BlockHandler implements Service
 		
 		if (progressRound.getState().equals(ProgressRound.State.VOTING))
 		{
-			if (progressRound.isVoteCompleted() || progressRound.isVoteTimedout())
+			if (progressRound.isVoteTimedout() || progressRound.isVoteCompleted())
 			{
 				progressRound.stepState();
 				this.context.getEvents().post(new ProgressPhaseEvent(progressRound));
@@ -1269,7 +1289,7 @@ public class BlockHandler implements Service
 				blocksLog.warn(this.context.getName()+": Absent proposers ["+absentProposers.stream().map(i -> i.toString(12)).collect(Collectors.joining(", "))+"] in progress round "+progressRound);								
 			
 			final long nextProgressRoundClock = this.progressClock.incrementAndGet();
-			final ProgressRound nextProgressRound = getProgressRound(nextProgressRoundClock);
+			final ProgressRound nextProgressRound = getProgressRound(nextProgressRoundClock, true);
 			this.context.getEvents().post(new ProgressPhaseEvent(nextProgressRound));
 
 			if (blocksLog.hasLevel(Logging.INFO))
@@ -1278,9 +1298,10 @@ public class BlockHandler implements Service
 			// Progress interval & delay
 			// If local replica is slow, then skip the wait delay if possible to attempt to catch up.  
 			// If it is fast, then it will naturally have to wait for a quorum or timeout, slowing it down.
+			// Finally if load and latency is such that new views are not being formed, gradually increase the delay
 			final long targetRoundDuration = Math.max(Ledger.definitions().roundInterval(), Configuration.getDefault().get("ledger.liveness.delay", 0));
 			final long roundDelayDuration = (targetRoundDuration-progressRound.getDuration());
-			final long roundDelayAdjustment = progressRound.driftMillis()/2;
+			final long roundDelayAdjustment = Math.min(0, progressRound.driftMillis()); // Only adjust if drift is negative (behind)
 			final long adjustedRoundDelayDuration = roundDelayDuration+roundDelayAdjustment;
 			
 			// Within interval bounds
@@ -1315,6 +1336,8 @@ public class BlockHandler implements Service
 				}
 			}
 			
+			_updateViewQC(progressRound, head);
+			
 			nextProgressRound.start(this.progressView);
 			this.blockProcessor.signal();
 			
@@ -1325,18 +1348,215 @@ public class BlockHandler implements Service
 		}
 	}
 	
+	private void _updateViewQC(final ProgressRound progressRound, final BlockHeader head)
+	{
+		boolean isAdopted = false;
+		QuorumCertificate updatedView = progressRound.getView();
+		
+		// Try to construct a new view from received votes in this and previous rounds
+		// Current progress rounds view might be stale if there was stalled transition phase resolved via a commit trigger
+		for (long h=head.getHeight()+1 ; h <= progressRound.clock() ; h++)
+		{
+			final ProgressRound pastProgressRound;
+			
+			// Important to handle this properly as a commit may have happened but a view update may not
+			try
+			{
+				pastProgressRound = getProgressRound(h, false);
+			}
+			catch (IllegalStateException isex)
+			{
+				blocksLog.warn(this.context.getName()+": Progress round "+h+" not found when updating view QC in progress round "+progressRound.clock());
+				continue;
+			}
+			
+			if (pastProgressRound.hasCertificate() == false && 
+			    pastProgressRound.getVoteWeight() >= pastProgressRound.getVoteThreshold())
+			{
+				try
+				{
+					// Determine the initial committable for the certificate
+					final Hash initialCommittable;
+					if (updatedView.getCommittable().equals(Hash.ZERO) == false)
+					{
+						if (updatedView.getPrevious().equals(Hash.ZERO) == false && head.getHeight() >= Block.toHeight(updatedView.getPrevious()))
+							initialCommittable = updatedView.getPrevious();
+						else
+							initialCommittable = head.getHash();
+					}
+					else
+						initialCommittable = head.getHash();
+					
+					// Build the certificate
+					final QuorumCertificate certificate = pastProgressRound.buildCertificate(updatedView, initialCommittable);
+					if (certificate != null)
+					{
+						// Verify the view is not divergent due to latency or faultiness and would potentially cause a fork, stalling liveness
+						if (verifyView(progressRound, updatedView, certificate))
+						{
+							this.guardLock.lock();
+							try
+							{
+								final PendingBlock referencedBlock = this.pendingBlocks.get(certificate.getCurrent());
+								if (referencedBlock.isSuper() == PendingBlock.SUPR.INTR)
+								{
+									final SUPR type;
+									// Super type depends on if local replica is behind, to the point that votes were received 
+									// before the round started or if votes were received latently from other replicas
+									//
+									// Hard supers are only created if the view is being updated for the latest round AND all
+									// votes constituting 2f+1 were received DURING the round
+									if (progressRound.driftMillis() < Math.negateExact(Ledger.definitions().roundInterval()))
+										type = SUPR.SOFT;
+									else if (pastProgressRound != progressRound)
+										type = SUPR.SOFT;
+									else
+										type = SUPR.HARD;
+										
+									referencedBlock.setSuper(type);
+								
+									if (blocksLog.hasLevel(Logging.INFO))
+										blocksLog.info(this.context.getName()+": Pending block 'current' is now a "+referencedBlock.isSuper().name().toLowerCase()+" super from view QC creation "+referencedBlock.toString());
+								}
+								
+								if (blocksLog.hasLevel(Logging.DEBUG))
+									blocksLog.debug(this.context.getName()+": Created view QC in progress round "+pastProgressRound.clock()+" "+certificate);
+								
+								// Created a higher view QC than the referenced progress round view
+								// NOTE:  It may not be higher than the current local view!
+								if (certificate.getHeight() > updatedView.getHeight())
+								{
+									// Discover a committable block up to the round height to update the view QC
+									final PendingBlock committableBlock;
+									final PendingBranch committableBranch = selectBranchWithQuorum(pastProgressRound);
+									if (committableBranch != null)
+									{
+										PendingBlock candidateBlock = committableBranch.commitable();
+										if (candidateBlock != null)
+										{
+											final long prevHeight = Block.toHeight(certificate.getPrevious());
+											if (prevHeight > 0 && candidateBlock.getHeight() > prevHeight)
+												candidateBlock = committableBranch.getBlockAtHeight(prevHeight);
+										}
+										
+										committableBlock = candidateBlock;
+									}
+									else
+										committableBlock = null;
+									
+									if (committableBlock != null)
+										certificate.updateCommittable(committableBlock.getHash());
+									
+									updatedView = certificate;
+									isAdopted = false;
+								}
+							}
+							finally
+							{
+								this.guardLock.unlock();
+							}
+						}
+						else
+							blocksLog.warn(this.context.getName()+": Divergent view QC created in progress round "+pastProgressRound.clock()+" "+certificate);
+					}
+				}
+				catch (Exception ex)
+				{
+					blocksLog.error(this.context.getName()+": Failed to construct view QC for progress round "+pastProgressRound, ex);
+				}
+			}
+		
+			// Check if proposals carry a view which can be adopted
+			// Also set proposals accordingly if they are referenced by a view QC
+			// View QCs in proposals will have been validated when witnessed along with the proposal contents
+			for (final Hash proposal : pastProgressRound.getProposals())
+			{
+				final PendingBlock pendingBlock = this.pendingBlocks.get(proposal);
+				if (pendingBlock == null)
+				{
+					// TODO why?
+					blocksLog.warn(this.context.getName()+": Pending block "+proposal+" not found when inspecting proposal view QCs for progress round "+pastProgressRound.clock());
+					continue;
+				}
+				
+				final QuorumCertificate certificate = pendingBlock.getHeader().getView();
+				
+				// Verify the committable contained in the proposal view QC
+				verifyCommittable(progressRound, certificate, head);
+				
+				// Verify the proposal view QC is not divergent due to latency or faultiness 
+				// and could potentially cause a fork or stall liveness
+				if (verifyView(progressRound, updatedView, certificate) == false)
+					continue;
+	
+				// Set observed proposals with a quorum as SOFT supers 
+				if (certificate.getCurrent().equals(Hash.ZERO) == false)
+				{
+					final PendingBlock referencedBlock = this.pendingBlocks.get(certificate.getCurrent());
+					if (referencedBlock != null)
+					{
+						if (referencedBlock.isSuper() == PendingBlock.SUPR.INTR)
+						{
+							referencedBlock.setSuper(SUPR.SOFT);
+							
+							if (blocksLog.hasLevel(Logging.INFO))
+								blocksLog.info(this.context.getName()+": Pending block 'current' is now a "+referencedBlock.isSuper().name().toLowerCase()+" super from view QC inspection "+referencedBlock.toString());
+						}
+					}
+					else
+					{
+						// Committed? 
+						try
+						{
+							final Hash committed = this.context.getLedger().getLedgerStore().getSyncBlock(Block.toHeight(certificate.getCurrent()));
+							if (certificate.getCurrent().equals(committed) == false)
+								blocksLog.error(this.context.getName()+": Pending block 'current' "+certificate.getCurrent()+" not found when inspecting proposal view QCs for progress round "+pastProgressRound.clock());
+						}
+						catch (IOException ioex)
+						{
+							blocksLog.error(this.context.getName()+": Failed to retreive `current` proposal hash "+Block.toHeight(certificate.getCurrent())+":"+certificate.getCurrent()+" in progress round "+pastProgressRound.clock(), ioex);
+						}
+					}
+				}
+				
+				if (certificate.getHeight() <= updatedView.getHeight())
+					continue;
+				
+				isAdopted = true;
+				updatedView = certificate;
+			}
+		}
+		
+		// Have an updated view QC, check it is a higher view QC than the current local view
+		if (updatedView.getHeight() > this.progressView.getHeight())
+		{
+			this.progressView = updatedView;
+
+			if (blocksLog.hasLevel(Logging.INFO))
+			{
+				if (isAdopted)
+					blocksLog.info(this.context.getName()+": Adopting view QC from proposal "+updatedView.getHeight()+":"+updatedView.getHash()+" for progress round "+progressRound.clock()+" "+updatedView);
+				else
+					blocksLog.info(this.context.getName()+": Updated view QC in progress round "+progressRound.clock()+" "+updatedView);
+			}
+		}
+		else
+			blocksLog.info(this.context.getName()+": Retaining view QC in progress round "+progressRound.clock()+" "+this.progressView);
+	}
+	
 	private void _decideCommit(final ProgressRound progressRound, final ProgressRound.State progressRoundPhase)
 	{
 		// Don't commit on phases where a proposal might be generated
-		if (progressRoundPhase.equals(ProgressRound.State.NONE) || progressRoundPhase.equals(ProgressRound.State.TRANSITION))
+		if ((progressRoundPhase.equals(ProgressRound.State.PROPOSING) && progressRound.isProposalsLatent() == false) || 
+			(progressRoundPhase.equals(ProgressRound.State.TRANSITION) && progressRound.isTransitionLatent() == false)) 
 			return;
-
+		
 		try
 		{
 			final PendingBranch selectedBranch = selectBranchWithQuorum(progressRound);
 			if (selectedBranch != null)
 			{
-				final PendingBlock commitTo = selectedBranch.commitable(Constants.MIN_COMMIT_SUPERS);
+				final PendingBlock commitTo = selectedBranch.commitable();
 				if (commitTo != null)
 					commit(commitTo, selectedBranch);
 			}
@@ -1354,39 +1574,171 @@ public class BlockHandler implements Service
 		return this.pendingBlocks.size();
 	}
 	
-	private ProgressRound getProgressRound(final long clock)
+	private ProgressRound getProgressRound(final long clock, final boolean create)
 	{
 		ProgressRound progressRound;
 		
 		synchronized(this.progressRounds)
 		{
-			progressRound = this.progressRounds.getIfAbsentPut(clock, () -> {
-				// FIXME needs to acquire value from ledger / branches but need vote power epochs etc
-				final Epoch epoch = this.context.getLedger().getEpoch();
-				final ShardGroupID localShardGroupID = ShardMapper.toShardGroup(this.context.getNode().getIdentity(), this.context.getLedger().numShardGroups());
-				long nextTotalVotePower;
-				long nextProposersVotePower;
-				Set<Identity> nextProposers;
-				try 
-				{
-					// TODO calculate seed
-					nextProposers = this.context.getLedger().getValidatorHandler().getProposers(clock, Hash.ZERO, localShardGroupID);
-					nextProposersVotePower = this.context.getLedger().getValidatorHandler().getVotePower(epoch, nextProposers);
-					nextTotalVotePower = this.context.getLedger().getValidatorHandler().getTotalVotePower(epoch, localShardGroupID);
-				} 
-				catch (IOException e) 
-				{ 
-					blocksLog.fatal(this.context.getName()+": Failed to get progress sync vote power at "+clock, e);
-					nextTotalVotePower = Long.MAX_VALUE; // Forces a progress vote timeout
-					nextProposersVotePower = Long.MAX_VALUE; // Forces a progress propose timeout
-					nextProposers = Collections.emptySet(); // Forces a progress propose timeout
-				}
+			if (create)
+			{
+				progressRound = this.progressRounds.getIfAbsentPut(clock, () -> {
+					// FIXME needs to acquire value from ledger / branches but need vote power epochs etc
+					final Epoch epoch = this.context.getLedger().getEpoch();
+					final ShardGroupID localShardGroupID = ShardMapper.toShardGroup(this.context.getNode().getIdentity(), this.context.getLedger().numShardGroups());
+					long nextTotalVotePower;
+					long nextProposersVotePower;
+					Set<Identity> nextProposers;
+					try 
+					{
+						// TODO calculate seed
+						nextProposers = this.context.getLedger().getValidatorHandler().getProposers(clock, Hash.ZERO, localShardGroupID);
+						nextProposersVotePower = this.context.getLedger().getValidatorHandler().getVotePower(epoch, nextProposers);
+						nextTotalVotePower = this.context.getLedger().getValidatorHandler().getTotalVotePower(epoch, localShardGroupID);
+					} 
+					catch (IOException e) 
+					{ 
+						blocksLog.fatal(this.context.getName()+": Failed to get progress sync vote power at "+clock, e);
+						nextTotalVotePower = Long.MAX_VALUE; // Forces a progress vote timeout
+						nextProposersVotePower = Long.MAX_VALUE; // Forces a progress propose timeout
+						nextProposers = Collections.emptySet(); // Forces a progress propose timeout
+					}
+					
+					return new ProgressRound(this.context, clock, nextProposers, nextProposersVotePower, nextTotalVotePower);
+				});
+			}
+			else
+			{
+				progressRound = this.progressRounds.get(clock);
 				
-				return new ProgressRound(this.context, clock, nextProposers, nextProposersVotePower, nextTotalVotePower);
-			});
+				if (progressRound == null)
+					throw new IllegalStateException("Progress round "+clock+" is not created");
+			}
 		}
 		
 		return progressRound;
+	}
+	
+	private boolean verifyView(final ProgressRound round, final QuorumCertificate view, final QuorumCertificate candidate)
+	{
+		if (view.getCurrent().equals(candidate.getCurrent()))
+			return true;
+		
+		// Not genesis comparison
+		if (candidate.getHeight() > 0)
+		{
+			// Ensure there is a branch with candidate view `current` which has been extended at least one round
+			synchronized(this.pendingBranches)
+			{
+				final boolean intersectsToRound = this.pendingBranches.stream().anyMatch(b -> {
+					if (b.contains(candidate.getCurrent()) == false && b.getRoot().getHash().equals(candidate.getCurrent()) == false)
+						return false;
+				 
+					if (round.clock() > Block.toHeight(candidate.getCurrent()))
+					{
+						if (b.getBlockAtHeight(Block.toHeight(candidate.getCurrent())+1) == null)
+							return false;
+					}
+				 
+					return true;
+				});
+				
+				if (intersectsToRound == false)
+				{
+					blocksLog.warn(this.context.getName()+": Candidate view QC does not intersect to progress round "+round.clock()+" "+candidate);
+					return false;
+				}
+			}
+		}
+		
+		// Create the current view branch
+		final Set<Hash> currentBranch = buildCanonicalViewBranch(view);
+
+		// Ensure `previous` proposal referenced is present in the current view branch
+		if (Block.toHeight(candidate.getPrevious()) > 0 && currentBranch.contains(candidate.getPrevious()) == false)
+		{
+			// Committed? 
+			try
+			{
+				final Hash committed = this.context.getLedger().getLedgerStore().getSyncBlock(Block.toHeight(candidate.getPrevious()));
+				if (candidate.getPrevious().equals(committed) == false)
+				{
+					blocksLog.warn(this.context.getName()+": Current view branch does not contain candidate `previous` "+candidate.getPrevious()+" in progress round "+round.clock());
+					return false;
+				}
+			}
+			catch (IOException ioex)
+			{
+				blocksLog.error(this.context.getName()+": Failed to retreive `previous` proposal hash "+Block.toHeight(candidate.getPrevious())+":"+candidate.getPrevious()+" in progress round "+round.clock(), ioex);
+				return false;
+			}
+		}
+		
+		// Validate the `committable` is present in the current view branch and canonical to previous
+		if (Block.toHeight(candidate.getCommittable()) > 0 && currentBranch.contains(candidate.getCommittable()) == false)
+		{
+			// Committed? 
+			try
+			{
+				final Hash committed = this.context.getLedger().getLedgerStore().getSyncBlock(Block.toHeight(candidate.getCommittable()));
+				if (candidate.getCommittable().equals(committed) == false)
+					return false;
+			}
+			catch (IOException ioex)
+			{
+				blocksLog.error(this.context.getName()+": Failed to retreive `committable` proposal hash "+Block.toHeight(candidate.getCommittable())+":"+candidate.getCommittable()+" in progress round "+round.clock(), ioex);
+				return false;
+			}
+		}
+
+	    return true;	
+	}
+	
+	private boolean verifyCommittable(final ProgressRound round, final QuorumCertificate view, final BlockHeader head)
+	{
+		// Check the status of the views head, tag or upgrade as hard super and committable if a 2-chain is witnessed
+		// TODO 2-chain detection
+		// TODO canonical branch
+		if (head.getHeight() < Block.toHeight(view.getCommittable()))
+		{
+			final PendingBlock committableBlock = this.pendingBlocks.get(view.getCommittable());
+			if (committableBlock != null)
+			{
+				if (committableBlock.isCommittable() == false)
+				{
+					if (committableBlock.isSuper() != PendingBlock.SUPR.HARD)
+						committableBlock.setSuper(SUPR.HARD);
+					
+					committableBlock.setCommittable();
+			
+					if (blocksLog.hasLevel(Logging.INFO))
+						blocksLog.info(this.context.getName()+": Pending block `commitable` is now a committable super from view QC inspection "+committableBlock.toString()+" during progress round "+round.clock());
+					
+					return true;
+				}
+			}
+		}
+	    
+	    return false;	
+	}
+
+	private Set<Hash> buildCanonicalViewBranch(final QuorumCertificate view)
+	{
+		final List<Hash> viewBranch = new ArrayList<Hash>();
+		viewBranch.add(view.getCurrent());
+		
+		PendingBlock proposal = this.pendingBlocks.get(view.getCurrent());
+		while(proposal != null)
+		{
+			if (proposal.getHeight() == 1)
+				viewBranch.add(Hash.ZERO);
+			else
+				viewBranch.add(proposal.getHeader().getPrevious());
+
+			proposal = this.pendingBlocks.get(proposal.getHeader().getPrevious());
+		}
+		Collections.reverse(viewBranch);
+		return new LinkedHashSet<Hash>(viewBranch);
 	}
 	
 	private BlockVoteStatus process(final BlockVote blockVote, final BlockHeader head) throws IOException, CryptoException, ValidationException
@@ -1396,7 +1748,7 @@ public class BlockHandler implements Service
 		// TODO Should be pre-verified, check 
 
 		// Stale?
-		if (blockVote.getHeight() < head.getHeight())
+		if (blockVote.getHeight() <= head.getHeight())
 		{
 			if (blocksLog.hasLevel(Logging.DEBUG))
 				blocksLog.warn(BlockHandler.this.context.getName()+": Removed stale delayed block vote "+blockVote);
@@ -1405,7 +1757,14 @@ public class BlockHandler implements Service
 		}
 
 		// Progress round is not available yet, postpone
-		final ProgressRound voteRound = getProgressRound(blockVote.getHeight());
+		final ProgressRound voteRound = getProgressRound(blockVote.getHeight(), false);
+		if (voteRound == null)
+		{
+			if (blocksLog.hasLevel(Logging.DEBUG))
+				blocksLog.warn(this.context.getName()+": Block vote "+blockVote.getHash()+" is postponed for block "+blockVote.getHeight()+"@"+blockVote.getBlock()+" by "+blockVote.getOwner());
+			
+			return BlockVoteStatus.POSTPONED;
+		}
 		
 		// Apply the vote to the progress round.  
 		// The vote should be applied even if the pending block is not yet know to ensure responsiveness and liveness of progress rounds 
@@ -1436,44 +1795,11 @@ public class BlockHandler implements Service
 			return BlockVoteStatus.POSTPONED;
 		}
 		
-		// Pending branch for the pending block is unknown
-		final PendingBranch pendingBranch = getPendingBranch(pendingBlock);
-		if (pendingBranch == null)
-		{
-			if (blocksLog.hasLevel(Logging.DEBUG))
-				blocksLog.warn(this.context.getName()+": Branch not found for "+blockVote.getHeight()+"@"+blockVote.getBlock()+" when processing block vote "+blockVote.getHash()+" by "+blockVote.getOwner());
-				
-			return BlockVoteStatus.POSTPONED;
-		}
-
 		try
 		{
-			final long preVoteWeight = voteRound.getVoteWeight();
 			voteRound.vote(blockVote);
 			if (blocksLog.hasLevel(Logging.INFO))
 				blocksLog.info(BlockHandler.this.context.getName()+": "+blockVote.getOwner().toString(12)+" voted on block "+blockVote.getHeight()+":"+blockVote.getBlock()+" "+blockVote.getHash());
-	
-			if (voteRound.getVoteWeight() >= voteRound.getVoteThreshold() && 
-				(preVoteWeight < voteRound.getVoteThreshold() || voteRound.hasCertificate() == false))
-			{
-				final QuorumCertificate certificate = voteRound.buildCertificate();
-				if (certificate != null)
-				{
-					// A new view certificate was created
-					if (certificate.equals(voteRound.getView()) == false)
-					{
-						final PendingBlock certificateBlock = this.pendingBlocks.get(certificate.getBlock());
-						certificateBlock.setAsSuper();
-					
-						if (blocksLog.hasLevel(Logging.INFO))
-							blocksLog.info(this.context.getName()+": Pending block is now a super "+certificateBlock.toString());
-					
-						this.progressView = certificate;
-					}
-				}
-				else 
-					blocksLog.warn(this.context.getName()+": Expected to construct view quorum certificate for progress round "+voteRound);
-			}
 		}
 		finally
 		{
@@ -1514,8 +1840,6 @@ public class BlockHandler implements Service
 			blocksLog.warn(this.context.getName()+": No proposal available at progress round "+round.clock()+" to vote on in branch "+branch);
 			return null;
 		}
-		
-		
 		
 		if (pendingBlock.isApplied() == false)
 			return null;
@@ -1713,6 +2037,9 @@ public class BlockHandler implements Service
 		if (proposalsToCommit.isEmpty())
 			return proposalsToCommit;
 		
+		if (blocksLog.hasLevel(Logging.INFO))
+			blocksLog.info(this.context.getName()+":  Attempting commit "+proposalsToCommit.getFirst().getHash()+(proposalsToCommit.size() == 1 ? "" : " -> "+proposalsToCommit.getLast().getHash()));
+		
 		final LinkedList<PendingBlock> proposalsCommitted = new LinkedList<PendingBlock>();
 
 		// Attempt the commit
@@ -1879,23 +2206,6 @@ public class BlockHandler implements Service
 		}
 	}
 	
-	private PendingBranch getPendingBranch(PendingBlock pendingBlock)
-	{
-		synchronized(this.pendingBranches)
-		{
-			for (PendingBranch pendingBranch : this.pendingBranches)
-			{
-				if (pendingBranch.getRoot().getHash().equals(pendingBlock.getHeader().getPrevious()))
-					return pendingBranch;
-				
-				if (pendingBranch.contains(pendingBlock.getHeader().getPrevious()))
-					return pendingBranch;
-			}
-
-			return null;
-		}
-	}
-	
 	public Collection<PendingBlock> getPendingBlocks()
 	{
 		synchronized(this.pendingBlocks)
@@ -2010,7 +2320,7 @@ public class BlockHandler implements Service
 		
 		if (this.progressClock.get() == pendingBlock.getHeight())
 		{
-			final ProgressRound progressRound = getProgressRound(pendingBlock.getHeight());
+			final ProgressRound progressRound = getProgressRound(pendingBlock.getHeight(), false);
 	
 			final long roundVotePower = this.context.getLedger().getValidatorHandler().getVotePower(progressRound.epoch(), pendingBlock.getHeader().getProposer());
 			if (progressRound.propose(pendingBlock.getHeader(), roundVotePower) == false)
@@ -2273,9 +2583,6 @@ public class BlockHandler implements Service
 		if (pendingBlock.getHeader() == null)
 			throw new IllegalStateException("Pending block "+pendingBlock.getHash()+" does not have a header");
 		
-		if (pendingBlock.isConstructed() == false)
-			throw new IllegalStateException("Pending block "+pendingBlock.getHash()+" is not constructed");
-
 		if (pendingBlock.isUnbranched() == false)
 			throw new IllegalStateException("Pending block "+pendingBlock.getHash()+" is already in a branch");
 
@@ -2379,25 +2686,9 @@ public class BlockHandler implements Service
 	    return selectedBranch;
 	}
 	
-	private long calculateBranchVoteStrength(final PendingBranch branch, final long height) 
+	private PendingBranch selectBranch(final ProgressRound round, final QuorumCertificate view, final Predicate<PendingBranch> filter)
 	{
-	    long totalVotePower = 0;
-	    for (final PendingBlock block : branch.getBlocks()) 
-	    {
-	        if (block.getHeight() > height)
-	            break;
-	            
-	        if (block.isSuper() == false)
-	        	continue;
-	        
-            totalVotePower ++;
-	    }
-	    
-	    return totalVotePower;
-	}
-	
-	private PendingBranch selectSuperBranch(final ProgressRound round, final QuorumCertificate view)
-	{
+		// Filter branches that intersect with the local view 
 	    final List<PendingBranch> candidateBranches;
 	    synchronized(this.pendingBranches) 
 	    {
@@ -2411,7 +2702,7 @@ public class BlockHandler implements Service
 	        	if (pendingBlock == null)
 	        		continue;
 	        	
-	        	if (pendingBlock.getHeader().getView().intersects(view) == false)
+	        	if (filter.test(pendingBranch) == false)
 	        		continue;
 	        	
 	        	candidateBranches.add(pendingBranch);
@@ -2419,159 +2710,115 @@ public class BlockHandler implements Service
 	    }
 	    
 	    if (candidateBranches.isEmpty())
+	    {
+	    	blocksLog.warn(this.context.getName()+": No suitable branches discovered when selecting on progress round "+round.clock()+" at phase "+round.getState());
 	    	return null;
-	    
-	    // FIRST: Check if any branches contain super blocks
-	    final List<PendingBranch> branchesWithSupers = new ArrayList<>(candidateBranches.size());
-	    for (final PendingBranch branch : candidateBranches) 
-	    {
-	        if (branch.supers().isEmpty() == false) 
-	            branchesWithSupers.add(branch);
 	    }
 	    
-	    // If we have branches with supers, ONLY consider those
-	    List<PendingBranch> filteredCandidates;
-	    if (branchesWithSupers.isEmpty() == false)
-	        filteredCandidates = branchesWithSupers;
-	    else
-	        filteredCandidates = candidateBranches;
-
-	    // SECOND: Find branch with strongest vote power up to height
-	    PendingBranch bestBranch = null;
-	    long bestBranchStrength = 0;
-	    for (final PendingBranch branch : filteredCandidates)
-	    {
-	        long strength = calculateBranchVoteStrength(branch, round.clock());
-	        if (strength > bestBranchStrength)
-	        {
-	            bestBranchStrength = strength;
-	            bestBranch = branch;
-	        }
-	    }
-	    
-	    // THIRD: Among strong consensus branches, pick highest work proposal at height
-	    if (bestBranch != null)
-	    {
-	        final List<PendingBranch> consensusBranches = new ArrayList<>();
-	        // Collect branches building on the strong consensus chain
-	        for (PendingBranch candidateBranch : filteredCandidates)
-	        {
-	            if (candidateBranch.intersects(bestBranch))
-	                consensusBranches.add(candidateBranch);
-	        }
-
-	        // Pick highest work proposal among these branches
-	        final PendingBranch selected = findHighestWorkBranch(consensusBranches, round.clock());
-	        if (selected != null)
-	            return selected;
-	    }
-	    
-	    // Fallback: No supers exist or no valid blocks building on branches with vote power
-	    return findHighestWorkBranch(candidateBranches, round.clock());
+	    final PendingBranch selectedBranch = findHighestWorkBranch(candidateBranches, round.clock());
+	    if (selectedBranch == null)
+	    	blocksLog.warn(this.context.getName()+": No branch selected on progress round "+round.clock());
+	    return selectedBranch;
 	}
 
 	private PendingBranch selectBranchToVote(final ProgressRound round, final QuorumCertificate view) 
 	{
-		return selectSuperBranch(round, view);
+		// Only proposal branches in the round which carry a canonical, non-divergent view with the local replica are selected
+		return selectBranch(round, view, b -> {
+			final PendingBlock candidate = b.getBlockAtHeight(round.clock());
+			return verifyView(round, view, candidate.getHeader().getView());
+		});
 	}
 
 	private PendingBranch selectBranchToExtend(final ProgressRound round, final QuorumCertificate view) 
 	{
-		return selectSuperBranch(round, view);
+		final boolean canLockToView;
+		// Phase 1
+		// Determine if a branch view lock can be applied for this extension 
+		synchronized(this.pendingBranches)
+		{
+			if (Block.toHeight(view.getCurrent()) == 0)
+				canLockToView = false;
+			else
+				canLockToView = this.pendingBranches.stream().anyMatch(b -> b.contains(view.getCurrent()));
+		}
+		
+		// Phase 2
+		// If a branch view lock is applied, only return branches which intersect with the view.
+		// In the absence of a branch view lock, simply return all branches and let the "branch work" be the decider. 
+		// TODO make genesis special cases better 
+		return selectBranch(round, view, b -> {
+			if (Block.toHeight(view.getCurrent()) == 0)
+				return true;
+
+			if (canLockToView == false)
+				return true;
+			
+			if (b.contains(view.getCurrent()))
+				return true;
+			
+			// TODO redundant?
+			if (b.getRoot().getHash().equals(view.getCurrent()))
+				return true;
+
+			return false;
+		});
 	}
 
-	private PendingBranch selectBranchWithQuorum(final ProgressRound round)
+	private PendingBranch selectBranchWithQuorum(final ProgressRound round) 
 	{
 	    final BlockHeader head = this.context.getLedger().getHead();
 
-	    // Make sure we don't commit an uncompleted progress round
-	    final long targetHeight = round.getState().equals(ProgressRound.State.COMPLETED) ? round.clock() : round.clock()-1;
-
-	    int maxSuperCount = 0;
-	    int maxBlockCount = 0;
+	    int bestScore = 0;
+	    int bestLength = 0;
 	    PendingBranch selectedBranch = null;
-	    synchronized(this.pendingBranches)
+
+	    synchronized (this.pendingBranches) 
 	    {
 	        if (this.pendingBranches.isEmpty())
 	            throw new IllegalStateException("No pending branches available");
 
-	        for (final PendingBranch pendingBranch : this.pendingBranches)
+	        for (final PendingBranch pendingBranch : this.pendingBranches) 
 	        {
-	            try
+	            try 
 	            {
-	                if (pendingBranch.isEmpty())
+	                if (pendingBranch.isEmpty()) 
 	                {
-	                    // Alert on all empty branches except a genesis branch
 	                    if (pendingBranch.getRoot().getHeight() > 0)
-	                        blocksLog.warn(this.context.getName()+": Unexpected empty branch "+pendingBranch);
-
+	                        blocksLog.warn(this.context.getName() + ": Unexpected empty branch " + pendingBranch);
 	                    continue;
 	                }
 
-	                if (pendingBranch.getLow().getHeader().getPrevious().equals(head.getHash()) == false)
+	                if (pendingBranch.getLow().getHeader().getPrevious().equals(head.getHash()) == false) 
 	                {
 	                    if (blocksLog.hasLevel(Logging.DEBUG))
-	                        blocksLog.debug(this.context.getName()+": Branch doesn't attach to ledger "+pendingBranch.getLow());
-
+	                        blocksLog.debug(this.context.getName() + ": Branch doesn't attach to ledger " + pendingBranch.getLow());
 	                    continue;
 	                }
 
-	                final LinkedList<PendingBlock> supers = pendingBranch.supers();
-	                
-	                // Count supers at or below the target height
-	                int supersAtOrBelowTarget = 0;
-	                for (final PendingBlock block : supers) 
-	                {
-	                    if (block.getHeight() <= targetHeight)
-	                        supersAtOrBelowTarget++;
-	                }
-	                
-	                // Ensure we have at least 2 supers at or below target height
-	                if (supersAtOrBelowTarget < Constants.MIN_COMMIT_SUPERS)
+	                final PendingBlock commitable = pendingBranch.commitable();
+	                if (commitable == null)
 	                    continue;
-	                
-	                // Find a super at or below target height that's not the last super at or below target
-	                PendingBlock superBlock = null;
-	                PendingBlock lastSuperAtOrBelowTarget = null;
-	                for (final PendingBlock block : supers) 
-	                {
-	                    if (block.getHeight() <= targetHeight) 
-	                    {
-	                        if (lastSuperAtOrBelowTarget == null)
-	                            lastSuperAtOrBelowTarget = block;
-	                        else 
-	                    	{
-	                            superBlock = lastSuperAtOrBelowTarget;
-	                            lastSuperAtOrBelowTarget = block;
-	                        }
-	                    }
-	                }
 
-	                if (superBlock == null)
-	                    continue;
-	                
-	                // If this is our first candidate or has more supers, use it
-	                if (selectedBranch == null || supersAtOrBelowTarget > maxSuperCount) 
+	                int superCount = pendingBranch.supers(SUPR.HARD).size();
+	                int branchLength = pendingBranch.size();
+
+	                if (selectedBranch == null || superCount > bestScore ||
+	                    (superCount == bestScore && branchLength > bestLength)) 
 	                {
-	                	selectedBranch = pendingBranch;
-	                    maxSuperCount = supersAtOrBelowTarget;
-	                    maxBlockCount = pendingBranch.size();
+	                    selectedBranch = pendingBranch;
+	                    bestScore = superCount;
+	                    bestLength = branchLength;
 	                }
-	                // If equal supers but longer branch, use it
-	                else if (supersAtOrBelowTarget == maxSuperCount && pendingBranch.size() > maxBlockCount) 
-	                {
-	                	selectedBranch = pendingBranch;
-	                    maxBlockCount = pendingBranch.size();
-	                }
-	            }
-	            catch (Exception ex)
+	            } 
+	            catch (Exception ex) 
 	            {
-	                blocksLog.error(this.context.getName()+": Branch selection with quorum "+pendingBranch.toString()+" failed", ex);
+	                blocksLog.error(this.context.getName() + ": Branch selection with quorum failed on " + pendingBranch, ex);
 	            }
 	        }
-	        
+
 	        if (selectedBranch != null && blocksLog.hasLevel(Logging.INFO))
-	            blocksLog.info(this.context.getName()+": Found branch with quorum "+selectedBranch);
+	            blocksLog.info(this.context.getName() + ": Found branch with quorum " + selectedBranch);
 	    }
 
 	    return selectedBranch;
@@ -2724,18 +2971,14 @@ public class BlockHandler implements Service
 				BlockHandler.this.headersToVerify.clear();
 				BlockHandler.this.blockVoteCollectors.clear();
 				BlockHandler.this.progressRounds.clear();
-				
-				// NOTE Collecting known block votes is redundant and carries a risk that they can cause safety issues locally on the 
-				// 		suncing replica.  In edge cases depending on network state, they being counted towards 2f+1 AFTER the progress round 
-				// 		has been completed by the network at large.  The network would be safe, but the syncing replica could suffer a local 
-				//		safety / liveness issue.  
 
+				// Set the views and clocks from the event head
 				BlockHandler.this.progressView = event.getHead().getView(); 
 				BlockHandler.this.progressClock.set(event.getHead().getHeight()+1);
 				BlockHandler.this.buildClock.set(event.getHead().getHeight());
 				BlockHandler.this.buildLock = false;
 				
-				final ProgressRound progressRound = getProgressRound(BlockHandler.this.progressClock.get());
+				final ProgressRound progressRound = getProgressRound(BlockHandler.this.progressClock.get(), true);
 				progressRound.start(BlockHandler.this.progressView);
 				
 				blocksLog.info(BlockHandler.this.context.getName()+": Progress round post sync is "+progressRound.toString());

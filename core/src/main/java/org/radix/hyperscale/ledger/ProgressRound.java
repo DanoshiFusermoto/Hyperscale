@@ -6,7 +6,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
 
 import org.eclipse.collections.api.factory.Maps;
 import org.eclipse.collections.api.factory.Sets;
@@ -39,25 +38,27 @@ public class ProgressRound
 	private volatile State state;
 	private volatile long startedAt;
 	private volatile long proposeStartAt;
+	private volatile long proposeTimeoutAt;
 	private volatile long transitionStartAt;
+	private volatile long transitionUpdateAt;
 	private volatile long voteStartAt;
+	private volatile long voteTimeoutAt;
 	private volatile long completedAt;
 
 	private volatile long driftMilli;
+	private volatile long phaseMaturityAt;
 
 	private final Map<Hash, BlockHeader> proposals;
 	private final Set<Identity> proposed;
 	private final Set<Identity> proposers;
 	private final long proposalThreshold;
 	private volatile long proposalWeight;
-	private volatile long proposalsTimeout;
 	private volatile int primariesProposed;
 
 	private final Map<Identity, BlockVote> votes;
 	private final long voteThreshold;
 	private final long totalVotePower;
 	private volatile long voteWeight;
-	private volatile long voteTimeout;
 	
 	private volatile QuorumCertificate view;
 	private volatile QuorumCertificate certificate;
@@ -72,7 +73,7 @@ public class ProgressRound
 		this.completedAt = this.createdAt+Ledger.definitions().roundInterval();
 
 		this.view = head.getView();
-		this.certificate = new QuorumCertificate(head.getHash());
+		this.certificate = new QuorumCertificate(head.getHash(), head.getView(), head.getHash());
 		
 		this.state = State.COMPLETED;
 		this.clock = head.getHeight();
@@ -80,13 +81,13 @@ public class ProgressRound
 		this.totalVotePower = 1;
 		this.epoch = Epoch.from(this.clock / Ledger.definitions().proposalsPerEpoch());
 
-		this.voteTimeout = 0;
+		this.voteTimeoutAt = 0;
 		this.voteWeight = this.totalVotePower;
 		this.voteThreshold = this.totalVotePower;
 		this.votes = Collections.emptyMap();
 
 		this.primariesProposed = 1;
-		this.proposalsTimeout = 0;
+		this.proposeTimeoutAt = 0;
 		this.proposed = Sets.immutable.of(head.getProposer()).castToSet();
 		this.proposers = Sets.immutable.of(head.getProposer()).castToSet();
 		this.proposals = Maps.immutable.of(head.getHash(), head).castToMap();
@@ -113,7 +114,7 @@ public class ProgressRound
 		Numbers.isNegative(proposersVotePower, "Primary proposers vote power is negative");
 		Numbers.isNegative(totalVotePower, "Total vote power is negative");
 		
-		this.voteTimeout = 0;
+		this.voteTimeoutAt = 0;
 		this.voteWeight = 0;
 		this.voteThreshold = ValidatorHandler.twoFPlusOne(totalVotePower);
 		this.votes = Maps.mutable.<Identity, BlockVote>ofInitialCapacity(8).asSynchronized();
@@ -122,7 +123,7 @@ public class ProgressRound
 		Numbers.isZero(proposers.size(), "Primary proposers is empty");
 
 		this.primariesProposed = 0;
-		this.proposalsTimeout = 0;
+		this.proposeTimeoutAt = 0;
 		this.proposed = Sets.mutable.<Identity>ofInitialCapacity(proposers.size()).asSynchronized();
 		this.proposers = Sets.immutable.<Identity>ofAll(proposers).castToSet();
 		this.proposals = Maps.mutable.<Hash, BlockHeader>ofInitialCapacity(proposers.size()).asSynchronized();
@@ -137,11 +138,15 @@ public class ProgressRound
 
 	public long driftMillis() 
 	{
-		if (this.startedAt == 0)
+		if (this.startedAt == 0 || this.driftMilli == 0)
 			return 0;
-
-		// Need to be careful here if the phase in which proposals are generated is changed
-		return this.driftMilli - this.startedAt;
+		
+		return (this.driftMilli - this.startedAt) / 2;
+	}
+	
+	public long phaseMaturityAt()
+	{
+		return this.phaseMaturityAt;
 	}
 
 	public Epoch epoch() 
@@ -172,6 +177,11 @@ public class ProgressRound
 		this.startedAt = System.currentTimeMillis();
 		this.view = view;
 	}
+	
+	boolean isStarted()
+	{
+		return this.startedAt != 0;
+	}
 
 	/** Terminates this proposal round, fast forwarding to the completed state.
 	 * 
@@ -189,26 +199,32 @@ public class ProgressRound
 		if (this.startedAt == 0)
 			throw new IllegalStateException("Progress round "+this.clock+" is not started");
 		
+		final long viewLatencyAdjustment = 1; // MathUtils.sqr(clock()-(getView().getHeight()+1));
 		if (this.state.equals(State.NONE))
 		{
 			this.state = State.PROPOSING;
 			this.proposeStartAt = Time.getSystemTime();
-			this.proposalsTimeout = this.proposeStartAt + Ledger.definitions().proposalPhaseTimeout(TimeUnit.MILLISECONDS);
+			this.phaseMaturityAt = this.proposeStartAt + (Ledger.definitions().roundInterval() / ProgressRound.State.values().length) + viewLatencyAdjustment;
+			this.proposeTimeoutAt = this.proposeStartAt + Ledger.definitions().roundInterval() + viewLatencyAdjustment;
 		}
 		else if (this.state.equals(State.PROPOSING))
 		{
 			this.state = State.TRANSITION;
 			this.transitionStartAt = Time.getSystemTime();
+			this.phaseMaturityAt = this.transitionStartAt + (Ledger.definitions().roundInterval() / ProgressRound.State.values().length) + viewLatencyAdjustment;
+			this.transitionUpdateAt = this.phaseMaturityAt;
 		}
 		else if (this.state.equals(State.TRANSITION))
 		{
 			this.state = State.VOTING;
 			this.voteStartAt = Time.getSystemTime();
-			this.voteTimeout = this.voteStartAt + Ledger.definitions().votePhaseTimeout(TimeUnit.MILLISECONDS);
+			this.phaseMaturityAt = this.voteStartAt + (Ledger.definitions().roundInterval() / ProgressRound.State.values().length) + viewLatencyAdjustment;
+			this.voteTimeoutAt = this.voteStartAt + Ledger.definitions().roundInterval() + viewLatencyAdjustment;
 		}
 		else if (this.state.equals(State.VOTING))
 		{
 			this.state = State.COMPLETED;
+			this.phaseMaturityAt = 0;
 			this.completedAt = Time.getSystemTime();
 		}
 		else
@@ -223,6 +239,13 @@ public class ProgressRound
 			throw new IllegalStateException("Vote already cast by "+vote.getOwner().getIdentity()+" for progress round "+this);
 		
 		this.voteWeight += vote.getWeight();
+		
+		// TODO f+1
+		if (vote.getOwner().getIdentity().equals(this.context.getNode().getIdentity()) == false)
+		{
+			if (this.driftMilli == 0 || vote.witnessedAt() < this.driftMilli)
+				this.driftMilli = vote.witnessedAt();
+		}
 	}
 	
 	public long getVoteWeight() 
@@ -237,7 +260,7 @@ public class ProgressRound
 
 	public boolean isVoteCompleted()
 	{
-		return this.voteWeight >= this.voteThreshold;
+		return this.voteWeight >= this.voteThreshold && Time.getSystemTime() >= this.phaseMaturityAt;
 	}
 
 	public boolean isVoteLatent()
@@ -245,15 +268,15 @@ public class ProgressRound
 		if (this.voteStartAt == 0)
 			return false;
 		
-		return Time.getSystemTime() > this.voteStartAt + (Ledger.definitions().roundInterval() / 3);
+		return Time.getSystemTime() >= this.phaseMaturityAt;
 	}
 
 	public boolean isVoteTimedout()
 	{
-		if (this.voteTimeout == 0)
+		if (this.voteTimeoutAt == 0)
 			return false;
 		
-		return Time.getSystemTime() > this.voteTimeout;
+		return Time.getSystemTime() >= this.voteTimeoutAt;
 	}
 	
 	public boolean hasVoted(final Identity identity) 
@@ -266,7 +289,20 @@ public class ProgressRound
 		if (this.transitionStartAt == 0)
 			return false;
 
-		return Time.getSystemTime() > this.transitionStartAt + (Ledger.definitions().roundInterval() / 3);
+		return Time.getSystemTime() >= this.phaseMaturityAt;
+	}
+
+	public boolean canTransitionUpdate()
+	{
+		if (this.transitionStartAt == 0)
+			return false;
+
+		return Time.getSystemTime() >= this.transitionUpdateAt;
+	}
+	
+	public void transitionUpdated()
+	{
+		this.transitionUpdateAt = Time.getSystemTime() + Ledger.definitions().roundInterval() / ProgressRound.State.values().length;
 	}
 
 	boolean propose(final BlockHeader proposal, final long votePower)
@@ -283,10 +319,6 @@ public class ProgressRound
 		
 		if (this.proposers.contains(proposal.getProposer()))
 			this.primariesProposed++;
-		
-		// TODO f+1
-		if (this.driftMilli == 0 && proposal.getProposer().equals(this.context.getNode().getIdentity()) == false)
-			this.driftMilli = proposal.getWitnessedAt();
 		
 		return true;
 	}
@@ -333,7 +365,7 @@ public class ProgressRound
 
 	public boolean isProposalsCompleted()
 	{
-		return this.proposalWeight > this.proposalThreshold;
+		return this.proposalWeight > this.proposalThreshold && Time.getSystemTime() >= this.phaseMaturityAt;
 	}
 
 	public boolean isProposalsLatent()
@@ -341,15 +373,15 @@ public class ProgressRound
 		if (this.proposeStartAt == 0)
 			return false;
 
-		return Time.getSystemTime() > this.proposeStartAt + (Ledger.definitions().roundInterval() / 3);
+		return Time.getSystemTime() >= this.phaseMaturityAt;
 	}
 
 	public boolean isProposalsTimedout()
 	{
-		if (this.proposalsTimeout == 0)
+		if (this.proposeTimeoutAt == 0)
 			return false;
 		
-		return Time.getSystemTime() > this.proposalsTimeout;
+		return Time.getSystemTime() >= this.proposeTimeoutAt;
 	}
 
 	public Set<Identity> getProposers()
@@ -393,8 +425,11 @@ public class ProgressRound
 		return this.certificate != null;
 	}
 	
-	QuorumCertificate buildCertificate() throws CryptoException
+	QuorumCertificate buildCertificate(final QuorumCertificate extend, final Hash head) throws CryptoException
 	{
+		Objects.requireNonNull(extend, "QC to extend is null");
+		Objects.requireNonNull(head, "Head hash is null");
+		
 	    synchronized(this)
 	    {
 	        if (this.certificate != null)
@@ -404,7 +439,7 @@ public class ProgressRound
 	            throw new IllegalStateException("Can not build a certificate when vote weight of "+this.voteWeight+" is less than vote threshold "+this.voteThreshold);
 
 	        // Find a round proposal which has a quorum of votes
-	        Hash proposalWithQuorum = null;
+	        Hash selectedProposal = null;
 	        final MutableObjectLongMap<Hash> weights = ObjectLongMaps.mutable.ofInitialCapacity(this.proposers.size());
 	        
 	        // Calculate weights for all proposals
@@ -417,13 +452,13 @@ public class ProgressRound
 	            long weight = weights.get(proposal);
 	            if (weight >= this.voteThreshold)
 	            {
-	                proposalWithQuorum = proposal;
+	            	selectedProposal = proposal;
 	                break;
 	            }
 	        }
 	        
 	        // If no proposal has a quorum but we have surpassed vote threshold
-	        if (proposalWithQuorum == null)
+	        if (selectedProposal == null)
 	        {
 	            // Check if it's mathematically impossible to reach a quorum
 	            long[] sortedWeights = weights.values().toSortedArray();
@@ -435,12 +470,11 @@ public class ProgressRound
 	            // If with all remaining potential votes, it's impossible to form a quorum maintain the current view
 	            if (highestWeight + remainingPotentialVotes < this.voteThreshold)
 	            {
-	            	this.certificate = this.view;
+	            	this.certificate = extend;
 	            	return this.certificate;
 	            }
 	            
 	            // Check if vote distribution makes quorum impossible
-	            long votesNeededForQuorum = this.voteThreshold;
 	            int proposalsWithWeight = 0;
 	            long totalPledgedWeight = 0;
 	            
@@ -460,13 +494,13 @@ public class ProgressRound
 	            if (proposalsWithWeight >= 2 && totalPledgedWeight >= this.voteThreshold &&
 	                this.voteWeight - highestWeight >= this.voteThreshold / 2)
 	            {
-	            	this.certificate = this.view;
+	            	this.certificate = extend;
 	            	return this.certificate;
 	            }
 	        }
 
 	        // If no quorum and no impossibility detected, return null
-	        if (proposalWithQuorum == null)
+	        if (selectedProposal == null)
 	            return null;
 
 	        // Have a quorum, collect the votes and create a certificate
@@ -475,7 +509,7 @@ public class ProgressRound
 	        final List<BLSSignature> signatures = new ArrayList<>(this.votes.size());
 	        for (final BlockVote blockVote : this.votes.values())
 	        {
-	            if (blockVote.getBlock().equals(proposalWithQuorum) == false)
+	            if (blockVote.getBlock().equals(selectedProposal) == false)
 	                continue;
 
 	            keys.add(blockVote.getOwner());
@@ -485,7 +519,7 @@ public class ProgressRound
 
 	        final BLSPublicKey key = BLS12381.aggregatePublicKey(keys);
 	        final BLSSignature signature = BLS12381.aggregateSignatures(signatures);
-	        final QuorumCertificate certificate = new QuorumCertificate(proposalWithQuorum, signers, key, signature);
+	        final QuorumCertificate certificate = new QuorumCertificate(selectedProposal, extend, head, signers, key, signature);
 	        this.certificate = certificate;
 	        return certificate;
 	    }
@@ -500,7 +534,7 @@ public class ProgressRound
 		if (this.completedAt > 0)
 			output += " "+this.completedAt+" "+getDuration()+"ms";
 		
-		output += " (PI/PN) "+this.proposed.size()+"/"+this.proposers.size()+" (PW/PT) "+this.proposalWeight+"/"+this.proposalThreshold+" (VW/VT) "+this.voteWeight+"/"+this.voteThreshold+" (TW) "+this.totalVotePower+" (TM) "+this.view.getBlock()+" (V)";
+		output += " (PI/PN) "+this.proposed.size()+"/"+this.proposers.size()+" (PW/PT) "+this.proposalWeight+"/"+this.proposalThreshold+" (VW/VT) "+this.voteWeight+"/"+this.voteThreshold+" (TW) "+this.totalVotePower+" (TM) "+this.view.getCurrent()+" (V)";
 		
 		return output;
 	}
