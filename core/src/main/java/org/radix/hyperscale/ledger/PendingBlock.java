@@ -15,13 +15,8 @@ import java.util.function.Consumer;
 import org.eclipse.collections.api.factory.Maps;
 import org.eclipse.collections.impl.factory.Sets;
 import org.radix.hyperscale.Context;
-import org.radix.hyperscale.collections.Bloom;
-import org.radix.hyperscale.crypto.CryptoException;
 import org.radix.hyperscale.crypto.Hash;
 import org.radix.hyperscale.crypto.Hashable;
-import org.radix.hyperscale.crypto.bls12381.BLS12381;
-import org.radix.hyperscale.crypto.bls12381.BLSPublicKey;
-import org.radix.hyperscale.crypto.bls12381.BLSSignature;
 import org.radix.hyperscale.exceptions.ValidationException;
 import org.radix.hyperscale.ledger.AtomStatus.State;
 import org.radix.hyperscale.ledger.BlockHeader.InventoryType;
@@ -45,6 +40,8 @@ public final class PendingBlock implements Hashable
 	
 	private static final int DEFAULT_STATE_LOCKS_PER_ATOM = 4;
 	private static final int STATE_LOCKS_PER_ATOM_MULTIPLIER = 2;
+	
+	public static enum SUPR {INTR, SOFT, HARD};
 
 	private final Context context;
 	private	final long 	  witnessedAt;
@@ -55,6 +52,8 @@ public final class PendingBlock implements Hashable
 	
 	private volatile boolean 	unbranched;
 	private volatile boolean 	applied;
+	private volatile SUPR		_super;
+	private volatile boolean	committable;
 	private volatile Throwable	thrown;
 	
 	private final Map<Hash, PendingAtom> accepted;
@@ -67,10 +66,6 @@ public final class PendingBlock implements Hashable
 	private final Map<Hash, PolyglotPackage> packages;
 	private final Set<Hash> absent;
 
-	private volatile long voteWeight;
-	private volatile long voteThreshold;
-	private final Map<BLSPublicKey, BLSSignature> votes;
-	
 	private final Map<StateAddress, PendingAtom> statesLocked;
 	private final Map<StateAddress, PendingAtom> statesUnlocked;
 	
@@ -85,6 +80,7 @@ public final class PendingBlock implements Hashable
 		this.witnessedAt = Time.getLedgerTimeMS();
 		this.unbranched = true;
 		this.applied = false;
+		this._super = SUPR.INTR;
 
 		this.accepted = Maps.mutable.ofInitialCapacity(header.getInventorySize(InventoryType.ACCEPTED));
 		this.unaccepted = Maps.mutable.ofInitialCapacity(header.getInventorySize(InventoryType.UNACCEPTED));
@@ -95,10 +91,6 @@ public final class PendingBlock implements Hashable
 		this.latent = Maps.mutable.ofInitialCapacity(header.getInventorySize(InventoryType.LATENT));
 
 		this.packages = Maps.mutable.ofInitialCapacity(header.getInventorySize(InventoryType.PACKAGES));
-
-		this.votes = Maps.mutable.ofInitialCapacity(4);
-		this.voteWeight = 0;
-		this.voteThreshold = -1;
 		
 		final InventoryType[] types = InventoryType.values();
 		this.absent = Sets.mutable.ofInitialCapacity(header.getTotalInventorySize());
@@ -188,7 +180,6 @@ public final class PendingBlock implements Hashable
 		return this.unbranched;
 	}
 	
-	private static boolean caughtMuchVoteThresholdVeryMath = false;
 	void setInBranch(final PendingBranch branch) throws IOException
 	{
 		synchronized(this)
@@ -196,11 +187,7 @@ public final class PendingBlock implements Hashable
 			if (this.unbranched == false)
 				throw new IllegalStateException("Branch already set for "+this);
 			
-			this.voteThreshold = branch.getVotePowerThreshold(getHeight());
 			this.unbranched = false;
-			
-			if (PendingBlock.caughtMuchVoteThresholdVeryMath == true)
-				return;
 		}
 	}
 	
@@ -217,6 +204,19 @@ public final class PendingBlock implements Hashable
 		this.applied = true;
 		
 		this.context.getEvents().post(new BlockAppliedEvent(this));
+	}
+
+	boolean isCommittable()
+	{
+		return this.committable;
+	}
+	
+	void setCommittable()
+	{
+		if (this.committable)
+			return;
+		
+		this.committable = true;
 	}
 
 	public Throwable thrown()
@@ -994,102 +994,19 @@ public final class PendingBlock implements Hashable
 		return this.witnessedAt;
 	}
 	
-	boolean voted(final BLSPublicKey identity)
+	SUPR isSuper()
 	{
-		Objects.requireNonNull(identity, "Public key is null");
+		return this._super;
+	}
+	
+	public void setSuper(final SUPR supr)
+	{
+		Objects.requireNonNull(supr, "Super type is null");
 		
-		synchronized(this)
-		{
-			return this.votes.containsKey(identity);
-		}
-	}
-	
-	BlockCertificate buildCertificate() throws CryptoException
-	{
-		synchronized(this)
-		{
-			if (this.header.getCertificate() != null)
-			{
-				blocksLog.warn(this.context.getName()+": Block header already has a certificate "+this.header);
-				return this.header.getCertificate();
-			}
-			
-			if (this.voteWeight < this.voteThreshold)
-				throw new IllegalStateException("Can not build a certificate when vote weight of "+this.voteWeight+" is less than vote threshold "+this.voteThreshold);
-			
-			final Bloom signers = new Bloom(0.000001, this.votes.size());
-			final List<BLSPublicKey> keys = new ArrayList<>(this.votes.size());
-			final List<BLSSignature> signatures = new ArrayList<>(this.votes.size());
-			
-			this.votes.forEach((k, s) -> {
-				keys.add(k);
-				signers.add(k.getIdentity().toByteArray());
-				signatures.add(s);
-			});
-
-			final BLSPublicKey key = BLS12381.aggregatePublicKey(keys);
-			final BLSSignature signature = BLS12381.aggregateSignatures(signatures);
-			final BlockCertificate certificate = new BlockCertificate(this.header.getHash(), signers, key, signature);
-			this.header.setCertificate(certificate);
-			return certificate;
-		}
-	}
-
-	boolean vote(final BlockVote vote, final long voteWeight) throws ValidationException
-	{
-		Objects.requireNonNull(vote, "Block vote is null");
+		if (this._super.ordinal() >  supr.ordinal())
+			throw new IllegalStateException("Can not downgrade pending block "+this+" super status from "+this._super+" to "+supr);
 		
-		try
-		{
-			if (vote.getObject().equals(getHash()) == false)
-				throw new ValidationException(vote, "Vote from "+vote.getOwner()+" is not for "+getHash());
-			
-			synchronized(this)
-			{
-				if (this.votes.containsKey(vote.getOwner()) == false)
-				{
-					this.votes.put(vote.getOwner(), vote.getSignature());
-					this.voteWeight += voteWeight;
-					return true;
-				}
-				else
-				{
-					blocksLog.warn(this.context.getName()+": "+vote.getOwner()+" has already cast a vote for "+this.header.getHash());
-					return false;
-				}
-			}
-		}
-		catch (ValidationException ex)
-		{
-			throw new ValidationException(getHeader(), ex);
-		}
-	}
-
-	long getVoteWeight() 
-	{
-		synchronized(this)
-		{
-			return this.voteWeight;
-		}
-	}
-	
-	long getVoteThreshold()
-	{
-		synchronized(this)
-		{
-			if (this.unbranched)
-				throw new IllegalStateException("Branch not set for "+this);
-			
-			return this.voteThreshold;
-		}
-	}
-	
-	boolean isSuper()
-	{
-		synchronized(this)
-		{
-			return this.voteWeight >= this.voteThreshold;
-		}
+		this._super = supr;
 	}
 
 	/**

@@ -49,11 +49,9 @@ public final class StateVote extends Vote<BLSKeyPair, BLSPublicKey, BLSSignature
 	private final Hash voteMerkle;
 	private final List<MerkleProof> voteAudit;
 	
-	private final transient long votePower;
-	
-	StateVote(final StateAddress address, final Hash atom, final Hash block, final Hash execution, final BLSPublicKey owner, final long votePower)
+	StateVote(final StateAddress address, final Hash atom, final Hash block, final Hash execution, final BLSPublicKey owner, final long weight)
 	{
-		super(convertToHash(address, atom, block, execution), execution.equals(Hash.ZERO) == false ? CommitDecision.ACCEPT : CommitDecision.REJECT, owner);
+		super(convertToHash(address, atom, block, execution), execution.equals(Hash.ZERO) == false ? CommitDecision.ACCEPT : CommitDecision.REJECT, owner, weight);
 		
 		this.atom = atom;
 		this.block = block;
@@ -61,12 +59,11 @@ public final class StateVote extends Vote<BLSKeyPair, BLSPublicKey, BLSSignature
 		this.address = address;
 		this.voteMerkle = Hash.ZERO;
 		this.voteAudit = Collections.emptyList();
-		this.votePower = Numbers.isNegative(votePower, "Vote power is negative");
 	}
 
-	StateVote(final StateAddress address, final Hash atom, final Hash block, final Hash execution, final Hash voteMerkle, final List<MerkleProof> voteAudit, final BLSPublicKey owner, final long votePower, final BLSSignature signature)
+	StateVote(final StateAddress address, final Hash atom, final Hash block, final Hash execution, final Hash voteMerkle, final List<MerkleProof> voteAudit, final BLSPublicKey owner, final BLSSignature signature, final long weight)
 	{
-		super(convertToHash(address, atom, block, execution), execution.equals(Hash.ZERO) == false ? CommitDecision.ACCEPT : CommitDecision.REJECT, owner, signature);
+		super(convertToHash(address, atom, block, execution), execution.equals(Hash.ZERO) == false ? CommitDecision.ACCEPT : CommitDecision.REJECT, owner, signature, weight);
 		Objects.requireNonNull(voteMerkle, "Vote merkle is null");
 		if (StateVoteCollector.MERKLE_AUDITS_DISABLED == false)
 			Hash.notZero(voteMerkle, "Vote merkle is ZERO");
@@ -79,12 +76,12 @@ public final class StateVote extends Vote<BLSKeyPair, BLSPublicKey, BLSSignature
 		this.address = address;
 		this.voteMerkle = voteMerkle;
 		this.voteAudit = new ArrayList<MerkleProof>(voteAudit);
-		this.votePower = Numbers.isNegative(votePower, "Vote power is negative");
 	}
 	
-	StateVote(final Hash object, final StateAddress address, final Hash atom, final Hash block, final Hash execution, final Hash voteMerkle, final List<MerkleProof> voteAudit, final BLSPublicKey owner, final long votePower, final BLSSignature signature)
+	StateVote(final Hash object, final StateAddress address, final Hash atom, final Hash block, final Hash execution, final Hash voteMerkle, final List<MerkleProof> voteAudit, final BLSPublicKey owner, final BLSSignature signature, final long weight)
 	{
-		super(object, execution.equals(Hash.ZERO) == false ? CommitDecision.ACCEPT : CommitDecision.REJECT, owner, signature);
+		super(object, execution.equals(Hash.ZERO) == false ? CommitDecision.ACCEPT : CommitDecision.REJECT, owner, signature, weight);
+		
 		Objects.requireNonNull(voteMerkle, "Vote merkle is null");
 		if (StateVoteCollector.MERKLE_AUDITS_DISABLED == false)
 			Hash.notZero(voteMerkle, "Vote merkle is ZERO");
@@ -97,7 +94,6 @@ public final class StateVote extends Vote<BLSKeyPair, BLSPublicKey, BLSSignature
 		this.address = address;
 		this.voteMerkle = voteMerkle;
 		this.voteAudit = new ArrayList<MerkleProof>(voteAudit);
-		this.votePower = Numbers.isNegative(votePower, "Vote power is negative");
 	}
 
 	@Override
@@ -184,11 +180,6 @@ public final class StateVote extends Vote<BLSKeyPair, BLSPublicKey, BLSSignature
 		return Collections.unmodifiableList(this.voteAudit);
 	}
 	
-	public long getVotePower()
-	{
-		return this.votePower;
-	}
-
 	// TODO put back to final
 	@Override
 	public String toString()

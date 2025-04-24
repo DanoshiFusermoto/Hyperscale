@@ -45,9 +45,12 @@ class BlockBuilder
 		this.stateLocks = Maps.mutable.ofInitialCapacity(BlockHeader.MAX_INVENTORY_TYPE_PRIMITIVES);
 	}
 
-	PendingBlock build(final BlockHeader buildable, final PendingBranch branch, final BlockHeader head) throws IOException, CryptoException, ValidationException
+	PendingBlock build(final BlockHeader buildable, final PendingBranch branch, final BlockHeader head, final QuorumCertificate view) throws IOException, CryptoException, ValidationException
 	{
+		Objects.requireNonNull(head, "Ledger head is null");
+		Objects.requireNonNull(view, "View certificate is null");
 		Objects.requireNonNull(branch, "Branch to build on is null");
+		Objects.requireNonNull(buildable, "Proposal to build on is null");
 		
 		if (branch.isConstructed() == false || branch.isPrepared() == false || branch.isCanonical() == false)
 			throw new IllegalStateException("Branch is not buildable "+branch);
@@ -403,7 +406,8 @@ class BlockBuilder
 			}
 
 			// if the branch is long, add some extra difficulty to create a stronger block
-			miningBlock = new Block(buildable.getHeight()+1, buildable.getHash(), Long.MAX_VALUE, buildable.getTotalWork(), ThreadLocalRandom.current().nextLong(), buildable.getNextIndex(), timestamp, this.context.getNode().getIdentity(), 
+			miningBlock = new Block(buildable.getHeight()+1, buildable.getHash(), Long.MAX_VALUE, buildable.getTotalWork(), 
+									ThreadLocalRandom.current().nextLong(), buildable.getNextIndex(), timestamp, this.context.getNode().getIdentity(), view, 
 									this.inventory.get(InventoryType.ACCEPTED).stream().map(PendingAtom.class::cast).map(pa -> pa.getAtom()).collect(Collectors.toList()), 
 									this.inventory.get(InventoryType.UNACCEPTED).stream().map(PendingAtom.class::cast).map(pa -> pa.getAtom()).collect(Collectors.toList()),
 									this.inventory.get(InventoryType.UNEXECUTED).stream().map(PendingAtom.class::cast).filter(pa -> pa.getTimeout() instanceof ExecutionTimeout).map(pa -> pa.<ExecutionTimeout>getTimeout()).collect(Collectors.toList()),

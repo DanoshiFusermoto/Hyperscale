@@ -10,6 +10,7 @@ import org.radix.hyperscale.crypto.PublicKey;
 import org.radix.hyperscale.crypto.Signature;
 import org.radix.hyperscale.serialization.DsonOutput;
 import org.radix.hyperscale.serialization.DsonOutput.Output;
+import org.radix.hyperscale.utils.Numbers;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -30,6 +31,8 @@ abstract class Vote<KP extends KeyPair<?, K, S>, K extends PublicKey<S>, S exten
 	@JsonProperty("signature")
 	@DsonOutput(value = {Output.API, Output.WIRE, Output.PERSIST})
 	private S signature;
+	
+	private volatile transient long weight = -1;
 	
 	Vote()
 	{
@@ -57,17 +60,37 @@ abstract class Vote<KP extends KeyPair<?, K, S>, K extends PublicKey<S>, S exten
 		this.decision = Objects.requireNonNull(decision, "Decision is null");
 	}
 
-	protected Vote(final Hash object, final CommitDecision decision, final K owner, final S signature)
+	protected Vote(final Hash object, final CommitDecision decision, final K owner, final long weight)
+	{
+		this.object = Objects.requireNonNull(object, "Object is null");
+		Hash.notZero(object, "Object hash is ZERO");
+		
+		// TODO check object is serializable
+		
+		this.owner = Objects.requireNonNull(owner, "Owner is null");
+		this.decision = Objects.requireNonNull(decision, "Decision is null");
+		this.weight = Numbers.isNegative(weight, "Weight is negative");
+	}
+
+/*	protected Vote(final Hash object, final CommitDecision decision, final K owner, final S signature)
 	{
 		this.object = Objects.requireNonNull(object, "Object is null");
 		Hash.notZero(object, "Object hash is ZERO");
 		this.owner = Objects.requireNonNull(owner, "Owner is null");
 		this.signature = Objects.requireNonNull(signature, "Signature is null");
 		this.decision = Objects.requireNonNull(decision, "Decision is null");
-		
-		// TODO check object is serializable
-	}
+	}*/
 	
+	protected Vote(final Hash object, final CommitDecision decision, final K owner, final S signature, final long weight)
+	{
+		this.object = Objects.requireNonNull(object, "Object is null");
+		Hash.notZero(object, "Object hash is ZERO");
+		this.owner = Objects.requireNonNull(owner, "Owner is null");
+		this.signature = Objects.requireNonNull(signature, "Signature is null");
+		this.decision = Objects.requireNonNull(decision, "Decision is null");
+		this.weight = Numbers.isNegative(weight, "Weight is negative");
+	}
+
 	@Override
 	public int hashCode() 
 	{
@@ -120,31 +143,37 @@ abstract class Vote<KP extends KeyPair<?, K, S>, K extends PublicKey<S>, S exten
 		return this.owner;
 	}
 	
-	public final synchronized void sign(final KP key) throws CryptoException
+	public final void sign(final KP key) throws CryptoException
 	{
 		Objects.requireNonNull(key, "Key pair is null");
 		
-		if (this.signature != null)
-			throw new IllegalStateException("Vote "+getClass()+" is already signed "+this);
-
-		if (key.getPublicKey().equals(getOwner()) == false)
-			throw new CryptoException("Attempting to sign with key that doesn't match owner");
-		
-		this.signature = key.getPrivateKey().sign(getObject());
+		synchronized(this)
+		{
+			if (this.signature != null)
+				throw new IllegalStateException("Vote "+getClass()+" is already signed "+this);
+	
+			if (key.getPublicKey().equals(getOwner()) == false)
+				throw new CryptoException("Attempting to sign with key that doesn't match owner");
+			
+			this.signature = key.getPrivateKey().sign(getObject());
+		}
 	}
 
 	public final synchronized boolean verify(final K key) throws CryptoException
 	{
 		Objects.requireNonNull(key, "Public key is null");
 		
-		if (this.signature == null)
-			throw new CryptoException("Signature is not present");
-		
-		if (getOwner() == null)
-			return false;
-
-		if (key.equals(getOwner()) == false)
-			return false;
+		synchronized(this)
+		{
+			if (this.signature == null)
+				throw new CryptoException("Signature is not present");
+			
+			if (getOwner() == null)
+				return false;
+	
+			if (key.equals(getOwner()) == false)
+				return false;
+		}
 		
 		return key.verify(getObject(), this.signature);
 	}
@@ -154,12 +183,38 @@ abstract class Vote<KP extends KeyPair<?, K, S>, K extends PublicKey<S>, S exten
 		return true;
 	}
 	
-	public final synchronized S getSignature()
+	public final S getSignature()
 	{
-		return this.signature;
+		synchronized(this)
+		{
+			return this.signature;
+		}
 	}
 	
-	// TODO put back to final
+	final long getWeight()
+	{
+		synchronized(this)
+		{
+			if (this.weight == -1)
+				throw new IllegalStateException("Vote weight has not been set");
+			
+			return this.weight;
+		}
+	}
+	
+	final void setWeight(final long weight)
+	{
+		Numbers.isNegative(weight, "Vote weight is negative");
+		
+		synchronized(this)
+		{
+			if (this.weight != -1)
+				throw new IllegalStateException("Vote weight has already been set");
+
+			this.weight = weight;
+		}
+	}
+
 	@Override
 	public String toString()
 	{

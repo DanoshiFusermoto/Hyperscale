@@ -4,16 +4,17 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
 import org.eclipse.collections.api.factory.Maps;
-import org.radix.hyperscale.Constants;
 import org.radix.hyperscale.Context;
 import org.radix.hyperscale.collections.Bloom;
 import org.radix.hyperscale.crypto.Hash;
@@ -21,6 +22,7 @@ import org.radix.hyperscale.crypto.Identity;
 import org.radix.hyperscale.exceptions.ValidationException;
 import org.radix.hyperscale.ledger.AtomStatus.State;
 import org.radix.hyperscale.ledger.BlockHeader.InventoryType;
+import org.radix.hyperscale.ledger.PendingBlock.SUPR;
 import org.radix.hyperscale.ledger.exceptions.LockException;
 import org.radix.hyperscale.ledger.exceptions.PrimitiveLockException;
 import org.radix.hyperscale.ledger.exceptions.PrimitiveUnlockException;
@@ -836,74 +838,73 @@ public class PendingBranch
 	{
 	}
 	
-	PendingBlock commitable(int superCount)
+	PendingBlock commitable()
 	{
 	    synchronized(this)
 	    {
-	        // Check if we have enough super blocks to satisfy consensus rules
-	    	//
-			// Blocks to be committed require at least one "confirming" super block higher than it, thus there will always be at least one super block in a pending branch.
-			// The required quantity of super blocks in a branch is defined by 'superCount' and may be larger than 2 depending on certain conditions.
-	        final LinkedList<PendingBlock> supers = supers();
-	        if (supers.size() < Math.max(superCount, Constants.MIN_COMMIT_SUPERS))
+	        final LinkedList<PendingBlock> supers = supers(SUPR.SOFT, SUPR.HARD);
+	        final PendingBlock targetSuper = commitable(supers);
+	        if (targetSuper == null)
 	            return null;
 
 	        if (blocksLog.hasLevel(Logging.DEBUG))
-	            blocksLog.debug(this.context.getName()+": Found commit branch "+this+" with supers "+supers);
+	            blocksLog.debug(this.context.getName()+": Found target super "+this+" -> "+targetSuper);
 
-	        // Find the highest constructed super that is NOT the last super
-	        PendingBlock highestConstructedSuper = null;
-	        for (final PendingBlock superBlock : supers) 
+	        // Check all supers to our target are constructed
+	        // The commitable super is the highest super constructed if not the target
+	        PendingBlock commitableSuper = null;
+	        for (final PendingBlock zuper : supers) 
 	        {
-	            // Break on the last super
-	            if (supers.getLast().equals(superBlock))
+	            if (zuper.isConstructed() == false) 
 	                break;
-	                
-	            // Also break on a non-constructed supers
-	            if (superBlock.isConstructed() == false)
+	            
+	            commitableSuper = zuper;
+	            
+	            // At the target super, break
+	            if (targetSuper.equals(zuper))
 	                break;
-	                
-	            highestConstructedSuper = superBlock;
+	        	
 	        }
 	        
-	        if (highestConstructedSuper == null)
-	            return null;
+	        if (commitableSuper == null)
+	        	return null;
 
-	        // Check if all blocks up to this super are constructed
-	        boolean allConstructed = true;
-	        PendingBlock lastConstructedSuper = null;
-	        
+	        // Select highest contructed block up to the commitable super
+	        PendingBlock commitableBlock = null;
 	        for (final PendingBlock vertex : this.blocks) 
 	        {
-	            // If we've reached our target super, we're done
-	            if (highestConstructedSuper.equals(vertex))
-	                break;
-	                
-	            // If we hit a non-constructed block, we can't commit to our target
 	            if (vertex.isConstructed() == false) 
-	            {
-	                allConstructed = false;
 	                break;
-	            }
 	            
-	            // Keep track of the last constructed super seen
-	            if (supers.contains(vertex) && vertex.isConstructed())
-	                lastConstructedSuper = vertex;
+	            commitableBlock = vertex;
+	            
+	            // At the target super, break
+	            if (commitableSuper.equals(vertex))
+	                break;
 	        }
 	        
-	        // If all blocks up to our target are constructed, return the target
-	        // Otherwise, return the last constructed super we found
-	        PendingBlock commitable = allConstructed ? highestConstructedSuper : lastConstructedSuper;
+	        // Found a committable block
+	        if (commitableBlock != null && blocksLog.hasLevel(Logging.INFO))
+	            blocksLog.info(this.context.getName()+": Found commitable block "+commitableBlock+" in branch "+this);
 
-	        if (commitable != null && blocksLog.hasLevel(Logging.INFO))
-	            blocksLog.info(this.context.getName()+": Found commitable block "+commitable+" in branch "+this);
-
-	        return commitable;
+	        return commitableBlock;
 	    }
 	}	
 
-	LinkedList<PendingBlock> supers()
+	LinkedList<PendingBlock> supers(final PendingBlock.SUPR ... types)
 	{
+		Objects.requireNonNull(types, "Super types is null");
+		Numbers.isZero(types.length, "Super types is empty");
+
+		final Set<PendingBlock.SUPR> superTypes = new HashSet<>(2);
+		for (final PendingBlock.SUPR superType : types)
+		{
+	        if (superType == SUPR.INTR)
+	            throw new IllegalArgumentException("Can not select super type " + SUPR.INTR);
+
+	        superTypes.add(superType);
+		}
+		
 		final LinkedList<PendingBlock> supers = new LinkedList<PendingBlock>();
 		synchronized(this)
 		{	
@@ -911,11 +912,61 @@ public class PendingBranch
 			while(vertexIterator.hasNext())
 			{
 				final PendingBlock vertex = vertexIterator.next();
-				if (vertex.isSuper())
+				if (superTypes.contains(vertex.isSuper()))
 					supers.add(vertex);
 			}
 		}
 		return supers;
+	}
+	
+	private PendingBlock commitable(final List<PendingBlock> supers) 
+	{
+	    if (supers == null || supers.size() < 2)
+	        return null;
+
+	    for (int i = 1; i < supers.size(); i++) 
+	    {
+	        final PendingBlock prev = supers.get(i - 1);
+	        final PendingBlock curr = supers.get(i);
+	        
+	        if (prev.isSuper() == SUPR.INTR || curr.isSuper() == SUPR.INTR)
+	            throw new IllegalStateException("Unexpected INTR super in sequence");
+	        
+	        // Explicitly set as committable
+	        if (prev.isCommittable())
+	        	return prev;
+
+	        // Must be consecutive
+	        if (prev.getHeight() + 1 != curr.getHeight())
+	            continue;
+
+	        final boolean prevIsSoft = prev.isSuper() == SUPR.SOFT;
+	        final boolean prevIsHard = prev.isSuper() == SUPR.HARD;
+	        final boolean currIsSoft = curr.isSuper() == SUPR.SOFT;
+	        final boolean currIsHard = curr.isSuper() == SUPR.HARD;
+
+	        // Case: 2 consecutive HARDs
+	        if (prevIsHard && currIsHard)
+	            return prev;
+
+	        // Case: SOFT -> HARD only
+	        if (prevIsSoft && currIsHard)
+	            return prev;
+
+/*	        // Case: SOFT -> SOFT -> SOFT or HARD
+	        if (prevIsSoft && currIsSoft && i+1 < supers.size()) 
+	        {
+	            final PendingBlock third = supers.get(i+1);
+	            if (curr.getHeight()+1 == third.getHeight()) 
+	            {
+	                final boolean thirdValid = third.isSuper() == SUPR.SOFT || third.isSuper() == SUPR.HARD;
+	                if (thirdValid)
+	                    return prev;
+	            }
+	        }*/
+	    }
+
+	    return null;
 	}
 	
 	private boolean isApplied(final Hash vertex)
@@ -1224,23 +1275,6 @@ public class PendingBranch
 		return this.context.getLedger().getValidatorHandler().getVotePower(epoch, identity);
 
 		// TODO Liveness recovery piece goes here // REMOVED FOR OPEN SOURCE
-	}
-
-	long getVoteWeight(final long height)
-	{
-		Numbers.isNegative(height, "Height is negative");
-		
-		synchronized(this)
-		{
-			if (this.root.getHeight() == height)
-				throw new IllegalArgumentException("Block at height "+height+" is branch root "+this.root);
-			
-			final PendingBlock block = getBlockAtHeight(height);
-			if (block == null)
-				throw new IllegalStateException("Expected to find pending block at height "+height);
-			
-			return block.getVoteWeight();
-		}
 	}
 
 	public long getVotePower(final long height, final Bloom owners) throws IOException

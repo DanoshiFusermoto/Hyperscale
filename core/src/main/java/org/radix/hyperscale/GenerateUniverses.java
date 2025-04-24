@@ -15,6 +15,7 @@ import org.radix.hyperscale.crypto.bls12381.BLSPublicKey;
 import org.radix.hyperscale.crypto.ed25519.EDKeyPair;
 import org.radix.hyperscale.exceptions.ValidationException;
 import org.radix.hyperscale.ledger.Block;
+import org.radix.hyperscale.ledger.QuorumCertificate;
 import org.radix.hyperscale.ledger.ShardGroupID;
 import org.radix.hyperscale.ledger.ShardMapper;
 import org.radix.hyperscale.ledger.VotePowers;
@@ -261,8 +262,8 @@ public final class GenerateUniverses
 		
 		final Atom genesisAtom = atomBuilder.build(0);
 		final BLSKeyPair genesisKey = new BLSKeyPair();
-		final Block genesisBlock = new Block(0l, Hash.ZERO, 0l, UInt256.ZERO, 0, 0, timestamp, genesisKey.getIdentity(), 
-									   		 Collections.singletonList(genesisAtom), Collections.emptyList(), 
+		final Block genesisBlock = new Block(0l, Hash.ZERO, 0l, UInt256.ZERO, 0, 0, timestamp, genesisKey.getIdentity(), QuorumCertificate.NULL,
+									   		 Collections.singletonList(genesisAtom), Collections.emptyList(),
 									   		 Collections.emptyList(), Collections.emptyList(), 
 									   		 Collections.emptyList(), Collections.emptyList(), 
 									   		 Collections.emptyList(), Collections.emptyList());

@@ -33,7 +33,7 @@ public abstract class VoteCertificate extends Certificate
 		super();
 	}
 	
-	protected VoteCertificate(final CommitDecision decision) throws CryptoException
+	protected VoteCertificate(final CommitDecision decision)
 	{
 		super(decision);
 	}

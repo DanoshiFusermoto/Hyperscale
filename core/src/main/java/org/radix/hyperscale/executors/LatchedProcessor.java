@@ -9,12 +9,13 @@ import org.radix.hyperscale.utils.Numbers;
 
 public abstract class LatchedProcessor extends Executable
 {
-	private final long delay;
+	private final long defaultDelay;
 	private final TimeUnit timeUnit;
 	private final boolean onSignalOnly;
 	
 	private volatile Thread thread;
 	private volatile boolean signalled;
+	private volatile long ephemeralDelay;
 	private final AtomicReference<Thread> latch;
 
 	protected LatchedProcessor()
@@ -22,32 +23,44 @@ public abstract class LatchedProcessor extends Executable
 		this(true, 1, TimeUnit.SECONDS);
 	}
 
-	protected LatchedProcessor(final long delay, final TimeUnit timeUnit)
+	protected LatchedProcessor(final long defaultDelay, final TimeUnit timeUnit)
 	{
-		this(false, delay, timeUnit);
+		this(false, defaultDelay, timeUnit);
 	}
 
-	private LatchedProcessor(final boolean onSignalOnly, final long delay, final TimeUnit timeUnit)
+	private LatchedProcessor(final boolean onSignalOnly, final long defaultDelay, final TimeUnit timeUnit)
 	{
 		super();
 		
-		Numbers.isNegative(delay, "Initial delay is negative");
+		Numbers.isNegative(defaultDelay, "Default delay is negative");
 		Objects.requireNonNull(timeUnit, "Time unit for scheduled executable is null");
 		
 		this.timeUnit = timeUnit;
-		this.delay = delay;
+		this.defaultDelay = defaultDelay;
 		this.latch = new AtomicReference<>();
 		this.onSignalOnly = onSignalOnly;
 	}
 
-	public final long getDelay() 
+	public final long getDefaultDelay() 
 	{ 
-		return this.delay; 
+		return this.defaultDelay; 
 	}
 
 	public final TimeUnit getTimeUnit() 
 	{ 
 		return this.timeUnit; 
+	}
+	
+	public final long getEphemeralDelay() 
+	{ 
+		return this.ephemeralDelay; 
+	}
+
+	public final void setEphemeralDelay(final long delay, final TimeUnit timeUnit) 
+	{ 
+		Numbers.isNegative(delay, "Ephemeral delay is negative");
+		Objects.requireNonNull(timeUnit, "Ephemeral delay time unit is null");
+		this.ephemeralDelay = this.timeUnit.convert(delay, timeUnit); 
 	}
 
 	@Override
@@ -62,7 +75,13 @@ public abstract class LatchedProcessor extends Executable
 				if (this.signalled == false)
 				{
 					this.latch.set(this.thread);
-	                LockSupport.parkNanos(this.timeUnit.toNanos(this.delay));
+					
+					long delay = this.ephemeralDelay;
+					if (delay == 0)
+						delay = this.defaultDelay;
+					this.ephemeralDelay = 0;
+					
+	                LockSupport.parkNanos(this.timeUnit.toNanos(delay));
 	                if (this.onSignalOnly && this.latch.compareAndSet(this.thread, null))
                 		continue;
 				}
