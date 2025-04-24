@@ -15,7 +15,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * 
  */
 @SerializerId2("message.node")
-public class NodeMessage extends Message
+public final class NodeMessage extends Message
 {
 	@JsonProperty("node")
 	@DsonOutput(Output.ALL)

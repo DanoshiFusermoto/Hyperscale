@@ -1,6 +1,5 @@
 package org.radix.hyperscale.network.messages;
 
-import org.radix.hyperscale.node.Node;
 import org.radix.hyperscale.serialization.DsonOutput;
 import org.radix.hyperscale.serialization.SerializerId2;
 import org.radix.hyperscale.serialization.DsonOutput.Output;
@@ -8,7 +7,7 @@ import org.radix.hyperscale.serialization.DsonOutput.Output;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 @SerializerId2("network.message.pong")
-public final class PeerPongMessage extends NodeMessage
+public final class PeerPongMessage extends Message
 {
 	@JsonProperty("nonce")
 	@DsonOutput(Output.ALL)
@@ -21,10 +20,8 @@ public final class PeerPongMessage extends NodeMessage
 		this.nonce = 0l;
 	}
 
-	public PeerPongMessage(final Node node, final long nonce)
+	public PeerPongMessage(final long nonce)
 	{
-		super(node);
-
 		this.nonce = nonce;
 	}
 

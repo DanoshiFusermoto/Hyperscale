@@ -147,23 +147,42 @@ public abstract class AbstractConnection extends Serializable implements Compara
 	private class TCPOutboundProcessor implements Runnable
 	{
 		private final BlockingQueue<Message> outboundQueue = new PriorityBlockingQueue<Message>(AbstractConnection.this.context.getConfiguration().get("messaging.outbound.queue_max", 1<<12), new Comparator<Message>() {
-			@Override
-			public int compare(final Message m1, final Message m2) 
-			{
-				if (m1.isUrgent() == true && m2.isUrgent() == false)
-					return -1;
-				if (m1.isUrgent() == false && m2.isUrgent() == true)
-					return 1;
-				
-				if (m1.getTimestamp() / Constants.BROADCAST_POLL_TIMEOUT < m2.getTimestamp() / Constants.BROADCAST_POLL_TIMEOUT)
-					return -1;
-				if (m1.getTimestamp() / Constants.BROADCAST_POLL_TIMEOUT > m2.getTimestamp() / Constants.BROADCAST_POLL_TIMEOUT)
-					return 1;
-				
-				return 0;
-			}
-		});
+            long AGE_THRESHOLD = Constants.BROADCAST_POLL_TIMEOUT;
 
+            @Override
+	        public int compare(final Message m1, final Message m2) 
+	        {
+	            // Get current time to calculate age
+	            long currentTime = System.currentTimeMillis();
+	            
+	            // Calculate age of messages
+	            long age1 = currentTime - m1.getTimestamp();
+	            long age2 = currentTime - m2.getTimestamp();
+	            
+	            // If m1 is old enough, it gains priority regardless of urgency
+	            if (m1.isUrgent() == false && age1 > AGE_THRESHOLD && m2.isUrgent())
+	                return -1;
+	            
+	            // If m2 is old enough, it gains priority regardless of urgency
+	            if (m2.isUrgent() == false && age2 > AGE_THRESHOLD && m1.isUrgent())
+	                return 1;
+	            
+	            // Otherwise, use the simple urgency-based comparison
+	            if (m1.isUrgent() && m2.isUrgent() == false)
+	                return -1;
+	            if (m1.isUrgent() == false && m2.isUrgent())
+	                return 1;
+	            
+	            // For same urgency, older messages get higher priority
+	            if (m1.getTimestamp() < m2.getTimestamp())
+	                return -1;
+	            if (m1.getTimestamp() > m2.getTimestamp())
+	                return 1;
+	            
+	            return 0;
+	        }
+	    });
+		
 		@Override
 		public void run ()
 		{

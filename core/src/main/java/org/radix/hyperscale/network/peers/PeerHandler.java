@@ -214,7 +214,7 @@ public class PeerHandler implements Service
 					try
 					{
 						networklog.debug("peer.ping from "+connection+" with nonce "+message.getNonce());
-						PeerHandler.this.context.getNetwork().getMessaging().send(new PeerPongMessage(PeerHandler.this.context.getNode(), message.getNonce()), connection);
+						PeerHandler.this.context.getNetwork().getMessaging().send(new PeerPongMessage(message.getNonce()), connection);
 					}
 					catch (Exception ex)
 					{
@@ -287,7 +287,7 @@ public class PeerHandler implements Service
 									continue;
 								}
 								
-								PeerPingMessage ping = new PeerPingMessage(PeerHandler.this.context.getNode(), ThreadLocalRandom.current().nextLong());
+								PeerPingMessage ping = new PeerPingMessage(ThreadLocalRandom.current().nextLong());
 								PeerHandler.this.pings.put(connection, ping.getNonce());
 
 								if (networklog.hasLevel(Logging.DEBUG))
@@ -298,8 +298,11 @@ public class PeerHandler implements Service
 						}
 
 						// Peer refresh
-						for (final AbstractConnection connection : PeerHandler.this.context.getNetwork().get(StandardConnectionFilter.build(PeerHandler.this.context).setStates(ConnectionState.CONNECTED)))
-							PeerHandler.this.context.getNetwork().getMessaging().send(new GetPeersMessage(), connection);
+						// Seems single connection refresh every 60s is sufficient on networks up to about 5k nodes
+						final StandardConnectionFilter connectionFilter = StandardConnectionFilter.build(PeerHandler.this.context).setStates(ConnectionState.CONNECTED);
+						final List<AbstractConnection> connections = PeerHandler.this.context.getNetwork().get(connectionFilter, true);
+						if (connections.isEmpty() == false)
+							PeerHandler.this.context.getNetwork().getMessaging().send(new GetPeersMessage(), connections.getFirst());
 					}
 					catch (Throwable t)
 					{
