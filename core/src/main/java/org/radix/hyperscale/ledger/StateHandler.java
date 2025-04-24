@@ -6,6 +6,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -54,6 +55,7 @@ import org.radix.hyperscale.ledger.events.ProgressPhaseEvent;
 import org.radix.hyperscale.ledger.events.StateCertificateConstructedEvent;
 import org.radix.hyperscale.ledger.events.SyncAcquiredEvent;
 import org.radix.hyperscale.ledger.messages.SyncAcquiredMessage;
+import org.radix.hyperscale.ledger.messages.SyncAcquiredMessageProcessor;
 import org.radix.hyperscale.ledger.primitives.AtomCertificate;
 import org.radix.hyperscale.ledger.primitives.StateCertificate;
 import org.radix.hyperscale.ledger.primitives.StateInput;
@@ -357,7 +359,7 @@ public final class StateHandler implements Service
 		});
 		
 		// SYNC //
-		this.context.getNetwork().getMessaging().register(SyncAcquiredMessage.class, this.getClass(), new MessageProcessor<SyncAcquiredMessage>()
+		this.context.getNetwork().getMessaging().register(SyncAcquiredMessage.class, this.getClass(), new SyncAcquiredMessageProcessor(this.context)
 		{
 			@Override
 			public void process(final SyncAcquiredMessage syncAcquiredMessage, final AbstractConnection connection)
@@ -374,13 +376,12 @@ public final class StateHandler implements Service
 					if (stateLog.hasLevel(Logging.DEBUG))
 						stateLog.debug(StateHandler.this.context.getName()+": State handler inventory request from "+connection);
 					
-					final Set<Hash> stateCertificateInventory = new HashSet<Hash>();
-					final Set<Hash> stateInputInventory = new HashSet<Hash>();
-					
 					final Epoch epoch = Epoch.from(syncAcquiredMessage.getHead());
 					final int numShardGroups = StateHandler.this.context.getLedger().numShardGroups(epoch);
 					ShardGroupID remoteShardGroupID = ShardMapper.toShardGroup(connection.getNode().getIdentity(), numShardGroups);
 					
+					final Set<Hash> deferredStateCertificateInventory = new HashSet<Hash>();
+					final Set<Hash> deferredStateInputInventory = new HashSet<Hash>();
 					StateHandler.this.context.getLedger().getAtomHandler().getAll().forEach(pa -> {
 						for (final StateCertificate sc : pa.getOutputs(StateCertificate.class))
 						{
@@ -388,7 +389,7 @@ public final class StateHandler implements Service
 							if (stateShardGroupID.equals(remoteShardGroupID))
 								continue;
 							
-							stateCertificateInventory.add(sc.getHash());
+							deferredStateCertificateInventory.add(sc.getHash());
 						}
 						
 						for (final StateInput si : pa.getInputs())
@@ -397,10 +398,14 @@ public final class StateHandler implements Service
 							if (stateShardGroupID.equals(remoteShardGroupID))
 								continue;
 							
-							stateInputInventory.add(si.getHash());
+							deferredStateInputInventory.add(si.getHash());
 						}
 					});
 
+					int broadcastedStateCertificateCount = 0;
+					int broadcastedStateInputCount = 0;
+					final Set<Hash> stateCertificateInventory = new LinkedHashSet<Hash>();
+					final Set<Hash> stateInputInventory = new LinkedHashSet<Hash>();
 					long syncInventoryHeight = Math.max(1, syncAcquiredMessage.getHead().getHeight() - Constants.SYNC_INVENTORY_HEAD_OFFSET);
 					while (syncInventoryHeight <= StateHandler.this.context.getLedger().getHead().getHeight())
 					{
@@ -413,6 +418,7 @@ public final class StateHandler implements Service
 								return;
 
 							stateCertificateInventory.add(ir.getHash());
+							deferredStateCertificateInventory.remove(ir.getHash());
 						});
 						
 						StateHandler.this.context.getLedger().getLedgerStore().getSyncInventory(syncInventoryHeight, StateInput.class).forEach(ir -> { 
@@ -424,34 +430,23 @@ public final class StateHandler implements Service
 								return;
 
 							stateInputInventory.add(ir.getHash()); 
+							deferredStateInputInventory.remove(ir.getHash());
 						});
+						
+						broadcastedStateCertificateCount += broadcastSyncInventory(stateCertificateInventory, StateCertificate.class, Constants.MAX_REQUEST_INVENTORY_ITEMS, connection);
+						broadcastedStateInputCount += broadcastSyncInventory(stateInputInventory, StateInput.class, Constants.MAX_REQUEST_INVENTORY_ITEMS, connection);
 						
 						syncInventoryHeight++;
 					}
 
-					if (syncLog.hasLevel(Logging.DEBUG))
-						syncLog.debug(StateHandler.this.context.getName()+": Broadcasting state certificates "+stateCertificateInventory.size()+" / "+stateCertificateInventory+" to "+connection);
-					else
-						syncLog.log(StateHandler.this.context.getName()+": Broadcasting "+stateCertificateInventory.size()+" state certificates to "+connection);
+					// Send any remaining (also now send the deferred)
+					broadcastedStateInputCount += broadcastSyncInventory(stateInputInventory, StateInput.class, 0, connection);
+					broadcastedStateInputCount += broadcastSyncInventory(deferredStateInputInventory, StateInput.class, 0, connection);
+					broadcastedStateCertificateCount += broadcastSyncInventory(stateCertificateInventory, StateCertificate.class, 0, connection);
+					broadcastedStateCertificateCount += broadcastSyncInventory(deferredStateCertificateInventory, StateCertificate.class, 0, connection);
 
-					while(stateCertificateInventory.isEmpty() == false)
-					{
-						InventoryMessage stateCertificateInventoryMessage = new InventoryMessage(stateCertificateInventory, 0, Math.min(Constants.MAX_BROADCAST_INVENTORY_ITEMS, stateCertificateInventory.size()), StateCertificate.class);
-						StateHandler.this.context.getNetwork().getMessaging().send(stateCertificateInventoryMessage, connection);
-						stateCertificateInventory.removeAll(stateCertificateInventoryMessage.asInventory().stream().map(ii -> ii.getHash()).collect(Collectors.toList()));
-					}
-					
-					if (syncLog.hasLevel(Logging.DEBUG))
-						syncLog.debug(StateHandler.this.context.getName()+": Broadcasting state inputs "+stateInputInventory.size()+" / "+stateInputInventory+" to "+connection);
-					else
-						syncLog.log(StateHandler.this.context.getName()+": Broadcasting "+stateInputInventory.size()+" state inputs to "+connection);
-
-					while(stateInputInventory.isEmpty() == false)
-					{
-						InventoryMessage stateInputInventoryMessage = new InventoryMessage(stateInputInventory, 0, Math.min(Constants.MAX_BROADCAST_INVENTORY_ITEMS, stateInputInventory.size()), StateInput.class);
-						StateHandler.this.context.getNetwork().getMessaging().send(stateInputInventoryMessage, connection);
-						stateInputInventory.removeAll(stateInputInventoryMessage.asInventory().stream().map(ii -> ii.getHash()).collect(Collectors.toList()));
-					}
+					syncLog.log(StateHandler.this.context.getName()+": Broadcasted "+broadcastedStateCertificateCount+" state certificates to "+connection);
+					syncLog.log(StateHandler.this.context.getName()+": Broadcasted "+broadcastedStateInputCount+" state inputs to "+connection);
 				}
 				catch (Exception ex)
 				{
