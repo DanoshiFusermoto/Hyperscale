@@ -471,7 +471,7 @@ function updateConnectionTable(tableId, connections, isShardTable = false) {
             shardConns.forEach(conn => {
                 const row = document.createElement('tr');
                 row.innerHTML = `
-					<td class=\"tiny\">#${shardId} ${parseInt(conn.head.slice(3, 19), 16)}</td>
+					<td class=\"tiny\">${createSyncIndicator(conn.sync)} ${shardId} ${parseInt(conn.head.slice(3, 19), 16)}</td>
                     <td class=\"medium\">${conn.host} | ${conn.strikes} </td>
                     <td class=\"small\">${createDirectionIcon(conn.direction)}</td>
 					<td class=\"small\">${formatDuration(conn.connected_at)} | ${formatRemaining(conn.shuffle_at)}</td>
@@ -490,7 +490,7 @@ function updateConnectionTable(tableId, connections, isShardTable = false) {
         connectionsArray.forEach(conn => {
             const row = document.createElement('tr');
             row.innerHTML = `
-                <td class=\"tiny\">${parseInt(conn.head.slice(3, 19), 16)}</td>
+                <td class=\"tiny\">${createSyncIndicator(conn.sync)} ${parseInt(conn.head.slice(3, 19), 16)}</td>
                 <td class=\"medium\">${conn.host} | ${conn.strikes} </td>
                 <td class=\"small\">${createDirectionIcon(conn.direction)}</td>
                 <td class=\"small\">${formatDuration(conn.connected_at)} | ${formatRemaining(conn.shuffle_at)}</td>
@@ -502,6 +502,16 @@ function updateConnectionTable(tableId, connections, isShardTable = false) {
             tbody.appendChild(row);
         });
     }
+}
+
+// Function to create a visual sync indicator using the existing sync-indicator class
+function createSyncIndicator(isSynced) 
+{
+    let className = "connection-sync-indicator";
+    if (isSynced === true) 
+        className += " synced"; // Add synced class for green color (defined in your CSS)
+    
+    return `<div class="${className}"></div>`;
 }
 
 function truncateStringMiddle(str, maxLength) 

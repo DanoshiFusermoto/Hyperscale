@@ -70,6 +70,20 @@ body {
     background-color: #10B981;  /* Green when synced */
 }
 
+.connection-sync-indicator {
+    display: inline-table;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background-color: #EF4444;  /* Default red */
+    transition: background-color 0.3s ease;
+    margin-right: 5px;
+}
+
+.connection-sync-indicator.synced {
+    background-color: #10B981;  /* Green when synced */
+}
+
 .theme-switch {
     position: relative;
     display: inline-block;
