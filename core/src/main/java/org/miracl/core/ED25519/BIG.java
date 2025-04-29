@@ -37,8 +37,11 @@ public class BIG
     public static final long HMASK = (((long)1 << HBITS) - 1);
     public static final int NEXCESS = ((int)1 << (CHUNK - CONFIG_BIG.BASEBITS - 1));
     public static final int BIGBITS = (CONFIG_BIG.MODBYTES * 8);
+    
+	static final BIG ROM_MODULUS = new BIG(ROM.Modulus); 
+    static final BIG ROM_CURVE_B = new BIG(ROM.CURVE_B);
 
-    protected long[] w = new long[NLEN];
+    long[] w = new long[NLEN];
     /* Constructors */
     public BIG() {
         for (int i = 0; i < NLEN; i++)
@@ -120,7 +123,7 @@ public class BIG
             w[i] = d & BMASK;
             carry = (d >> CONFIG_BIG.BASEBITS);
         }
-        w[NLEN - 1] = (w[NLEN - 1] + carry);
+        w[NLEN - 1] += carry;
         return (long)(w[NLEN - 1] >> ((8 * CONFIG_BIG.MODBYTES) % CONFIG_BIG.BASEBITS));
     }
 
@@ -168,32 +171,25 @@ public class BIG
 
     /* set this[i]+=x*y+c, and return high part */
 
-    public static long[] muladd(long a, long b, long c, long r, long[] cr) {
+    public static void muladd(long a, long b, long c, long r, long[] cr) {
         long tp=Math.multiplyHigh(a,b);  // useful intrinsic
         long bt=a*b;
-        long bot=bt&BMASK;
-        long top=(tp<<(64-CONFIG_BIG.BASEBITS)) | (bt >>> CONFIG_BIG.BASEBITS);
-        bot+=c; bot+=r;
+        long top=(tp << CONFIG_BIG.INVBASEBITS) | (bt >>> CONFIG_BIG.BASEBITS);
+        long bot=(bt & BMASK) + c + r;
         long carry=bot >>> CONFIG_BIG.BASEBITS;
-        bot &= BMASK;
-        top+=carry;
-        cr[0] = top;
-        cr[1] = bot;
-        return cr;
+        cr[0] = top + carry;
+        cr[1] = bot & BMASK;
     }
 
     /* this*=x, where x is >NEXCESS */
     public long pmul(int c) 
     {
-        long ak, carry = 0;
+        long carry = 0;
         long[] cr = new long[2];
 
         for (int i = 0; i < NLEN; i++) 
         {
-            ak = w[i];
-            w[i] = 0;
-
-            muladd(ak, (long)c, carry, w[i], cr);
+            muladd(w[i], (long)c, carry, 0, cr);
             carry = cr[0];
             w[i] = cr[1];
 
@@ -263,19 +259,20 @@ public class BIG
 	/* Inputs must be normed */
 	public static DBIG mul(BIG a, BIG b, DBIG o)
 	{
-        long carry;
+        long carry, awi;
         long[] cr = mulLONG2.get();
 
         for (int i = 0; i < NLEN; i++) 
         {
             carry = 0;
+            awi = a.w[i];
             for (int j = 0; j < NLEN; j++) 
             {
-                muladd(a.w[i], b.w[j], carry, o.w[i + j], cr);
+                muladd(awi, b.w[j], carry, o.w[i+j], cr);
                 carry = cr[0];
-                o.w[i + j] = cr[1];
+                o.w[i+j] = cr[1];
             }
-            o.w[NLEN + i] = carry;
+            o.w[NLEN+i] = carry;
         }
 
         return o;
@@ -292,26 +289,28 @@ public class BIG
     /* Input must be normed */
     public static DBIG sqr(BIG a, DBIG o) 
     {
-        long carry;
+        long carry, awi;
         long[] cr = new long[2];
 
         for (int i = 0; i < NLEN; i++) 
         {
             carry = 0;
+            awi = 2*a.w[i];
             for (int j = i + 1; j < NLEN; j++) 
             {
-                muladd(2 * a.w[i], a.w[j], carry, o.w[i + j], cr);
+                muladd(awi, a.w[j], carry, o.w[i+j], cr);
                 carry = cr[0];
-                o.w[i + j] = cr[1];
+                o.w[i+j] = cr[1];
             }
-            o.w[NLEN + i] = carry;
+            o.w[NLEN+i] = carry;
         }
 
-        for (int i = 0; i < NLEN; i++) 
+        for (int i = 0, i2 = 0; i < NLEN; i++, i2+=2) 
         {
-            muladd(a.w[i], a.w[i], 0, o.w[2 * i], cr);
-            o.w[2 * i + 1] += cr[0];
-            o.w[2 * i] = cr[1];
+        	awi = a.w[i];
+            muladd(awi, awi, 0, o.w[i2], cr);
+            o.w[i2 + 1] += cr[0];
+            o.w[i2] = cr[1];
         }
         o.norm();
         return o;
