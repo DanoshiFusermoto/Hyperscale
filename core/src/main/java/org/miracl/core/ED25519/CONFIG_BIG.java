@@ -21,4 +21,5 @@ package org.miracl.core.ED25519;
 public class CONFIG_BIG {
     public static final int MODBYTES = 32;
     public static final int BASEBITS = 56;
+    public static final int INVBASEBITS = Long.SIZE - BASEBITS;
 }

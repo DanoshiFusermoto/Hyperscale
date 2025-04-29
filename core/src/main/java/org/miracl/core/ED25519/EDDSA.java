@@ -228,17 +228,21 @@ public final class EDDSA {
         ECP P=new ECP();
         int sign=getsign(W); // lsb of x
         BIG y=decode_int(true,W);
-        FP one=new FP(1);
         FP hint=new FP();
         FP x=new FP(y); x.sqr(); 
         FP d=new FP(x); 
-        x.sub(one);
+        x.sub(FP.ONE);
         x.norm();
-        FP t=new FP(new BIG(ROM.CURVE_B));
+        FP t=new FP(BIG.ROM_CURVE_B);
         d.mul(t);
-        if (CONFIG_CURVE.CURVE_A==1) d.sub(one);
-        if (CONFIG_CURVE.CURVE_A==-1) d.add(one);
+        
+        if (CONFIG_CURVE.CURVE_A==-1) 
+        	d.add(FP.ONE);
+        else if (CONFIG_CURVE.CURVE_A==1) 
+        	d.sub(FP.ONE);
+        
         d.norm();
+        
 // inverse square root trick for sqrt(x/d)
         t.copy(x);
         t.sqr();

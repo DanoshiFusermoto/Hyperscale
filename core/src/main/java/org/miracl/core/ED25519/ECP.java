@@ -46,10 +46,10 @@ public final class ECP
 /* Constructor - set to O */
 	public ECP() {
 		x=new FP();
-		y=new FP(1);
+		y=new FP(FP.ONE);
 		if (CONFIG_CURVE.CURVETYPE==CONFIG_CURVE.EDWARDS)
 		{
-			z=new FP(1);
+			z=new FP(FP.ONE);
 		}
 		else
 		{
@@ -220,7 +220,7 @@ public final class ECP
 	public ECP(BIG ix,BIG iy) {
 		x=new FP(ix);
 		y=new FP(iy);
-		z=new FP(1);
+		z=new FP(FP.ONE);
 		x.norm();
 		FP rhs=RHS(x);
 
@@ -242,7 +242,7 @@ public final class ECP
 		FP rhs=RHS(x);
         FP hint=new FP();
 		y=new FP();
-		z=new FP(1);
+		z=new FP(FP.ONE);
 		if (rhs.qr(hint)==1)
 		{
 			FP ny=rhs.sqrt(hint);
@@ -262,7 +262,7 @@ public final class ECP
 		FP rhs=RHS(x);
         FP hint=new FP();
 		y=new FP();
-		z=new FP(1);
+		z=new FP(FP.ONE);
 		if (rhs.qr(hint)==1)
 		{
 			if (CONFIG_CURVE.CURVETYPE!=CONFIG_CURVE.MONTGOMERY) y.copy(rhs.sqrt(hint));
@@ -436,7 +436,34 @@ public final class ECP
 /* this*=2 */
 	public void dbl() {
 
-		if (CONFIG_CURVE.CURVETYPE==CONFIG_CURVE.WEIERSTRASS)
+		if (CONFIG_CURVE.CURVETYPE==CONFIG_CURVE.EDWARDS)
+		{
+			FP[] FPw = dblFP4.get();
+			FP C=FPw[0]; C.copy(x);
+			FP D=FPw[1]; D.copy(y);
+			FP H=FPw[2]; H.copy(z);
+			FP J=FPw[3];
+
+			x.mul(y); x.add(x); x.norm();
+			C.sqr();
+			D.sqr();
+
+			if (CONFIG_CURVE.CURVE_A==-1) C.neg();
+
+			y.copy(C); y.add(D); y.norm();
+			H.sqr(); H.add(H);
+
+			z.copy(y);
+			J.copy(y);
+
+			J.sub(H); J.norm();
+			x.mul(J);
+
+			C.sub(D); C.norm();
+			y.mul(C);
+			z.mul(J);
+		}
+		else if (CONFIG_CURVE.CURVETYPE==CONFIG_CURVE.WEIERSTRASS)
 		{
 			if (CONFIG_CURVE.CURVE_A==0)
 			{
@@ -534,34 +561,7 @@ public final class ECP
 				z.copy(z3); z.norm();
 			}
 		}
-		if (CONFIG_CURVE.CURVETYPE==CONFIG_CURVE.EDWARDS)
-		{
-			FP[] FPw = dblFP4.get();
-			FP C=FPw[0]; C.copy(x);
-			FP D=FPw[1]; D.copy(y);
-			FP H=FPw[2]; H.copy(z);
-			FP J=FPw[3];
-
-			x.mul(y); x.add(x); x.norm();
-			C.sqr();
-			D.sqr();
-
-			if (CONFIG_CURVE.CURVE_A==-1) C.neg();
-
-			y.copy(C); y.add(D); y.norm();
-			H.sqr(); H.add(H);
-
-			z.copy(y);
-			J.copy(y);
-
-			J.sub(H); J.norm();
-			x.mul(J);
-
-			C.sub(D); C.norm();
-			y.mul(C);
-			z.mul(J);
-		}
-		if (CONFIG_CURVE.CURVETYPE==CONFIG_CURVE.MONTGOMERY)
+		else if (CONFIG_CURVE.CURVETYPE==CONFIG_CURVE.MONTGOMERY)
 		{
 			FP A=new FP(x);
 			FP B=new FP(x);
@@ -587,7 +587,59 @@ public final class ECP
 /* this+=Q */
 	public void add(ECP Q) {
 
-		if (CONFIG_CURVE.CURVETYPE==CONFIG_CURVE.WEIERSTRASS)
+		if (CONFIG_CURVE.CURVETYPE==CONFIG_CURVE.EDWARDS)
+		{
+			FP[] FPw = addFP7.get();
+			FP A=FPw[0]; A.copy(z);
+			FP B=FPw[1];
+			FP C=FPw[2]; C.copy(x);
+			FP D=FPw[3]; D.copy(y);
+			FP E=FPw[4];
+			FP F=FPw[5];
+			FP G=FPw[6];
+
+			A.mul(Q.z);
+			B.copy(A); B.sqr();
+			C.mul(Q.x);
+			D.mul(Q.y);
+
+			E.copy(C); E.mul(D);
+
+			if (ROM.CURVE_B_I==0)
+				E.mul(FP_ROM_CURVE_B);
+			else
+				E.imul(ROM.CURVE_B_I);
+
+			F.copy(B); F.sub(E);
+			G.copy(B); G.add(E);
+
+			if (CONFIG_CURVE.CURVE_A==1)
+			{
+				E.copy(D); E.sub(C);
+			}
+			C.add(D);
+
+			B.copy(x); B.add(y);
+			D.copy(Q.x); D.add(Q.y); B.norm(); D.norm();
+			B.mul(D);
+			B.sub(C); B.norm(); F.norm();
+			B.mul(F);
+			x.copy(A); x.mul(B); G.norm();
+			
+			if (CONFIG_CURVE.CURVE_A==-1)
+			{
+				C.norm(); C.mul(G);
+			}
+			else if (CONFIG_CURVE.CURVE_A==1)
+			{
+				E.norm(); C.copy(E); C.mul(G);
+			}
+			y.copy(A); y.mul(C);
+
+			z.copy(F);
+			z.mul(G);
+		}
+		else if (CONFIG_CURVE.CURVETYPE==CONFIG_CURVE.WEIERSTRASS)
 		{
 			if (CONFIG_CURVE.CURVE_A==0)
 			{
@@ -721,57 +773,6 @@ public final class ECP
 				y.copy(y3); y.norm();
 				z.copy(z3); z.norm();
 			}
-		}
-		if (CONFIG_CURVE.CURVETYPE==CONFIG_CURVE.EDWARDS)
-		{
-			FP[] FPw = addFP7.get();
-			FP A=FPw[0]; A.copy(z);
-			FP B=FPw[1]; // B.zero();
-			FP C=FPw[2]; C.copy(x);
-			FP D=FPw[3]; D.copy(y);
-			FP E=FPw[4]; // E.zero();
-			FP F=FPw[5]; // F.zero();
-			FP G=FPw[6]; // G.zero();
-
-			A.mul(Q.z);
-			B.copy(A); B.sqr();
-			C.mul(Q.x);
-			D.mul(Q.y);
-
-			E.copy(C); E.mul(D);
-
-			if (ROM.CURVE_B_I==0)
-				E.mul(FP_ROM_CURVE_B);
-			else
-				E.imul(ROM.CURVE_B_I);
-
-			F.copy(B); F.sub(E);
-			G.copy(B); G.add(E);
-
-			if (CONFIG_CURVE.CURVE_A==1)
-			{
-				E.copy(D); E.sub(C);
-			}
-			C.add(D);
-
-			B.copy(x); B.add(y);
-			D.copy(Q.x); D.add(Q.y); B.norm(); D.norm();
-			B.mul(D);
-			B.sub(C); B.norm(); F.norm();
-			B.mul(F);
-			x.copy(A); x.mul(B); G.norm();
-			if (CONFIG_CURVE.CURVE_A==1)
-			{
-				E.norm(); C.copy(E); C.mul(G);
-			}
-			if (CONFIG_CURVE.CURVE_A==-1)
-			{
-				C.norm(); C.mul(G);
-			}
-			y.copy(A); y.mul(C);
-
-			z.copy(F);
-			z.mul(G);
 		}
 		return;
 	}
@@ -1117,7 +1118,7 @@ public final class ECP
             FP X2=new FP();
             FP t=new FP(h);
             FP w=new FP();
-            FP one=new FP(1);
+            FP one=new FP(FP.ONE);
             FP N=new FP();
             FP D=new FP();
             FP hint=new FP();
@@ -1165,7 +1166,7 @@ public final class ECP
             FP X2=new FP();
             FP t=new FP(h);
             FP w=new FP();
-            FP one=new FP(1);
+            FP one=new FP(FP.ONE);
             FP A=new FP();
             FP w1=new FP();
             FP w2=new FP();
@@ -1351,7 +1352,7 @@ public final class ECP
             FP X1=new FP();
             FP X2=new FP();
             FP X3=new FP();
-            FP one=new FP(1);
+            FP one=new FP(FP.ONE);
             FP Y=new FP();
             FP D=new FP();
             FP t=new FP(h);
@@ -1562,9 +1563,10 @@ CAISZF */
 		return P;
 	} */
 
-	public static ECP generator()
-	{
-		ECP G;
+    // Pre-compute and store G
+    private final static ECP G;
+    static
+    {
 		BIG gx,gy;
 		gx=new BIG(ROM.CURVE_Gx);
 
@@ -1575,7 +1577,12 @@ CAISZF */
 		}
 		else
 			G=new ECP(gx);
-		return G;
+    }
+
+    // Returns a copy of the pre-computed G
+	public static ECP generator()
+	{
+		return new ECP(G);
 	}
 
 }
