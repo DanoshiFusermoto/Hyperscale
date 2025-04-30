@@ -309,7 +309,8 @@ public abstract class Spammer extends Executable
 			for (final Atom atom : pendingAtoms)
 			{
 				final SubstateSearchQuery query = new SubstateSearchQuery(StateAddress.from(Atom.class, atom.getHash()));
-				final Future<SubstateSearchResponse> response = Context.get().getLedger().get(query);
+				final long timeout = Constants.ATOM_ACCEPT_TIMEOUT_SECONDS + (long) (Constants.ATOM_ACCEPT_TIMEOUT_SECONDS * Math.log(atom.getManifestSize()));
+				final Future<SubstateSearchResponse> response = Context.get().getLedger().get(query, timeout, TimeUnit.SECONDS);
 				searchFutures.add(response);
 			}
 			
@@ -379,7 +380,8 @@ public abstract class Spammer extends Executable
 	private boolean isAtomCompleted(final Atom atom) throws InterruptedException, ExecutionException
 	{
 		final SubstateSearchQuery query = new SubstateSearchQuery(StateAddress.from(Atom.class, atom.getHash()));
-		final Future<SubstateSearchResponse> response = Context.get().getLedger().get(query);
+		final long timeout = Constants.ATOM_ACCEPT_TIMEOUT_SECONDS + (long) (Constants.ATOM_ACCEPT_TIMEOUT_SECONDS * Math.log(atom.getManifestSize()));
+		final Future<SubstateSearchResponse> response = Context.get().getLedger().get(query, timeout, TimeUnit.SECONDS);
 		final SubstateCommit result = response.get().getResult();
 		if (result != null && result.getSubstate().get(NativeField.CERTIFICATE) != null)
 			return true;

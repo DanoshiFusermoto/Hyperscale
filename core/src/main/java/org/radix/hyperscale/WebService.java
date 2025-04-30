@@ -321,7 +321,8 @@ public class WebService implements Service
 				for (Hash atomCertificateHash : head.getInventory(InventoryType.COMMITTED))
 				{
 					AtomCertificate atomCertificate = context.getLedger().get(atomCertificateHash, AtomCertificate.class);
-					Future<SubstateSearchResponse> atomSubstate = context.getLedger().get(new SubstateSearchQuery(StateAddress.from(Atom.class, atomCertificate.getAtom()), true));
+					SubstateSearchQuery atomSubstateQuery = new SubstateSearchQuery(StateAddress.from(Atom.class, atomCertificate.getAtom()), true);
+					Future<SubstateSearchResponse> atomSubstate = context.getLedger().get(atomSubstateQuery, 1, TimeUnit.SECONDS);
 					SubstateSearchResponse substateSearchResponse = atomSubstate.get(1, TimeUnit.SECONDS);
 					if (substateSearchResponse.getResult() == null)
 						continue;
@@ -488,8 +489,9 @@ public class WebService implements Service
 				int limit = Integer.parseUnsignedInt(req.queryParamOrDefault("limit", "50"));
 				// TODO filter
 				String filterContext = req.queryParamOrDefault("context", "");
-				Future<AssociationSearchResponse> associationSearchResponseFuture = context.getLedger().get(new AssociationSearchQuery(associations, matchon, filterContext, order, offset, limit));
-				AssociationSearchResponse associationSearchResponse = associationSearchResponseFuture.get(5, TimeUnit.SECONDS);
+				AssociationSearchQuery associationSearchQuery = new AssociationSearchQuery(associations, matchon, filterContext, order, offset, limit);
+				Future<AssociationSearchResponse> associationSearchResponseFuture = context.getLedger().get(associationSearchQuery, Constants.SEARCH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+				AssociationSearchResponse associationSearchResponse = associationSearchResponseFuture.get(Constants.SEARCH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
 				if (associationSearchResponse.isEmpty())
 					status(responseJSON, 404, "No instances found associated with "+req.queryParamOrDefault("keys", ""));
@@ -540,8 +542,9 @@ public class WebService implements Service
 				int limit = requestJSON.optInt("limit", 100);
 				// TODO filter
 				String filterContext = req.queryParamOrDefault("filter", "");
-				Future<AssociationSearchResponse> associationSearchResponseFuture = context.getLedger().get(new AssociationSearchQuery(associations, matchon, filterContext, order, offset, limit));
-				AssociationSearchResponse associationSearchResponse = associationSearchResponseFuture.get(5, TimeUnit.SECONDS);
+				AssociationSearchQuery associationSearchQuery = new AssociationSearchQuery(associations, matchon, filterContext, order, offset, limit);
+				Future<AssociationSearchResponse> associationSearchResponseFuture = context.getLedger().get(associationSearchQuery, Constants.SEARCH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+				AssociationSearchResponse associationSearchResponse = associationSearchResponseFuture.get(Constants.SEARCH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
 				if (associationSearchResponse.isEmpty())
 					status(responseJSON, 404, "No instances found associated with "+requestJSON.getJSONArray("keys"));
@@ -598,8 +601,9 @@ public class WebService implements Service
 			final Hash primitiveHash = Hash.valueOf(decodeQueryValue(req.params("hash")));
 			final Class<? extends Primitive> primitiveType = (Class<? extends Primitive>) Serialization.getInstance().getClassForId(req.params("type"));
 			
-			Future<PrimitiveSearchResponse> primitiveFuture = WebService.this.getContext(req).getLedger().get(new PrimitiveSearchQuery(primitiveHash, primitiveType));
-			PrimitiveSearchResponse primitiveResult = primitiveFuture.get(5, TimeUnit.SECONDS);
+			PrimitiveSearchQuery primitiveQuery = new PrimitiveSearchQuery(primitiveHash, primitiveType);
+			Future<PrimitiveSearchResponse> primitiveFuture = WebService.this.getContext(req).getLedger().get(primitiveQuery, Constants.SEARCH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+			PrimitiveSearchResponse primitiveResult = primitiveFuture.get(Constants.SEARCH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 			if (primitiveResult.getResult() == null)
 				status(responseJSON, 404, "No primitive found "+primitiveHash+" of type "+req.params("type"));
 			else
@@ -667,8 +671,9 @@ public class WebService implements Service
 		try
 		{
 			StateAddress stateAddress = StateAddress.from(req.params("context"), Hash.valueOf(decodeQueryValue(req.params("scope"))));
-			Future<SubstateSearchResponse> substateSearchFuture = WebService.this.getContext(req).getLedger().get(new SubstateSearchQuery(stateAddress, Isolation.valueOf(req.queryParamOrDefault("isolation", "COMMITTED").toUpperCase())));
-			SubstateSearchResponse substateSearchResponse = substateSearchFuture.get(5, TimeUnit.SECONDS);
+			SubstateSearchQuery substateSearchQuery = new SubstateSearchQuery(stateAddress, Isolation.valueOf(req.queryParamOrDefault("isolation", "COMMITTED").toUpperCase()));
+			Future<SubstateSearchResponse> substateSearchFuture = WebService.this.getContext(req).getLedger().get(substateSearchQuery, Constants.SEARCH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+			SubstateSearchResponse substateSearchResponse = substateSearchFuture.get(Constants.SEARCH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 			if (substateSearchResponse.getResult() == null) 
 				status(responseJSON, 404, "Substate "+req.params("context")+":"+req.params("scope"));
 			else
@@ -1252,10 +1257,11 @@ public class WebService implements Service
 			else
 				stateAddress = StateAddress.from(Blob.class, endPoint.toLowerCase());
 			
-			final Future<SubstateSearchResponse> substateSearchResponseFuture = Context.get().getLedger().get(new SubstateSearchQuery(stateAddress, Isolation.valueOf(req.queryParamOrDefault("isolation", "COMMITTED").toUpperCase())));
+			final SubstateSearchQuery substateSearchQuery = new SubstateSearchQuery(stateAddress, Isolation.valueOf(req.queryParamOrDefault("isolation", "COMMITTED").toUpperCase()));
+			final Future<SubstateSearchResponse> substateSearchResponseFuture = Context.get().getLedger().get(substateSearchQuery, Constants.SEARCH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 			try
 			{
-				final SubstateSearchResponse substateSearchResponse = substateSearchResponseFuture.get(5, TimeUnit.SECONDS);
+				final SubstateSearchResponse substateSearchResponse = substateSearchResponseFuture.get(Constants.SEARCH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 				if (substateSearchResponse.getResult() == null)
 					res.status(404);
 				else

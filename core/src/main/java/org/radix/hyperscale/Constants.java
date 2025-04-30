@@ -28,8 +28,8 @@ public final class Constants
 	// GOSSIP
 	public static final int 	BROADCAST_POLL_TIMEOUT = 50;
 	public static final int 	MAX_PUSH_INVENTORY_ITEMS = 32;
-	public static final int 	MAX_BROADCAST_INVENTORY_ITEMS = 256;
-	public static final int 	MAX_REQUEST_INVENTORY_ITEMS = 256;
+	public static final int 	MAX_BROADCAST_INVENTORY_ITEMS = 128;
+	public static final int 	MAX_REQUEST_INVENTORY_ITEMS = 128;
 	public static final int 	MAX_FETCH_INVENTORY_ITEMS = 32;
 	public static final int 	INVENTORY_TRANSMIT_AT_SIZE = 1<<20;	// Transmit if size is 1M or greater
 	public static final int 	MIN_GOSSIP_REQUEST_TIMEOUT_MILLISECONDS = 5000;
@@ -55,10 +55,10 @@ public final class Constants
 	// ATOMS
 	public static final int 	ATOM_DISCARD_AT_PENDING_LIMIT = 50000;
 	public static final int 	ATOM_PREPARE_TIMEOUT_SECONDS = 5;
-	public static final int 	ATOM_ACCEPT_TIMEOUT_SECONDS = 10;
-	public static final int 	ATOM_EXECUTE_LATENT_SECONDS = 10;			
-	public static final int 	ATOM_EXECUTE_TIMEOUT_SECONDS = 20;			
-	public static final int 	ATOM_COMMIT_TIMEOUT_SECONDS = 20;
+	public static final int 	ATOM_ACCEPT_TIMEOUT_SECONDS = 15;
+	public static final int 	ATOM_EXECUTE_LATENT_SECONDS = 15;			
+	public static final int 	ATOM_EXECUTE_TIMEOUT_SECONDS = 30;			
+	public static final int 	ATOM_COMMIT_TIMEOUT_SECONDS = 30;
 	
 	// SYNC THRESHOLDS
 	public static final int     SYNC_BROADCAST_INTERVAL_MS = 1000;
@@ -71,6 +71,9 @@ public final class Constants
 	public static final long 	VOTE_POWER_BOOTSTRAP = 1000l;
 	public static final int 	VOTE_POWER_PROPOSAL_REWARD = 1;
 	public static final int 	VOTE_POWER_MATURITY_EPOCHS = 2;
+	
+	// SEARCH
+	public static final long 	SEARCH_TIMEOUT_SECONDS = 10;
 	
 	private Constants() {}
 }

@@ -24,6 +24,7 @@ import java.util.stream.Collectors;
 import org.java_websocket.client.WebSocketClient;
 import org.java_websocket.handshake.ServerHandshake;
 import org.json.JSONObject;
+import org.radix.hyperscale.Constants;
 import org.radix.hyperscale.Context;
 import org.radix.hyperscale.common.Order;
 import org.radix.hyperscale.crypto.CryptoException;
@@ -86,7 +87,7 @@ public class SimpleWallet implements AutoCloseable
 		this.key = Objects.requireNonNull(key);
 		
 		StateAddress vaultStateAddress = StateAddress.from(Vault.class.getAnnotation(StateContext.class).value(), this.key.getIdentity());
-		Future<SubstateSearchResponse> vaultSubstateSearchResponseFuture = context.getLedger().get(new SubstateSearchQuery(vaultStateAddress));
+		Future<SubstateSearchResponse> vaultSubstateSearchResponseFuture = context.getLedger().get(new SubstateSearchQuery(vaultStateAddress), Constants.SEARCH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 		SubstateSearchResponse vaultSubstateSearchResponse = vaultSubstateSearchResponseFuture.get();
 		if (vaultSubstateSearchResponse.getResult() != null)
 			this.substates.put(vaultSubstateSearchResponse.getResult().getSubstate().getAddress(), vaultSubstateSearchResponse.getResult().getSubstate());
@@ -95,7 +96,7 @@ public class SimpleWallet implements AutoCloseable
 		AssociationSearchQuery associationsearchQuery = new AssociationSearchQuery(key.getIdentity().getHash(), "", Order.ASCENDING, 25);
 		Future<AssociationSearchResponse> associationSearchResponseFuture;
 		
-		while((associationSearchResponseFuture = this.context.getLedger().get(associationsearchQuery)).get().isEmpty() == false)
+		while((associationSearchResponseFuture = this.context.getLedger().get(associationsearchQuery, Constants.SEARCH_TIMEOUT_SECONDS, TimeUnit.SECONDS)).get().isEmpty() == false)
 		{
 			for (SubstateCommit associationSubstateCommit : associationSearchResponseFuture.get().getResults())
 			{
@@ -315,8 +316,8 @@ public class SimpleWallet implements AutoCloseable
 	public String spend(String symbol, final UInt256 quantity, final Identity to) throws ValidationException, InsufficientBalanceException, InterruptedException, ExecutionException, TimeoutException
 	{
 		symbol = symbol.toLowerCase();
-		Future<SubstateSearchResponse> tokenSubstateSearchResponseFuture = context.getLedger().get(new SubstateSearchQuery(StateAddress.from(TokenComponent.class, Hash.valueOf(symbol.toLowerCase()))));
-		SubstateSearchResponse tokenSubstateSearchResponse = tokenSubstateSearchResponseFuture.get(10, TimeUnit.SECONDS);
+		Future<SubstateSearchResponse> tokenSubstateSearchResponseFuture = context.getLedger().get(new SubstateSearchQuery(StateAddress.from(TokenComponent.class, Hash.valueOf(symbol.toLowerCase()))), Constants.SEARCH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+		SubstateSearchResponse tokenSubstateSearchResponse = tokenSubstateSearchResponseFuture.get(Constants.SEARCH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 		if (tokenSubstateSearchResponse.getResult() == null)
 			throw new ValidationException("Token "+symbol+" not found");
 		

@@ -54,7 +54,7 @@ import org.radix.hyperscale.serialization.SerializerId2;
  * @author Dan
  *
  */
-final class LedgerSearch implements Service, LedgerInterface
+final class LedgerSearch implements Service, LedgerSearchInterface
 {
 	private static final Logger searchLog = Logging.getLogger("search");
 	
@@ -617,7 +617,7 @@ final class LedgerSearch implements Service, LedgerInterface
 	}
 
 	@Override
-	public Future<PrimitiveSearchResponse> get(final PrimitiveSearchQuery query) 
+	public Future<PrimitiveSearchResponse> get(final PrimitiveSearchQuery query, final long timeout, final TimeUnit timeUnit) 
 	{
 		ShardGroupID localShardGroupID = ShardMapper.toShardGroup(this.context.getNode().getIdentity(), this.context.getLedger().numShardGroups());
 		try
@@ -627,7 +627,7 @@ final class LedgerSearch implements Service, LedgerInterface
 				PrimitiveSearchTask primitiveSearchTask = this.primitiveSearchTasks.get(query.getHash());
 				if (primitiveSearchTask == null)
 				{					
-					primitiveSearchTask = new PrimitiveSearchTask(query, 5, TimeUnit.SECONDS);
+					primitiveSearchTask = new PrimitiveSearchTask(query, timeout, timeUnit);
 					this.primitiveSearchTasks.put(query.getHash(), primitiveSearchTask);
 					Executor.getInstance().schedule(primitiveSearchTask);
 					
@@ -689,7 +689,7 @@ final class LedgerSearch implements Service, LedgerInterface
 	}
 
 	@Override
-	public Future<SubstateSearchResponse> get(final SubstateSearchQuery query)
+	public Future<SubstateSearchResponse> get(final SubstateSearchQuery query, final long timeout, final TimeUnit timeUnit)
 	{
 		try
 		{
@@ -719,7 +719,7 @@ final class LedgerSearch implements Service, LedgerInterface
 
 				AtomicBoolean isExisting = new AtomicBoolean(true);
 				SubstateSearchTask substateSearchTask = this.substateSearchTasks.computeIfAbsent(query.getHash(), k -> {
-					SubstateSearchTask newSubstateSearchTask = new SubstateSearchTask(query, 5, TimeUnit.SECONDS); 
+					SubstateSearchTask newSubstateSearchTask = new SubstateSearchTask(query, timeout, timeUnit); 
 					Executor.getInstance().schedule(newSubstateSearchTask);
 					isExisting.set(false);
 					return newSubstateSearchTask;
@@ -754,7 +754,7 @@ final class LedgerSearch implements Service, LedgerInterface
 	}
 	
 	@Override
-	public Future<AssociationSearchResponse> get(final AssociationSearchQuery query)
+	public Future<AssociationSearchResponse> get(final AssociationSearchQuery query, final long timeout, final TimeUnit timeUnit)
 	{
 		ShardGroupID localShardGroupID = ShardMapper.toShardGroup(this.context.getNode().getIdentity(), this.context.getLedger().numShardGroups());
 		try
@@ -764,7 +764,7 @@ final class LedgerSearch implements Service, LedgerInterface
 				AssociationSearchTask associationSearchTask = this.associationSearchTasks.get(query.getHash());
 				if (associationSearchTask == null)
 				{					
-					associationSearchTask = new AssociationSearchTask(query, 5, TimeUnit.SECONDS);
+					associationSearchTask = new AssociationSearchTask(query, timeout, timeUnit);
 					this.associationSearchTasks.put(associationSearchTask.getQuery().getHash(), associationSearchTask);
 					Executor.getInstance().schedule(associationSearchTask);
 

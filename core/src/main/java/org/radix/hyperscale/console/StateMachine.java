@@ -13,6 +13,7 @@ import org.apache.commons.cli.Option;
 import org.apache.commons.cli.Options;
 import org.apache.commons.io.FileUtils;
 import org.json.JSONObject;
+import org.radix.hyperscale.Constants;
 import org.radix.hyperscale.Context;
 import org.radix.hyperscale.Universe;
 import org.radix.hyperscale.apps.SimpleWallet;
@@ -277,8 +278,9 @@ public class StateMachine extends Function
 				decodedSubstateScope = ((String) decodedSubstateScope).toLowerCase();
 			
 			final StateAddress stateAddress = StateAddress.from(substateContext, Hash.valueOf(decodedSubstateScope));
-			final Future<SubstateSearchResponse> searchFuture = context.getLedger().get(new SubstateSearchQuery(stateAddress, Isolation.COMMITTED));
-			final SubstateSearchResponse searchResult = searchFuture.get(5, TimeUnit.SECONDS);
+			final SubstateSearchQuery substateSearchQuery = new SubstateSearchQuery(stateAddress, Isolation.COMMITTED);
+			final Future<SubstateSearchResponse> searchSearchFuture = context.getLedger().get(substateSearchQuery, Constants.SEARCH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+			final SubstateSearchResponse searchResult = searchSearchFuture.get(Constants.SEARCH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 			if (searchResult.getResult() == null) 
 			{
 				printStream.println("Substate "+substateContext+":"+substateScope+" mapping to "+stateAddress+" not found");
