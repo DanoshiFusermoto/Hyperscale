@@ -258,6 +258,11 @@ public final class Atom extends ExtendedObject implements Primitive
 		return Collections.unmodifiableList(this.manifest);
 	}
 	
+	public int getManifestSize()
+	{
+		return this.manifest.size();
+	}
+
 	public boolean isSealed()
 	{
 		return this.signatures.isEmpty() == false;
