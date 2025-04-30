@@ -64,7 +64,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.eventbus.Subscribe;
 import com.sleepycat.je.OperationStatus;
 
-public final class Ledger implements Service, LedgerInterface
+public final class Ledger implements Service, LedgerSearchInterface
 {
 	private static final Logger ledgerLog = Logging.getLogger("ledger");
 	
@@ -570,21 +570,21 @@ public final class Ledger implements Service, LedgerInterface
 	}
 
 	@Override
-	public Future<AssociationSearchResponse> get(final AssociationSearchQuery query)
+	public Future<AssociationSearchResponse> get(final AssociationSearchQuery query, final long timeout, final TimeUnit timeUnit)
 	{
-		return this.ledgerSearch.get(query);
+		return this.ledgerSearch.get(query, timeout, timeUnit);
 	}
 
 	@Override
-	public Future<SubstateSearchResponse> get(SubstateSearchQuery query)
+	public Future<SubstateSearchResponse> get(SubstateSearchQuery query, final long timeout, final TimeUnit timeUnit)
 	{
-		return this.ledgerSearch.get(query);
+		return this.ledgerSearch.get(query, timeout, timeUnit);
 	}
 	
 	@Override
-	public Future<PrimitiveSearchResponse> get(PrimitiveSearchQuery query)
+	public Future<PrimitiveSearchResponse> get(PrimitiveSearchQuery query, final long timeout, final TimeUnit timeUnit)
 	{
-		return this.ledgerSearch.get(query);
+		return this.ledgerSearch.get(query, timeout, timeUnit);
 	}
 	
 	boolean isSynced()
@@ -947,7 +947,7 @@ public final class Ledger implements Service, LedgerInterface
 						case INTR: superText = ""; break;
 						case SOFT: superText = "soft super"; break;
 						case HARD: superText = "hard super"; break;
-						default: superText = "unknown";
+						default: superText = blockCommittedEvent.getPendingBlock().isCommittable() ? "committable" : "unknown";
 					}
 					
 					ledgerLog.info(Ledger.this.context.getName()+": Committed "+superText+" block with "+blockCommittedEvent.getPendingBlock().getHeader().getInventorySize(InventoryType.ACCEPTED)+" atoms "+

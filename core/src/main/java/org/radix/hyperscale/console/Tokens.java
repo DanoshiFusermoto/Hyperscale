@@ -11,6 +11,7 @@ import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.Option;
 import org.apache.commons.cli.Options;
 import org.json.JSONObject;
+import org.radix.hyperscale.Constants;
 import org.radix.hyperscale.Context;
 import org.radix.hyperscale.Universe;
 import org.radix.hyperscale.apps.SimpleWallet;
@@ -55,7 +56,8 @@ public class Tokens extends Function
 		{
 			final String ISO = commandLine.getOptionValue("balance", "CASSIE");
 
-			final Future<SubstateSearchResponse> tokenSearchFuture = context.getLedger().get(new SubstateSearchQuery(StateAddress.from(TokenComponent.class, Hash.valueOf(ISO.toLowerCase()))));
+			final SubstateSearchQuery tokenSearchQuery = new SubstateSearchQuery(StateAddress.from(TokenComponent.class, Hash.valueOf(ISO.toLowerCase())));
+			final Future<SubstateSearchResponse> tokenSearchFuture = context.getLedger().get(tokenSearchQuery, Constants.SEARCH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 			final SubstateSearchResponse tokenSearchResult = tokenSearchFuture.get(10, TimeUnit.SECONDS);
 			if (tokenSearchResult.getResult() == null)
 			{
@@ -113,8 +115,9 @@ public class Tokens extends Function
 			final UInt256 amount = UInt256.from(options[0]);
 			final String ISO = options[1];
 			
-			final Future<SubstateSearchResponse> tokenSearchFuture = context.getLedger().get(new SubstateSearchQuery(StateAddress.from(TokenComponent.class, Hash.valueOf(ISO.toLowerCase()))));
-			final SubstateSearchResponse tokenSearchResult = tokenSearchFuture.get(10, TimeUnit.SECONDS);
+			final SubstateSearchQuery tokenSearchQuery = new SubstateSearchQuery(StateAddress.from(TokenComponent.class, Hash.valueOf(ISO.toLowerCase())));
+			final Future<SubstateSearchResponse> tokenSearchFuture = context.getLedger().get(tokenSearchQuery, Constants.SEARCH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+			final SubstateSearchResponse tokenSearchResult = tokenSearchFuture.get(Constants.SEARCH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 			if (tokenSearchResult.getResult() == null)
 			{
 				printStream.println("Token "+ISO+" not found");
@@ -139,8 +142,9 @@ public class Tokens extends Function
 		{
 			final String ISO = commandLine.getOptionValue("debits", "CASSIE");
 			
-			final Future<SubstateSearchResponse> tokenSearchFuture = context.getLedger().get(new SubstateSearchQuery(StateAddress.from(TokenComponent.class, Hash.valueOf(ISO.toLowerCase()))));
-			final SubstateSearchResponse tokenSearchResult = tokenSearchFuture.get(10, TimeUnit.SECONDS);
+			final SubstateSearchQuery tokenSearchQuery = new SubstateSearchQuery(StateAddress.from(TokenComponent.class, Hash.valueOf(ISO.toLowerCase())));
+			final Future<SubstateSearchResponse> tokenSearchFuture = context.getLedger().get(tokenSearchQuery, Constants.SEARCH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+			final SubstateSearchResponse tokenSearchResult = tokenSearchFuture.get(Constants.SEARCH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 			if (tokenSearchResult.getResult() == null)
 			{
 				printStream.println("Token "+ISO+" not found");
@@ -163,8 +167,9 @@ public class Tokens extends Function
 		{
 			final String ISO = commandLine.getOptionValue("credits", "CASSIE");
 			
-			final Future<SubstateSearchResponse> tokenSearchFuture = context.getLedger().get(new SubstateSearchQuery(StateAddress.from(TokenComponent.class, Hash.valueOf(ISO.toLowerCase()))));
-			final SubstateSearchResponse tokenSearchResult = tokenSearchFuture.get(10, TimeUnit.SECONDS);
+			final SubstateSearchQuery tokenSearchQuery = new SubstateSearchQuery(StateAddress.from(TokenComponent.class, Hash.valueOf(ISO.toLowerCase())));
+			final Future<SubstateSearchResponse> tokenSearchFuture = context.getLedger().get(tokenSearchQuery, Constants.SEARCH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+			final SubstateSearchResponse tokenSearchResult = tokenSearchFuture.get(Constants.SEARCH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 			if (tokenSearchResult.getResult() == null)
 			{
 				printStream.println("Token "+ISO+" not found");
