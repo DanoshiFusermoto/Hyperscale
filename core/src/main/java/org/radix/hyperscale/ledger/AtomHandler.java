@@ -7,6 +7,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -277,7 +278,7 @@ public class AtomHandler implements Service, LedgerInterface
 						atomsLog.debug(AtomHandler.this.context.getName()+": Atom pool inventory request from "+connection);
 
 					// TODO will cause problems when pool is very big
-					final Set<Hash> deferredPendingAtomInventory = new HashSet<Hash>();
+					final Set<Hash> deferredPendingAtomInventory = new LinkedHashSet<Hash>();
 					AtomHandler.this.pendingAtoms.forEach((hash, pendingAtom) -> {
 						if (pendingAtom.getStatus().before(AtomStatus.State.PREPARED))
 							return;
@@ -289,7 +290,7 @@ public class AtomHandler implements Service, LedgerInterface
 					});
 
 					int broadcastedPendingAtomCount = 0;
-					final Set<Hash> pendingAtomInventory = new HashSet<Hash>();
+					final Set<Hash> pendingAtomInventory = new LinkedHashSet<Hash>();
 					long syncInventoryHeight = Math.max(1, syncAcquiredMessage.getHead().getHeight() - Constants.SYNC_INVENTORY_HEAD_OFFSET);
 					while (syncInventoryHeight <= AtomHandler.this.context.getLedger().getHead().getHeight())
 					{

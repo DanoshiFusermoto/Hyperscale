@@ -4,7 +4,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map.Entry;
 import java.util.Objects;
@@ -28,7 +28,7 @@ public final class GetItemsMessage extends Message
 {
 	@JsonProperty("inventory")
 	@DsonOutput(Output.ALL)
-	private HashMap<String, HashSet<Hash>> inventory;
+	private HashMap<String, LinkedHashSet<Hash>> inventory;
 	
 	private volatile transient List<InventoryItem> inventoryItems = null;
 
@@ -46,9 +46,9 @@ public final class GetItemsMessage extends Message
 		if (items.isEmpty())
 			throw new IllegalArgumentException("Items is empty");
 
-		this.inventory = new HashMap<String, HashSet<Hash>>();
+		this.inventory = new HashMap<String, LinkedHashSet<Hash>>();
 		for (final Hash item : items)
-			this.inventory.computeIfAbsent(Serialization.getInstance().getIdForClass(type), t -> new HashSet<>(items.size())).add(item);
+			this.inventory.computeIfAbsent(Serialization.getInstance().getIdForClass(type), t -> new LinkedHashSet<>(items.size())).add(item);
 	}
 
 	public GetItemsMessage(final Collection<InventoryItem> items)
@@ -59,9 +59,9 @@ public final class GetItemsMessage extends Message
 		if (items.isEmpty())
 			throw new IllegalArgumentException("Items is empty");
 
-		this.inventory = new HashMap<String, HashSet<Hash>>(items.size());
+		this.inventory = new HashMap<String, LinkedHashSet<Hash>>(items.size());
 		for (InventoryItem item : items)
-			this.inventory.computeIfAbsent(Serialization.getInstance().getIdForClass(item.getType()), t -> new HashSet<>()).add(item.getHash());
+			this.inventory.computeIfAbsent(Serialization.getInstance().getIdForClass(item.getType()), t -> new LinkedHashSet<>()).add(item.getHash());
 	}
 	
 	public List<InventoryItem> asInventory()
@@ -71,7 +71,7 @@ public final class GetItemsMessage extends Message
 			if (this.inventory != null)
 			{
 				this.inventoryItems = new ArrayList<InventoryItem>(this.inventory.size());
-				for (final Entry<String, HashSet<Hash>> items : this.inventory.entrySet())
+				for (final Entry<String, LinkedHashSet<Hash>> items : this.inventory.entrySet())
 				{
 					for (final Hash item : items.getValue())
 						this.inventoryItems.add(new InventoryItem(items.getKey(), item));
@@ -89,7 +89,7 @@ public final class GetItemsMessage extends Message
 		final MutableMultimap<Class<? extends Primitive>, Hash> typed = Multimaps.mutable.list.empty();
 		if (this.inventory != null && this.inventory.isEmpty() == false)
 		{
-			for (final Entry<String, HashSet<Hash>> items : this.inventory.entrySet())
+			for (final Entry<String, LinkedHashSet<Hash>> items : this.inventory.entrySet())
 			{
 				final Class<?> clazz = Serialization.getInstance().getClassForId(items.getKey());
 				for (final Hash item : items.getValue())

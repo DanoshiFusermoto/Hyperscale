@@ -5,6 +5,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Map.Entry;
@@ -31,7 +32,7 @@ public final class InventoryMessage extends Message
 {
 	@JsonProperty("inventory")
 	@DsonOutput(Output.ALL)
-	private HashMap<String, HashSet<Hash>> inventory;
+	private HashMap<String, LinkedHashSet<Hash>> inventory;
 	
 	private volatile transient List<InventoryItem> inventoryItems = null;
 
@@ -64,12 +65,12 @@ public final class InventoryMessage extends Message
 		Numbers.isNegative(end - start, "Delta is negative");
 		Numbers.greaterThan(end - start, Constants.MAX_BROADCAST_INVENTORY_ITEMS, "Items is greater than allowed max of "+Constants.MAX_BROADCAST_INVENTORY_ITEMS);
 
-		this.inventory = new HashMap<String, HashSet<Hash>>();
+		this.inventory = new HashMap<String, LinkedHashSet<Hash>>();
 		int i = 0;
 		for (Hash item : inventory)
 		{
 			if (i >= start)
-				this.inventory.computeIfAbsent(type, t -> new HashSet<>(end-start)).add(item);
+				this.inventory.computeIfAbsent(type, t -> new LinkedHashSet<>(end-start)).add(item);
 			
 			i++;
 			if (i==end)
@@ -84,11 +85,11 @@ public final class InventoryMessage extends Message
 		Hash.notZero(item, "Item has is ZERO");
 		
 		if (this.inventory == null)
-			this.inventory = new HashMap<String, HashSet<Hash>>();
+			this.inventory = new HashMap<String, LinkedHashSet<Hash>>();
 		
 		Numbers.greaterThan(this.inventory.size(), Constants.MAX_BROADCAST_INVENTORY_ITEMS, "Broadcast items greater than allowed max of "+Constants.MAX_BROADCAST_INVENTORY_ITEMS);
 
-		return this.inventory.computeIfAbsent(Serialization.getInstance().getIdForClass(type), t -> new HashSet<>()).add(item);
+		return this.inventory.computeIfAbsent(Serialization.getInstance().getIdForClass(type), t -> new LinkedHashSet<>()).add(item);
 	}
 	
 	public List<InventoryItem> asInventory()
@@ -98,7 +99,7 @@ public final class InventoryMessage extends Message
 			if (this.inventoryItems == null)
 			{
 				final List<InventoryItem> inventoryItems = new ArrayList<InventoryItem>(this.inventory.size());
-				for (final Entry<String, HashSet<Hash>> items : this.inventory.entrySet())
+				for (final Entry<String, LinkedHashSet<Hash>> items : this.inventory.entrySet())
 				{
 					for (final Hash item : items.getValue())
 						inventoryItems.add(new InventoryItem(items.getKey(), item));
@@ -116,7 +117,7 @@ public final class InventoryMessage extends Message
 		final MutableMultimap<Class<? extends Primitive>, Hash> typed = Multimaps.mutable.list.empty();
 		if (this.inventory != null && this.inventory.isEmpty() == false)
 		{
-			for (final Entry<String, HashSet<Hash>> items : this.inventory.entrySet())
+			for (final Entry<String, LinkedHashSet<Hash>> items : this.inventory.entrySet())
 			{
 				final Class<?> clazz = Serialization.getInstance().getClassForId(items.getKey());
 				for (final Hash item : items.getValue())

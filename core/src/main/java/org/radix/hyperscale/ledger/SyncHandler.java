@@ -1764,9 +1764,6 @@ public class SyncHandler implements Service
 		this.lock.lock();
 		try
 		{
-			// Reset the ledger store state (inventories, caches, etc)
-			this.context.getLedger().getLedgerStore().reset();
-
 			// Send a SyncAcquiredEvent to all listeners.  SyncAcquiredEvent listeners MUST be synchronous listeners!
 			this.context.getEvents().post(new SyncAcquiredEvent(this.syncHead, this.syncAccumulator, this.atoms.values(), this.stateVoteCollectors.values()));
 		

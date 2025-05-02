@@ -304,11 +304,6 @@ public class LedgerStore extends DatabaseStore implements LedgerProvider
 	@Override
 	public void flush() throws DatabaseException  { /* Not used */ }
 	
-	void reset()
-	{
-		this.primitivesInventory.clear();
-	}
-
 	// PRIMITIVES //
 	public OperationStatus delete(final Hash hash, final Class<? extends EphemeralPrimitive> primitive) throws IOException
 	{
@@ -1367,6 +1362,9 @@ public class LedgerStore extends DatabaseStore implements LedgerProvider
 				
 			items.add(inventoryRecord);
 		}
+		
+		if (items.isEmpty() == false)
+			items.sort((i1, i2) -> Long.compare(i1.witnessedAt, i2.witnessedAt));
 		
 		return Collections.unmodifiableList(items);
 	}
