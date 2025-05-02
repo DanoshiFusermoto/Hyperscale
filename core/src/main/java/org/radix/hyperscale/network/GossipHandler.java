@@ -23,6 +23,7 @@ import org.eclipse.collections.api.factory.Sets;
 import org.eclipse.collections.api.map.MutableMap;
 import org.eclipse.collections.api.multimap.Multimap;
 import org.eclipse.collections.api.multimap.MutableMultimap;
+import org.eclipse.collections.api.multimap.list.MutableListMultimap;
 import org.eclipse.collections.api.multimap.set.MutableSetMultimap;
 import org.eclipse.collections.api.set.MutableSet;
 import org.eclipse.collections.impl.factory.Multimaps;
@@ -419,22 +420,6 @@ public class GossipHandler implements Service
 				this.lastQueueSizeWarn = System.currentTimeMillis();
 			}
 
-			try
-			{
-				if (GossipHandler.this.context.getNode().isSynced() == false)
-				{
-					GossipHandler.this.eventQueue.clear();
-					Thread.sleep(1000);
-					return;
-				}
-			}
-			catch (InterruptedException e) 
-			{
-		        Thread.currentThread().interrupt();
-		        gossipLog.warn(GossipHandler.this.context.getName()+": Gossip sleep interrupted, continuing", e);
-		        return;
-		    }
-				
 			_processGossipEvents();
 		}
 
@@ -804,12 +789,14 @@ public class GossipHandler implements Service
 		{
 			while((event = this.eventQueue.poll(nextPollTimer, TimeUnit.MILLISECONDS)) != null)
 			{
-				if (this.context.getNode().isSynced() == false)
-					break;
-				
-				if (event.getMessage() instanceof InventoryMessage inventoryMessage)
+				// No not process inventory & items only if local instance is not in sync as dont need 
+				// them anymore and re-syncing is currently handled in a different pipeline.
+				//
+				// For remote instances requesting items, process them as not doing so would cause a 
+				// disconnection and the remote instance would have to locate them elsewhere, causing latency.
+				if (event.getMessage() instanceof InventoryMessage inventoryMessage && this.context.getNode().isSynced())
 					inventory(inventoryMessage, event.getConnection());
-				else if (event.getMessage() instanceof ItemsMessage itemsMessage)
+				else if (event.getMessage() instanceof ItemsMessage itemsMessage && this.context.getNode().isSynced())
 					received(itemsMessage, event.getConnection());
 				else if (event.getMessage() instanceof GetItemsMessage getItemsMessage)
 					fetch(getItemsMessage, event.getConnection());
@@ -1116,7 +1103,7 @@ public class GossipHandler implements Service
 				gossipLog.warn(this.context.getName()+": Received un-normalized fetch from "+connection.toString());
 			
 			final List<Primitive> fetched = new ArrayList<Primitive>(inventory.size()); 
-			final MutableSetMultimap<Class<? extends Primitive>, Hash> itemsByType = Multimaps.mutable.set.empty();
+			final MutableListMultimap<Class<? extends Primitive>, Hash> itemsByType = Multimaps.mutable.list.empty();
 			inventory.forEach(item -> itemsByType.put(item.getType(), item.getHash()));
 			
 			for (final Class<? extends Primitive> type : itemsByType.keySet())
@@ -1271,8 +1258,8 @@ public class GossipHandler implements Service
 			int cacheMisses = 0;
 			boolean isNormalized = true;
 			final List<InventoryItem> inventory = message.asInventory();
-			final Set<InventoryItem> required = Sets.mutable.<InventoryItem>withInitialCapacity(inventory.size());
-			final MutableSetMultimap<Class<? extends Primitive>, Hash> itemsByType = Multimaps.mutable.set.empty();
+			final Set<InventoryItem> required = new LinkedHashSet<InventoryItem>(inventory.size());
+			final MutableListMultimap<Class<? extends Primitive>, Hash> itemsByType = Multimaps.mutable.list.empty();
 			
 			// Sort to types for efficient inventory processing
 			for (int i = 0 ; i < inventory.size() ; i++)
@@ -1533,7 +1520,7 @@ public class GossipHandler implements Service
     				{
     					if (gossipRequestTask.isFinished() == false && gossipRequestTask.isCancelled() == false)
     					{
-    						if (gossipRequestTask.cancel() == true && gossipLog.hasLevel(Logging.INFO))
+    						if (gossipRequestTask.cancel() && gossipLog.hasLevel(Logging.INFO))
     							gossipLog.info(GossipHandler.this.context.getName()+": Cancelled pending gossip task with remaining items "+gossipRequestTask.numRemaining()+" from "+event.getConnection());
     					}
     				}
@@ -1561,17 +1548,17 @@ public class GossipHandler implements Service
     		try
     		{
 				GossipHandler.this.broadcastQueue.clear();
-				GossipHandler.this.eventQueue.clear();
 				GossipHandler.this.itemSources.clear();
 				GossipHandler.this.toRequest.clear();
 				GossipHandler.this.itemsRequested.clear();
 	
-				for (final GossipRequestTask requestTask : GossipHandler.this.requestTasks.valuesView())
+				final List<GossipRequestTask> requestTasks = GossipHandler.this.requestTasks.valuesView().toList();
+				for (final GossipRequestTask requestTask : requestTasks)
 				{
 					if (requestTask.isCancelled() == false)
 					{
 						if (requestTask.cancel())
-							gossipLog.warn(GossipHandler.this.context.getName()+": Cancelled GossipTask "+hashCode()+" on sync change with "+requestTask.numRemaining()+"/"+requestTask.numRequested()+" "+requestTask.getRemaining()+" for "+requestTask.getConnection());
+							gossipLog.warn(GossipHandler.this.context.getName()+": Cancelled GossipTask "+requestTask.hashCode()+" on sync change with "+requestTask.numRemaining()+"/"+requestTask.numRequested()+" "+requestTask.getRemaining()+" for "+requestTask.getConnection());
 					}
 				}
 				GossipHandler.this.requestTasks.clear();
