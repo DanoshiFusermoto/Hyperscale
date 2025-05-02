@@ -380,8 +380,8 @@ public final class StateHandler implements Service
 					final int numShardGroups = StateHandler.this.context.getLedger().numShardGroups(epoch);
 					ShardGroupID remoteShardGroupID = ShardMapper.toShardGroup(connection.getNode().getIdentity(), numShardGroups);
 					
-					final Set<Hash> deferredStateCertificateInventory = new HashSet<Hash>();
-					final Set<Hash> deferredStateInputInventory = new HashSet<Hash>();
+					final Set<Hash> deferredStateCertificateInventory = new LinkedHashSet<Hash>();
+					final Set<Hash> deferredStateInputInventory = new LinkedHashSet<Hash>();
 					StateHandler.this.context.getLedger().getAtomHandler().getAll().forEach(pa -> {
 						for (final StateCertificate sc : pa.getOutputs(StateCertificate.class))
 						{

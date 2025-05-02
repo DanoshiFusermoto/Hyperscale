@@ -272,7 +272,7 @@ public final class StatePool implements Service
 					if (statePoolLog.hasLevel(Logging.DEBUG))
 						statePoolLog.debug(StatePool.this.context.getName()+": State pool inventory request from "+connection);
 					
-					final Set<Hash> deferredStateVoteBlockInventory = new HashSet<Hash>();
+					final Set<Hash> deferredStateVoteBlockInventory = new LinkedHashSet<Hash>();
 					StatePool.this.context.getLedger().getAtomHandler().getAll().forEach(pa -> {
 						if (pa.getStatus().after(State.NONE) == false)
 							return;
