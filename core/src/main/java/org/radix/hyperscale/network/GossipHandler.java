@@ -838,14 +838,11 @@ public class GossipHandler implements Service
 				if (connections.isEmpty())
 					break;
 				
-				final Set<AbstractConnection> connectionsWithItem = this.itemSources.get(item);
 				final Iterator<AbstractConnection> connectionsIterator = connections.iterator();
 				while(connectionsIterator.hasNext())
 				{
 					final AbstractConnection connection = connectionsIterator.next();
-					if (connectionsWithItem.contains(connection) == false)
-						continue;
-
+					
 					// Connection went stale during this request iteration
 					if (connection.isStale())
 					{
@@ -853,9 +850,17 @@ public class GossipHandler implements Service
 						continue;
 					}
 					
+					// Max iteration quota reached for this connection
+					int queuedRequests = nextToRequest.getOrDefault(connection, Collections.emptyList()).size();					
+					if (queuedRequests >= Constants.MAX_REQUEST_INVENTORY_ITEMS)
+					{
+						connectionsIterator.remove();
+						continue;
+					}
+					
 					// Max quota reached for this connection
-					int outstandingRequests = (connection.pendingRequests() * connection.pendingRequests()) + connection.pendingWeight() + nextToRequest.getOrDefault(connection, Collections.emptyList()).size();
-					if (outstandingRequests >= Constants.MAX_REQUEST_INVENTORY_ITEMS)
+					int outstandingRequests = MathUtils.sqr(connection.pendingRequests()) + connection.pendingWeight() + queuedRequests;
+					if (outstandingRequests >= Constants.MAX_REQUEST_INVENTORY_ITEMS_TOTAL)
 					{
 						connectionsIterator.remove();
 						continue;
@@ -875,9 +880,16 @@ public class GossipHandler implements Service
 						}
 
 						if (connectionAvailable == false)
+						{
+							connectionsIterator.remove();
 							continue;
+						}
 					}
-					
+
+					// Connection has not signalled it has the item
+					if (this.itemSources.containsKeyAndValue(item, connection) == false)
+						continue;
+
 					// Add item to request inventory for this connection
 					nextToRequest.computeIfAbsent(connection, c -> new ArrayList<InventoryItem>());
 					nextToRequest.get(connection).add(item);

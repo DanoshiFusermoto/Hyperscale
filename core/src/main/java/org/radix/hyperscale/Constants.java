@@ -29,7 +29,8 @@ public final class Constants
 	public static final int 	BROADCAST_POLL_TIMEOUT = 50;
 	public static final int 	MAX_PUSH_INVENTORY_ITEMS = 32;
 	public static final int 	MAX_BROADCAST_INVENTORY_ITEMS = 128;
-	public static final int 	MAX_REQUEST_INVENTORY_ITEMS = 128;
+	public static final int 	MAX_REQUEST_INVENTORY_ITEMS = 64;
+	public static final int 	MAX_REQUEST_INVENTORY_ITEMS_TOTAL = 512;
 	public static final int 	MAX_FETCH_INVENTORY_ITEMS = 32;
 	public static final int 	INVENTORY_TRANSMIT_AT_SIZE = 1<<20;	// Transmit if size is 1M or greater
 	public static final int 	MIN_GOSSIP_REQUEST_TIMEOUT_MILLISECONDS = 5000;
@@ -46,6 +47,15 @@ public final class Constants
 	public static final int 	PROPOSAL_PHASE_TIMEOUT_ROUNDS = 6;
 	public static final int 	VOTE_PHASE_TIMEOUT_ROUNDS = 6;
 	public static final int 	TRANSITION_PHASE_TIMEOUT_ROUNDS = 2;
+	
+	// STATE
+	public static final boolean STATE_VOTE_UNGROUPED = false;
+	public final static int 	MAX_ATOM_TO_STATE_PROVISION = 256;
+	public final static int 	MAX_STATE_CERTIFICATES_TO_PROCESS = 256;
+	public final static int		MAX_STATE_VOTE_COLLECTOR_ITEMS = 256;
+	
+	// EXECUTION
+	public static final boolean SKIP_EXECUTION_SIGNALS = false;
 
 	// PRIMITIVES
 	public static final int 	PRIMITIVE_STALE = 60;
