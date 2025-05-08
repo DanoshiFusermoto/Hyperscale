@@ -464,6 +464,13 @@ public abstract class AbstractConnection extends Serializable implements Compara
 		return this.node.isSynced();
 	}
 
+	@JsonProperty("drift")
+	@DsonOutput(Output.API)
+	private int getDrift()
+	{
+		return this.node.getDrift();
+	}
+
 	@JsonProperty("direction")
 	@DsonOutput(Output.API)
 	public final Direction getDirection()

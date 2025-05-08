@@ -56,6 +56,13 @@ public class Node extends BasicObject
 	@DsonOutput(value = {Output.API, Output.WIRE})
 	private volatile boolean synced;
 
+	/**
+	 * The nodes perceived drift (milliseconds) within its shard group
+	 */
+	@JsonProperty("drift")
+	@DsonOutput(value = {Output.API, Output.WIRE})
+	private volatile int drift;
+
 	@JsonProperty("identity")
 	@DsonOutput(Output.ALL)
 	private Identity identity;
@@ -73,6 +80,7 @@ public class Node extends BasicObject
 		this.apiPort = 0;
 		this.identity = null;
 		this.synced = false;
+		this.drift = 0;
 		this.services = Collections.emptySet();
 	}
 
@@ -91,6 +99,7 @@ public class Node extends BasicObject
 		this.websocketPort = node.getWebsocketPort();
 		this.identity = node.getIdentity();
 		this.synced = node.isSynced();
+		this.drift = node.getDrift();
 		this.services = Collections.unmodifiableSet(new LinkedHashSet<Services>(node.getServices()));
 	}
 
@@ -189,6 +198,17 @@ public class Node extends BasicObject
 	public final void setSynced(boolean synced)
 	{
 		this.synced = synced;
+	}
+	
+	// DRIFT //
+	public final int getDrift()
+	{
+		return this.drift;
+	}
+	
+	public final void setDrift(long drift)
+	{
+		this.drift = (int) drift;
 	}
 
 	public Identity getIdentity()
