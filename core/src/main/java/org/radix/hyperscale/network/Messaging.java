@@ -31,6 +31,8 @@ import org.radix.hyperscale.network.messages.NodeMessage;
 import org.radix.hyperscale.node.Node;
 import org.radix.hyperscale.time.Time;
 
+import io.netty.util.internal.ThreadLocalRandom;
+
 public class Messaging
 {
 	private static final Logger messagingLog = Logging.getLogger("messaging");
@@ -211,11 +213,17 @@ public class Messaging
 						}
 					};
 					
-					int simulatedNetworkLatency = Messaging.this.context.getConfiguration().get("network.latency", 0);
-					if (simulatedNetworkLatency == 0 && (transportParameters == null || transportParameters.async() == false))
+					final int simulatedNetworkLatency = Messaging.this.context.getConfiguration().get("network.latency", 0);
+					final int simulatedNetworkLatencyJitter;
+					if (simulatedNetworkLatency > 0)
+						simulatedNetworkLatencyJitter = ThreadLocalRandom.current().nextInt(Messaging.this.context.getConfiguration().get("network.latency.jitter", 0)) - (Messaging.this.context.getConfiguration().get("network.latency.jitter", 0)/2);
+					else
+						simulatedNetworkLatencyJitter = 0;
+					
+					if (simulatedNetworkLatency + simulatedNetworkLatencyJitter > 0 && (transportParameters == null || transportParameters.async() == false))
 						Executor.getInstance().submit(executor);
 					else
-						Executor.getInstance().schedule(executor, simulatedNetworkLatency, TimeUnit.MILLISECONDS);
+						Executor.getInstance().schedule(executor, simulatedNetworkLatency + simulatedNetworkLatencyJitter, TimeUnit.MILLISECONDS);
 				}
 			}
 		}

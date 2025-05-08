@@ -342,18 +342,6 @@ public final class Network implements Service
 					    		{
 					    			Network.this.connecting.unlock();
 					    		}
-								
-				    			// Wait 1 second between connections
-								try
-								{
-									Thread.sleep(1000);
-								}
-								catch (InterruptedException ex)
-								{
-							        Thread.currentThread().interrupt();
-							        networkLog.warn(Network.this.context.getName()+": Discovery / rotation delay interval interrupted", ex);
-							        return;
-								}
 							}
 						}
 						else if (networkLog.hasLevel(Logging.DEBUG))
