@@ -38,15 +38,15 @@ public class ProgressRound
 	private volatile State state;
 	private volatile long startedAt;
 	private volatile long proposeStartAt;
-	private volatile long proposeTimeoutAt;
 	private volatile long transitionStartAt;
 	private volatile long transitionUpdateAt;
 	private volatile long voteStartAt;
-	private volatile long voteTimeoutAt;
 	private volatile long completedAt;
 
-	private volatile long driftMilli;
-	private volatile long phaseMaturityAt;
+	private final List<Long> driftSamples;
+	
+	private volatile long phaseLatentAt;
+	private volatile long phaseTimeoutAt;
 
 	private final Map<Hash, BlockHeader> proposals;
 	private final Set<Identity> proposed;
@@ -77,17 +77,17 @@ public class ProgressRound
 		
 		this.state = State.COMPLETED;
 		this.clock = head.getHeight();
-		this.driftMilli = 0;
+		
+		this.driftSamples = new ArrayList<Long>();
+
 		this.totalVotePower = 1;
 		this.epoch = Epoch.from(this.clock / Ledger.definitions().proposalsPerEpoch());
 
-		this.voteTimeoutAt = 0;
 		this.voteWeight = this.totalVotePower;
 		this.voteThreshold = this.totalVotePower;
 		this.votes = Collections.emptyMap();
 
 		this.primariesProposed = 1;
-		this.proposeTimeoutAt = 0;
 		this.proposed = Sets.immutable.of(head.getProposer()).castToSet();
 		this.proposers = Sets.immutable.of(head.getProposer()).castToSet();
 		this.proposals = Maps.immutable.of(head.getHash(), head).castToMap();
@@ -107,14 +107,15 @@ public class ProgressRound
 
 		this.state = State.NONE;
 		this.clock = clock;
-		this.driftMilli = 0;
+		
+		this.driftSamples = new ArrayList<Long>();
+
 		this.totalVotePower = totalVotePower;
 		this.epoch = Epoch.from(clock / Ledger.definitions().proposalsPerEpoch());
 
 		Numbers.isNegative(proposersVotePower, "Primary proposers vote power is negative");
 		Numbers.isNegative(totalVotePower, "Total vote power is negative");
 		
-		this.voteTimeoutAt = 0;
 		this.voteWeight = 0;
 		this.voteThreshold = ValidatorHandler.twoFPlusOne(totalVotePower);
 		this.votes = Maps.mutable.<Identity, BlockVote>ofInitialCapacity(8).asSynchronized();
@@ -123,7 +124,6 @@ public class ProgressRound
 		Numbers.isZero(proposers.size(), "Primary proposers is empty");
 
 		this.primariesProposed = 0;
-		this.proposeTimeoutAt = 0;
 		this.proposed = Sets.mutable.<Identity>ofInitialCapacity(proposers.size()).asSynchronized();
 		this.proposers = Sets.immutable.<Identity>ofAll(proposers).castToSet();
 		this.proposals = Maps.mutable.<Hash, BlockHeader>ofInitialCapacity(proposers.size()).asSynchronized();
@@ -136,17 +136,31 @@ public class ProgressRound
 		return this.clock;
 	}
 
-	public long driftMillis() 
+	public int driftMillis() 
 	{
-		if (this.startedAt == 0 || this.driftMilli == 0)
+		if (this.startedAt == 0 || this.driftSamples.isEmpty())
 			return 0;
+
+		Collections.sort(this.driftSamples);
 		
-		return (this.driftMilli - this.startedAt) / 2;
+		long medianValue;
+		int middleSlot = this.driftSamples.size() / 2;
+		if (this.driftSamples.size() % 2 == 0)
+            medianValue = (long) ((this.driftSamples.get(middleSlot - 1) + this.driftSamples.get(middleSlot)) / 2.0);
+        else
+        	medianValue = this.driftSamples.get(middleSlot);
+		
+		return (int) ((medianValue - this.proposeStartAt) / 2);
 	}
 	
-	public long phaseMaturityAt()
+	public long phaseLatentAt()
 	{
-		return this.phaseMaturityAt;
+		return this.phaseLatentAt;
+	}
+
+	public long phaseTimeoutAt()
+	{
+		return this.phaseTimeoutAt;
 	}
 
 	public Epoch epoch() 
@@ -199,32 +213,33 @@ public class ProgressRound
 		if (this.startedAt == 0)
 			throw new IllegalStateException("Progress round "+this.clock+" is not started");
 		
-		final long viewLatencyAdjustment = 1; // MathUtils.sqr(clock()-(getView().getHeight()+1));
 		if (this.state.equals(State.NONE))
 		{
 			this.state = State.PROPOSING;
 			this.proposeStartAt = Time.getSystemTime();
-			this.phaseMaturityAt = this.proposeStartAt + (Ledger.definitions().roundInterval() / ProgressRound.State.values().length) + viewLatencyAdjustment;
-			this.proposeTimeoutAt = this.proposeStartAt + Ledger.definitions().roundInterval() + viewLatencyAdjustment;
+			this.phaseLatentAt = this.proposeStartAt + (Ledger.definitions().roundInterval() / 3);
+			this.phaseTimeoutAt = this.proposeStartAt + Ledger.definitions().roundInterval();
 		}
 		else if (this.state.equals(State.PROPOSING))
 		{
 			this.state = State.TRANSITION;
 			this.transitionStartAt = Time.getSystemTime();
-			this.phaseMaturityAt = this.transitionStartAt + (Ledger.definitions().roundInterval() / ProgressRound.State.values().length) + viewLatencyAdjustment;
-			this.transitionUpdateAt = this.phaseMaturityAt;
+			this.phaseLatentAt = this.transitionStartAt + (Ledger.definitions().roundInterval() / ProgressRound.State.values().length);
+			this.phaseTimeoutAt = Long.MAX_VALUE;
+			this.transitionUpdateAt = this.phaseLatentAt;
 		}
 		else if (this.state.equals(State.TRANSITION))
 		{
 			this.state = State.VOTING;
 			this.voteStartAt = Time.getSystemTime();
-			this.phaseMaturityAt = this.voteStartAt + (Ledger.definitions().roundInterval() / ProgressRound.State.values().length) + viewLatencyAdjustment;
-			this.voteTimeoutAt = this.voteStartAt + Ledger.definitions().roundInterval() + viewLatencyAdjustment;
+			this.phaseLatentAt = this.voteStartAt + (Ledger.definitions().roundInterval() / 3);
+			this.phaseTimeoutAt = this.voteStartAt + Ledger.definitions().roundInterval();
 		}
 		else if (this.state.equals(State.VOTING))
 		{
 			this.state = State.COMPLETED;
-			this.phaseMaturityAt = 0;
+			this.phaseLatentAt = Long.MAX_VALUE;
+			this.phaseTimeoutAt = Long.MAX_VALUE;
 			this.completedAt = Time.getSystemTime();
 		}
 		else
@@ -239,13 +254,6 @@ public class ProgressRound
 			throw new IllegalStateException("Vote already cast by "+vote.getOwner().getIdentity()+" for progress round "+this);
 		
 		this.voteWeight += vote.getWeight();
-		
-		// TODO f+1
-		if (vote.getOwner().getIdentity().equals(this.context.getNode().getIdentity()) == false)
-		{
-			if (this.driftMilli == 0 || vote.witnessedAt() < this.driftMilli)
-				this.driftMilli = vote.witnessedAt();
-		}
 	}
 	
 	public long getVoteWeight() 
@@ -260,7 +268,10 @@ public class ProgressRound
 
 	public boolean isVoteCompleted()
 	{
-		return this.voteWeight >= this.voteThreshold && Time.getSystemTime() >= this.phaseMaturityAt;
+		if (this.voteWeight >= this.totalVotePower)
+			return true;
+
+		return this.voteWeight >= this.voteThreshold && Time.getSystemTime() >= this.phaseLatentAt;
 	}
 
 	public boolean isVoteLatent()
@@ -268,15 +279,15 @@ public class ProgressRound
 		if (this.voteStartAt == 0)
 			return false;
 		
-		return Time.getSystemTime() >= this.phaseMaturityAt;
+		return Time.getSystemTime() >= this.phaseLatentAt;
 	}
 
 	public boolean isVoteTimedout()
 	{
-		if (this.voteTimeoutAt == 0)
+		if (this.voteStartAt == 0)
 			return false;
 		
-		return Time.getSystemTime() >= this.voteTimeoutAt;
+		return Time.getSystemTime() >= this.phaseTimeoutAt;
 	}
 	
 	public boolean hasVoted(final Identity identity) 
@@ -289,7 +300,7 @@ public class ProgressRound
 		if (this.transitionStartAt == 0)
 			return false;
 
-		return Time.getSystemTime() >= this.phaseMaturityAt;
+		return Time.getSystemTime() >= this.phaseLatentAt;
 	}
 
 	public boolean canTransitionUpdate()
@@ -319,6 +330,9 @@ public class ProgressRound
 		
 		if (this.proposers.contains(proposal.getProposer()))
 			this.primariesProposed++;
+		
+		if (proposal.getProposer().equals(this.context.getNode().getIdentity()) == false)
+			this.driftSamples.add(proposal.getTimestamp());
 		
 		return true;
 	}
@@ -365,7 +379,10 @@ public class ProgressRound
 
 	public boolean isProposalsCompleted()
 	{
-		return this.proposalWeight > this.proposalThreshold && Time.getSystemTime() >= this.phaseMaturityAt;
+		if (this.proposalWeight >= this.totalVotePower)
+			return true;
+		
+		return this.proposalWeight >= this.proposalThreshold && Time.getSystemTime() >= this.phaseLatentAt;
 	}
 
 	public boolean isProposalsLatent()
@@ -373,15 +390,15 @@ public class ProgressRound
 		if (this.proposeStartAt == 0)
 			return false;
 
-		return Time.getSystemTime() >= this.phaseMaturityAt;
+		return Time.getSystemTime() >= this.phaseLatentAt;
 	}
 
 	public boolean isProposalsTimedout()
 	{
-		if (this.proposeTimeoutAt == 0)
+		if (this.proposeStartAt == 0)
 			return false;
 		
-		return Time.getSystemTime() >= this.proposeTimeoutAt;
+		return Time.getSystemTime() >= this.phaseTimeoutAt;
 	}
 
 	public Set<Identity> getProposers()
