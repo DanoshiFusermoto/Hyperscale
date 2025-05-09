@@ -29,8 +29,6 @@ import com.google.common.primitives.UnsignedBytes;
 
 public final class StateVoteCollector
 {
-	static final boolean DEBUG_SIMPLE_UNGROUPED = true;
-	
 	public static final boolean MERKLE_AUDITS_DISABLED = Boolean.getBoolean("merkle.audit.disabled");
 	static 
 	{
@@ -76,10 +74,11 @@ public final class StateVoteCollector
 
 	StateVoteCollector(final Context context, final Hash block, final Collection<PendingState> states, long votePower, long voteThreshold)
 	{
-		Objects.requireNonNull(states, "Pending states is null");
-		Numbers.isZero(states.size(), "Pending states is empty");
 		Objects.requireNonNull(block, "Block is null");
 		Hash.notZero(block, "Block is ZERO");
+		Objects.requireNonNull(states, "Pending states is null");
+		Numbers.isZero(states.size(), "Pending states is empty");
+//		Numbers.greaterThan(states.size(), Constants.MAX_STATE_VOTE_COLLECTOR_ITEMS, "Pending states exceeds limit of "+Constants.MAX_STATE_VOTE_COLLECTOR_ITEMS);
 
 		this.context = Objects.requireNonNull(context, "Context is null");
 		this.block = block;

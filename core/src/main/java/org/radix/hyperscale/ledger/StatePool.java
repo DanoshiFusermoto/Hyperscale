@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -16,6 +15,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
+import org.apache.commons.lang3.mutable.MutableBoolean;
 import org.eclipse.collections.api.factory.Maps;
 import org.eclipse.collections.api.factory.Sets;
 import org.radix.hyperscale.Constants;
@@ -56,7 +56,6 @@ import org.radix.hyperscale.network.GossipFetcher;
 import org.radix.hyperscale.network.GossipFilter;
 import org.radix.hyperscale.network.GossipInventory;
 import org.radix.hyperscale.network.GossipReceiver;
-import org.radix.hyperscale.network.messages.InventoryMessage;
 import org.radix.hyperscale.time.Time;
 
 import com.google.common.collect.HashMultimap;
@@ -653,8 +652,10 @@ public final class StatePool implements Service
 		final long votePower = this.context.getLedger().getValidatorHandler().getVotePower(epoch, this.context.getNode().getIdentity());
 		final long voteThreshold = this.context.getLedger().getValidatorHandler().getVotePowerThreshold(epoch, localShardGroupID);
 
-		// Create state vote collectors //
-		final Multimap<ShardGroupID, PendingState> atomsByShardGroup = LinkedHashMultimap.create();
+		// Collate pending states into buckets //
+		final MutableBoolean spanningStateSet = new MutableBoolean(false);
+		final List<PendingState> pendingStates = new ArrayList<PendingState>();
+		final Multimap<Long, PendingState> pendingStateBuckets = LinkedHashMultimap.create();
 		for (final Hash atom : pendingBlock.getHeader().getInventory(InventoryType.ACCEPTED))
 		{
 			final PendingAtom pendingAtom = pendingBlock.get(InventoryType.ACCEPTED, atom);
@@ -667,30 +668,40 @@ public final class StatePool implements Service
 			pendingAtom.forStates(StateLockMode.WRITE, pendingState -> {
 				final ShardGroupID provisionShardGroupID = ShardMapper.toShardGroup(pendingState.getAddress(), numShardGroups);
 				if (provisionShardGroupID.equals(localShardGroupID) == false)
+				{
+					spanningStateSet.setTrue();
 					return;
-
-				if (StateVoteCollector.DEBUG_SIMPLE_UNGROUPED)
-					atomsByShardGroup.put(ShardGroupID.from(0), pendingState);
-				else
-					atomsByShardGroup.put(provisionShardGroupID, pendingState);
+				}
+				
+				pendingStates.add(pendingState);
 			});
+			
+			if (Constants.STATE_VOTE_UNGROUPED || spanningStateSet.isFalse())
+				pendingStateBuckets.putAll(0l, pendingStates);
+			else
+				pendingStateBuckets.putAll(1l, pendingStates);
+			
+			pendingStates.clear();
+			spanningStateSet.setFalse();
 		}
 
-		for (final ShardGroupID shardGroupID : atomsByShardGroup.keySet())
+		// Create state vote collectors //
+		for (final long bucketID : pendingStateBuckets.keySet())
 		{
-			final List<PendingState> stateVoteCollectorStates = new ArrayList<PendingState>(atomsByShardGroup.get(shardGroupID));
-			if (stateVoteCollectorStates.isEmpty() == false)
+			final Collection<PendingState> pendingStateBucket = pendingStateBuckets.get(bucketID);
+			if (pendingStateBucket.isEmpty() == false)
 			{
 				if (statePoolLog.hasLevel(Logging.DEBUG))
-					statePoolLog.debug(this.context.getName()+": Creating StateVoteCollector for proposal "+pendingBlock.toString()+" with state keys "+stateVoteCollectorStates.stream().map(sk -> sk.getAddress()).collect(Collectors.toList()));
-				
-				final StateVoteCollector stateVoteCollector = new StateVoteCollector(this.context, pendingBlock.getHash(), stateVoteCollectorStates, votePower, voteThreshold);
-				for (final PendingState pendingState : stateVoteCollectorStates)
+					statePoolLog.debug(this.context.getName()+": Creating StateVoteCollector for proposal "+pendingBlock.toString()+" with state keys "+pendingStateBucket.stream().map(sk -> sk.getAddress()).collect(Collectors.toList()));
+				else 
+					statePoolLog.log(this.context.getName()+": Creating StateVoteCollector for proposal "+pendingBlock.toString()+" with "+pendingStateBucket.size()+" state keys");
+
+				final StateVoteCollector stateVoteCollector = new StateVoteCollector(this.context, pendingBlock.getHash(), pendingStateBucket, votePower, voteThreshold);
+				for (final PendingState pendingState : pendingStateBucket)
 					pendingState.setStateVoteCollector(stateVoteCollector);
 				this.stateVoteCollectors.put(pendingBlock.getHash(), stateVoteCollector);
 				
 				this.context.getMetaData().increment("ledger.pool.state.vote.collectors.total");
-				stateVoteCollectorStates.clear();
 			}
 		}
 	}
