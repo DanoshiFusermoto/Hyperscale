@@ -933,7 +933,7 @@ public class PendingBranch
 	            throw new IllegalStateException("Unexpected INTR super in sequence");
 	        
 	        // Explicitly set as committable
-	        if (prev.isCommittable())
+	        if (prev.isCommittable() || curr.isCommittable())
 	        	return prev;
 
 	        // Must be consecutive
@@ -952,18 +952,6 @@ public class PendingBranch
 	        // Case: SOFT -> HARD only
 	        if (prevIsSoft && currIsHard)
 	            return prev;
-
-/*	        // Case: SOFT -> SOFT -> SOFT or HARD
-	        if (prevIsSoft && currIsSoft && i+1 < supers.size()) 
-	        {
-	            final PendingBlock third = supers.get(i+1);
-	            if (curr.getHeight()+1 == third.getHeight()) 
-	            {
-	                final boolean thirdValid = third.isSuper() == SUPR.SOFT || third.isSuper() == SUPR.HARD;
-	                if (thirdValid)
-	                    return prev;
-	            }
-	        }*/
 	    }
 
 	    return null;
