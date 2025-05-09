@@ -173,7 +173,7 @@ public abstract class Spammer extends Executable
 	
 	private enum AtomCompletionStatus
 	{
-		COMPLETED, TIMEDOUT
+		NONE, COMPLETED, TIMEDOUT
 	}
 	
 	void submit(final Context context, final Atom atom) throws Exception	
@@ -298,29 +298,31 @@ public abstract class Spammer extends Executable
 		final long start = System.currentTimeMillis();
 		final List<Atom> pendingAtoms = new ArrayList<Atom>(this.submittedAtoms);
 		final Map<Hash, AtomCompletionStatus> statuses = new HashMap<>();
-		final List<Future<SubstateSearchResponse>> searchFutures = new ArrayList<>();
 		
+		// Wait for atoms to be completed with either a certificate or timeout
+		// TODO quirk when substate searching atoms is that an initial substate is 
+		// 		created when it is accepted, then updated when completed.
+		//		Therefore we may need to query it multiple times as initial searches
+		//		may return the "accepted" substate and not the completed.
 		while(pendingAtoms.isEmpty() == false)
 		{
 			long iteration = System.currentTimeMillis();
-			
-			searchFutures.clear();
+			statuses.clear();
 			
 			for (final Atom atom : pendingAtoms)
 			{
 				final SubstateSearchQuery query = new SubstateSearchQuery(StateAddress.from(Atom.class, atom.getHash()));
 				final long timeout = Constants.ATOM_ACCEPT_TIMEOUT_SECONDS + (long) (Constants.ATOM_ACCEPT_TIMEOUT_SECONDS * Math.log(atom.getManifestSize()));
+				
 				final Future<SubstateSearchResponse> response = Context.get().getLedger().get(query, timeout, TimeUnit.SECONDS);
-				searchFutures.add(response);
-			}
-			
-			for (final Future<SubstateSearchResponse> searchFuture : searchFutures)
-			{
-				final SubstateCommit result = searchFuture.get().getResult();
-				if (result != null && result.getSubstate().get(NativeField.CERTIFICATE) != null)
-					statuses.put(searchFuture.get().getQuery().getAddress().scope(), AtomCompletionStatus.COMPLETED);
-				else if (System.currentTimeMillis() > start + TimeUnit.SECONDS.toMillis(Constants.ATOM_ACCEPT_TIMEOUT_SECONDS))
-					statuses.put(searchFuture.get().getQuery().getAddress().scope(), AtomCompletionStatus.TIMEDOUT);
+				final SubstateCommit result = response.get().getResult();
+
+				if (result == null && System.currentTimeMillis() > start + TimeUnit.SECONDS.toMillis(timeout))
+					statuses.put(query.getAddress().scope(), AtomCompletionStatus.TIMEDOUT);
+				else if (result != null && result.getSubstate().get(NativeField.TIMEOUT) != null)
+					statuses.put(query.getAddress().scope(), AtomCompletionStatus.TIMEDOUT);
+				else if (result != null && result.getSubstate().get(NativeField.CERTIFICATE) != null)
+					statuses.put(query.getAddress().scope(), AtomCompletionStatus.COMPLETED);
 			}
 			
 			final Iterator<Atom> atomIterator = pendingAtoms.iterator();

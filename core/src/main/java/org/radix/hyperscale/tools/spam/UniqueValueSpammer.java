@@ -85,16 +85,21 @@ final class UniqueValueSpammer extends Spammer
 					atomShardGroups.add(targetShardGroupID);
 						
 					final int saturation = pluckSaturationInRange();
-					if (isIsolatedShard == false && saturation > 1)
+					if (isIsolatedShard && saturation > 1)
 					{
 						for (int u = 1 ; u < saturation ; u++)
 						{
-							final long extraValue = ThreadLocalRandom.current().nextLong();
+							long extraValue;
+							ShardGroupID shardGroupID;
+							do
+							{
+								extraValue = ThreadLocalRandom.current().nextLong();
+								shardGroupID = ShardMapper.toShardGroup(StateAddress.from(uniqueValueComponentContext, Hash.valueOf(UInt256.from(extraValue))), numShardGroups);
+							}
+							while(shardGroupID.equals(targetShardGroupID) == false);
+
 							final String extraInstruction = uniqueValueComponentContext+"::set(uint256("+extraValue+"), identity('"+signer.getIdentity()+"'))";
 							atomBuilder.push(extraInstruction);
-							
-							final StateAddress uniqueStateAddress = StateAddress.from(uniqueValueComponentContext, Hash.valueOf(UInt256.from(extraValue)));
-							atomShardGroups.add(ShardMapper.toShardGroup(uniqueStateAddress, numShardGroups));
 						}
 					}
 					
