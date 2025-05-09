@@ -50,8 +50,6 @@ import com.google.common.annotations.VisibleForTesting;
 public final class BlockHeader extends Serializable implements Comparable<BlockHeader>, Hashable, Primitive
 {
 	public static final UInt256 MAX_WORK = UInt256.from(new byte[]{(byte)0xff, (byte)0xff, (byte)0xff, (byte)0xff, (byte)0xff, (byte)0xff, (byte)0xff, (byte)0xff});
-	public static final int	MAX_PACKAGES = 16;
-	public static final int	MAX_INVENTORY_TYPE_PRIMITIVES = 4096;
 	
 	public static enum InventoryType
 	{
