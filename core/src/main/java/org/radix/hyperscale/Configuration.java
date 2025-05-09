@@ -67,10 +67,26 @@ public class Configuration extends PersistedConfiguration
 			for (String clKey : commandLineConfigJSON.keySet())
 			{
 				JSONObject clOption = commandLineConfigJSON.getJSONObject(clKey);
+				Option.Builder optionBuilder;
+				
 				if (clOption.has("short"))
-					gnuOptions.addOption(clOption.getString("short"), clKey, clOption.getBoolean("has_arg"),  clOption.optString("desc", ""));
+					optionBuilder = Option.builder(clOption.getString("short")).longOpt(clKey);
 				else
-					gnuOptions.addOption(clKey, clOption.getBoolean("has_arg"),  clOption.optString("desc", ""));
+					optionBuilder = Option.builder(clKey);
+				
+				optionBuilder.desc(clOption.optString("desc", ""));
+				
+				if (clOption.optBoolean("has_arg"))
+					optionBuilder.hasArg();
+				else if (clOption.optBoolean("opt_arg"))
+				{
+					optionBuilder.optionalArg(true);
+					optionBuilder.numberOfArgs(1);
+				}
+				else
+					optionBuilder.hasArg(false);
+				
+				gnuOptions.addOption(optionBuilder.build());
 			}
 			
 			// Using the Apache CommandLine class itself is extremely inefficient if it needs to be queried a lot as it is a List lookup. 
@@ -131,6 +147,11 @@ public class Configuration extends PersistedConfiguration
 		return null;
 	}
 
+	public boolean hasCommandLine(String key)
+	{
+		return this.commandLine.get(key) == null ? false : true;
+	}
+
 	public String getCommandLine(String key)
 	{
 		return getCommandLine(key, null);
@@ -147,7 +168,7 @@ public class Configuration extends PersistedConfiguration
 			return (T) Boolean.TRUE;
 		
 		String value = commandLineOption.getValue();
-		if (_default != null)
+		if (value != null && _default != null)
 		{
 			if (_default instanceof Byte)
 				return (T) Byte.valueOf(value);
@@ -167,6 +188,6 @@ public class Configuration extends PersistedConfiguration
 				return (T) value;
 		}
 
-		return null;
+		return _default;
 	}
 }
