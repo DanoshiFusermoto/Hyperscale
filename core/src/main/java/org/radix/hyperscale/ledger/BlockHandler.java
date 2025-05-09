@@ -1300,7 +1300,7 @@ public class BlockHandler implements Service
 			// Finally if load and latency is such that new views are not being formed, gradually increase the delay
 			final long targetRoundDuration = Math.max(Ledger.definitions().roundInterval(), Configuration.getDefault().get("ledger.liveness.delay", 0));
 			final long roundDelayDuration = (targetRoundDuration-round.getDuration());
-			final long roundDelayAdjustment = round.driftMillis(); // Only adjust if drift is negative (behind)
+			final long roundDelayAdjustment = round.drift();
 			final long adjustedRoundDelayDuration = roundDelayDuration+roundDelayAdjustment;
 			
 			// Within interval bounds
@@ -1481,7 +1481,7 @@ public class BlockHandler implements Service
 									//
 									// Hard supers are only created if the view is being updated for the latest round AND all
 									// votes constituting 2f+1 were received DURING the round
-									if (round.driftMillis() < Math.negateExact(Ledger.definitions().roundInterval()))
+									if (round.drift() < Math.negateExact(Ledger.definitions().roundInterval()))
 										type = SUPR.SOFT;
 									else if (pastRound != round)
 										type = SUPR.SOFT;
@@ -1908,7 +1908,7 @@ public class BlockHandler implements Service
 		if (votePower == 0)
 			return null;
 
-		final BlockVote blockVote = new BlockVote(pendingBlock.getHash(), this.context.getNode().getIdentity().getKey());
+		final BlockVote blockVote = new BlockVote(pendingBlock.getHash(), round.startedAt(), this.context.getNode().getIdentity().getKey());
 		blockVote.sign(this.context.getNode().getKeyPair());
 		if (this.context.getLedger().getLedgerStore().store(blockVote).equals(OperationStatus.SUCCESS))
 		{
@@ -2946,7 +2946,7 @@ public class BlockHandler implements Service
 				blocksLog.fatal(BlockHandler.this.context.getName()+": Failed to add progress round to queue "+event.getProgressRound());
 			
 			if (event.getProgressPhase().equals(ProgressRound.State.COMPLETED))
-				BlockHandler.this.context.getNode().setDrift(event.getProgressRound().driftMillis());
+				BlockHandler.this.context.getNode().setDrift(event.getProgressRound().drift());
 			
 			BlockHandler.this.blockProcessor.signal();
 		}

@@ -136,7 +136,7 @@ public class ProgressRound
 		return this.clock;
 	}
 
-	public int driftMillis() 
+	public int drift() 
 	{
 		if (this.startedAt == 0 || this.driftSamples.isEmpty())
 			return 0;
@@ -196,6 +196,11 @@ public class ProgressRound
 	{
 		return this.startedAt != 0;
 	}
+	
+	long startedAt()
+	{
+		return this.startedAt;
+	}
 
 	/** Terminates this proposal round, fast forwarding to the completed state.
 	 * 
@@ -254,6 +259,9 @@ public class ProgressRound
 			throw new IllegalStateException("Vote already cast by "+vote.getOwner().getIdentity()+" for progress round "+this);
 		
 		this.voteWeight += vote.getWeight();
+		
+		if (vote.getOwner().getIdentity().equals(this.context.getNode().getIdentity()) == false)
+			this.driftSamples.add(vote.progressedAt());
 	}
 	
 	public long getVoteWeight() 
@@ -330,9 +338,6 @@ public class ProgressRound
 		
 		if (this.proposers.contains(proposal.getProposer()))
 			this.primariesProposed++;
-		
-		if (proposal.getProposer().equals(this.context.getNode().getIdentity()) == false)
-			this.driftSamples.add(proposal.getTimestamp());
 		
 		return true;
 	}
@@ -547,7 +552,7 @@ public class ProgressRound
 	{
 		String output = Long.toString(this.clock)+":"+this.view.getHeight();
 		if (this.state.equals(State.COMPLETED))
-			output += ":"+driftMillis()+"ms";
+			output += ":"+drift()+"ms";
 		if (this.completedAt > 0)
 			output += " "+this.completedAt+" "+getDuration()+"ms";
 		
