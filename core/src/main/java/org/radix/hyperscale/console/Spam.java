@@ -15,6 +15,7 @@ import org.apache.commons.cli.Option;
 import org.apache.commons.cli.Options;
 import org.apache.commons.lang3.Range;
 import org.radix.hyperscale.Context;
+import org.radix.hyperscale.Universe;
 import org.radix.hyperscale.crypto.KeyPair;
 import org.radix.hyperscale.crypto.ed25519.EDKeyPair;
 import org.radix.hyperscale.ledger.BlockHeader.InventoryType;
@@ -92,11 +93,15 @@ public class Spam extends Function
 		// POW key
 		if (commandLine.hasOption("powkey"))
 		{
-			final File POWKeyPairPath = new File(commandLine.getOptionValue("powkey"));
-			
-			// TODO key type detection via standard formatting rather than binary parse
-			KeyPair<?,?,?> POWKeyPair = EDKeyPair.fromFile(POWKeyPairPath, false);
-			spammer.addSigner(POWKeyPair);
+			// Check if a powkey is actually needed
+			if (Universe.get().getPrimitivePOW() > 0)
+			{
+				final File POWKeyPairPath = new File(commandLine.getOptionValue("powkey"));
+				
+				// TODO key type detection via standard formatting rather than binary parse
+				KeyPair<?,?,?> POWKeyPair = EDKeyPair.fromFile(POWKeyPairPath, false);
+				spammer.addSigner(POWKeyPair);
+			}
 		}
 
 		printStream.println("Starting spam "+name+" of "+commandLine.getOptionValue("iterations")+" iterations at rate of "+commandLine.getOptionValue("rate")+" ... ");
