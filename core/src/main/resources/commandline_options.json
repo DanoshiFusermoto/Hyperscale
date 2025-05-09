@@ -54,7 +54,7 @@
 	"godix":{	
 		"long":"godix",
 		"desc":"Whether GODIX mode is enabled",
-		"has_arg":false
+		"opt_arg":true
 	},
 	
 	"debug":{	
