@@ -119,7 +119,7 @@ public class Hyperscale
 			// Sys Props //
 			System.setProperty("user.dir", Configuration.getDefault().getCommandLine("home", System.getProperty("user.dir")));
 			System.setProperty("console", Boolean.toString(Configuration.getDefault().getCommandLine("console", false)));
-			System.setProperty("godix", Boolean.toString(Configuration.getDefault().getCommandLine("godix", false)));
+			System.setProperty("godix", Boolean.toString(Configuration.getDefault().hasCommandLine("godix")));
 			System.setProperty("singleton", Boolean.toString(Configuration.getDefault().getCommandLine("singleton", false)));
 
 			// Crypto toggles //
@@ -158,7 +158,8 @@ public class Hyperscale
 			// Check the universe key exists to run Godix functions
 			if (Boolean.getBoolean("godix") == true)
 			{
-				final File universeKeyPath = new File(System.getProperty("universe.key.path", System.getProperty("user.dir"))+File.separatorChar+"universe.key");
+				final String godixKeyPath = Configuration.getDefault().getCommandLine("godix", "universe.key");
+				final File universeKeyPath = new File(System.getProperty("universe.key.path", System.getProperty("user.dir"))+File.separatorChar+godixKeyPath);
 				if (universeKeyPath.exists() == false)
 				{
 					log.fatal("Unable to start with Godix functions as universe.key is not found!");
