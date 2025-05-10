@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -68,8 +67,6 @@ import org.radix.hyperscale.network.GossipFetcher;
 import org.radix.hyperscale.network.GossipFilter;
 import org.radix.hyperscale.network.GossipInventory;
 import org.radix.hyperscale.network.GossipReceiver;
-import org.radix.hyperscale.network.MessageProcessor;
-import org.radix.hyperscale.network.messages.InventoryMessage;
 import org.radix.hyperscale.utils.Base58;
 
 import com.google.common.collect.HashMultimap;
@@ -80,9 +77,6 @@ import com.sleepycat.je.OperationStatus;
 
 public final class StateHandler implements Service
 {
-	private final static int MAX_ATOMS_TO_PROVISION = 256;
-	private final static int MAX_STATE_CERTIFICATES_TO_PROCESS = 256;
-
 	private final LRUCacheMap<Hash, StateVerificationRecord> verificationCache;
 	
 	private static final Logger syncLog = Logging.getLogger("sync");
@@ -565,8 +559,8 @@ public final class StateHandler implements Service
 		if (this.provisioningQueue.isEmpty() == false)
 		{
 			final ShardGroupID localShardGroupID = ShardMapper.toShardGroup(this.context.getNode().getIdentity(), numShardGroups);
-			final List<PendingAtom> pendingAtomsToProvision = new ArrayList<PendingAtom>(Math.min(MAX_ATOMS_TO_PROVISION, provisioningQueue.size()));
-			this.provisioningQueue.drainTo(pendingAtomsToProvision, MAX_ATOMS_TO_PROVISION);
+			final List<PendingAtom> pendingAtomsToProvision = new ArrayList<PendingAtom>(Math.min(Constants.MAX_ATOM_TO_STATE_PROVISION, provisioningQueue.size()));
+			this.provisioningQueue.drainTo(pendingAtomsToProvision, Constants.MAX_ATOM_TO_STATE_PROVISION);
 			
 			for (final PendingAtom pendingAtom : pendingAtomsToProvision)
 			{
@@ -604,12 +598,12 @@ public final class StateHandler implements Service
         					stateInput = new StateInput(pendingAtom.getHash(), substate);
         					if (this.context.getLedger().getLedgerStore().store(stateInput).equals(OperationStatus.SUCCESS))
         					{
-	        					this.process(pendingAtom, stateInput);
+	        					process(pendingAtom, stateInput);
         						if (stateLog.hasLevel(Logging.DEBUG))
         							stateLog.debug(this.context.getName()+": Processed locally provisioned state input "+stateInput.getHash()+" with for atom "+stateInput.getAtom());
 	        		
         						if (pendingAtom.isPrepared() && pendingAtom.getState(stateInput.getAddress()).getStateLockMode().equals(StateLockMode.WRITE))
-        							this.broadcast(pendingAtom, stateInput, epoch);
+        							broadcast(pendingAtom, stateInput, epoch);
         					}
         					else
         						stateLog.warn(this.context.getName()+": Failed to store locally provisioned state input "+stateInput);
@@ -694,7 +688,7 @@ public final class StateHandler implements Service
 						stateLog.debug(this.context.getName()+": Processed state input "+stateInputToProcess.getKey()+" with for atom "+pendingAtom.getHash());
 						
 					if (pendingAtom.isPrepared() && pendingAtom.getState(stateInputToProcess.getValue().getAddress()).getStateLockMode().equals(StateLockMode.WRITE))
-						this.broadcast(pendingAtom, stateInputToProcess.getValue(), epoch);
+						broadcast(pendingAtom, stateInputToProcess.getValue(), epoch);
 				}
 				catch (Exception ex)
 				{
@@ -718,8 +712,8 @@ public final class StateHandler implements Service
 	{
 		if (this.stateCertificatesToProcessQueue.isEmpty() == false) 
 		{
-			// Expensive to process and may be queued in "bursts" so would also like to break that up a little with batches
-			final List<StateCertificate> stateCertificatesToProcess = this.stateCertificatesToProcessQueue.getMany(MAX_STATE_CERTIFICATES_TO_PROCESS, (v1, v2) -> (int) (v1.getHeight() - v2.getHeight())); // Oldest first
+			// Expensive to process and may be queued in "bursts", use small batch processing to ensure responsiveness
+			final List<StateCertificate> stateCertificatesToProcess = this.stateCertificatesToProcessQueue.getMany(Constants.MAX_STATE_CERTIFICATES_TO_PROCESS, (v1, v2) -> (int) (v1.getHeight() - v2.getHeight())); // Oldest first
 			for(final StateCertificate stateCertificateToProcess : stateCertificatesToProcess)
 			{
 				if (this.context.getNode().isSynced() == false)

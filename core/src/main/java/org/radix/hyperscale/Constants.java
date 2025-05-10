@@ -61,6 +61,10 @@ public final class Constants
 	public static final int 	PRIMITIVE_STALE = 60;
 	public static final int 	PRIMITIVE_EXPIRE = 90;
 	public static final int 	PRIMITIVE_GC_INTERVAL = 3;
+	
+	// PROPOSALS 
+	public static final int		MAX_PROPOSAL_PACKAGES = 32;
+	public static final int		MAX_PROPOSAL_TYPE_PRIMITIVES = 2048;
 
 	// ATOMS
 	public static final int 	ATOM_DISCARD_AT_PENDING_LIMIT = 50000;

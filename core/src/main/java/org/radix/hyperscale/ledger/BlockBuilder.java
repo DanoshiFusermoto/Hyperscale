@@ -9,6 +9,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
 import org.eclipse.collections.api.factory.Maps;
+import org.radix.hyperscale.Constants;
 import org.radix.hyperscale.Context;
 import org.radix.hyperscale.crypto.CryptoException;
 import org.radix.hyperscale.crypto.Hash;
@@ -42,7 +43,7 @@ class BlockBuilder
 		Objects.requireNonNull(context, "Context is null");
 		this.context = context;
 		this.inventory = LinkedHashMultimap.create();
-		this.stateLocks = Maps.mutable.ofInitialCapacity(BlockHeader.MAX_INVENTORY_TYPE_PRIMITIVES);
+		this.stateLocks = Maps.mutable.ofInitialCapacity(Constants.MAX_PROPOSAL_TYPE_PRIMITIVES);
 	}
 
 	PendingBlock build(final BlockHeader buildable, final PendingBranch branch, final BlockHeader head, final QuorumCertificate view) throws IOException, CryptoException, ValidationException
@@ -80,7 +81,7 @@ class BlockBuilder
 		this.stateLocks.clear();
 
 		final long timestamp = Time.getSystemTime();
-		final List<PendingAtom> acceptAtoms = this.context.getLedger().getAtomHandler().acceptable(BlockHeader.MAX_INVENTORY_TYPE_PRIMITIVES, o -> { 
+		final List<PendingAtom> acceptAtoms = this.context.getLedger().getAtomHandler().acceptable(Constants.MAX_PROPOSAL_TYPE_PRIMITIVES, o -> { 
 			boolean exclude = false;
 			if (exclude == false) exclude = this.inventory.containsValue(o);
 			if (exclude == false) exclude = branch.references(o.getHash(), BlockHeader.ACCEPT_SELECT_FILTER) != null;
@@ -149,7 +150,7 @@ class BlockBuilder
 		do
 		{
 			// TODO is it better to handle timeouts before certificates due to block size limitation?
-			for (PendingAtom unacceptedAtom : this.context.getLedger().getAtomHandler().unaccepted(BlockHeader.MAX_INVENTORY_TYPE_PRIMITIVES, 
+			for (PendingAtom unacceptedAtom : this.context.getLedger().getAtomHandler().unaccepted(Constants.MAX_PROPOSAL_TYPE_PRIMITIVES, 
 					  																			       o -> branch.references(o.getHash(), BlockHeader.UNACCEPT_SELECT_FILTER) != null ||
 					  																			    		BlockBuilder.this.inventory.containsValue(o)))
 			{
@@ -181,7 +182,7 @@ class BlockBuilder
 				}				
 			}
 			
-			for (PendingAtom executableAtom : this.context.getLedger().getAtomHandler().executable(BlockHeader.MAX_INVENTORY_TYPE_PRIMITIVES, 
+			for (PendingAtom executableAtom : this.context.getLedger().getAtomHandler().executable(Constants.MAX_PROPOSAL_TYPE_PRIMITIVES, 
 																									  o -> branch.references(o.getHash(), BlockHeader.EXECUTE_SELECT_FILTER) != null ||
 																										   BlockBuilder.this.inventory.containsValue(o)))
 			{
@@ -218,7 +219,7 @@ class BlockBuilder
 				}				
 			}
 
-			for (PendingAtom latentAtom : this.context.getLedger().getAtomHandler().latent(BlockHeader.MAX_INVENTORY_TYPE_PRIMITIVES, 
+			for (PendingAtom latentAtom : this.context.getLedger().getAtomHandler().latent(Constants.MAX_PROPOSAL_TYPE_PRIMITIVES, 
 																							   o -> branch.references(o.getHash(), BlockHeader.LATENT_SELECT_FILTER) != null || 
 																									BlockBuilder.this.inventory.containsValue(o)))
 			{
@@ -254,7 +255,7 @@ class BlockBuilder
 				}				
 			}
 
-			for (PendingAtom unexecutedAtom : this.context.getLedger().getAtomHandler().unexecuted(BlockHeader.MAX_INVENTORY_TYPE_PRIMITIVES, 
+			for (PendingAtom unexecutedAtom : this.context.getLedger().getAtomHandler().unexecuted(Constants.MAX_PROPOSAL_TYPE_PRIMITIVES, 
 				     																				   o -> branch.references(o.getHash(), BlockHeader.UNEXECUTED_SELECT_FILTER) != null ||
 				     																						BlockBuilder.this.inventory.containsValue(o)))
 			{
@@ -295,7 +296,7 @@ class BlockBuilder
 				}				
 			}
 
-			for (PendingAtom commitAtom : this.context.getLedger().getAtomHandler().completed(BlockHeader.MAX_INVENTORY_TYPE_PRIMITIVES, 
+			for (PendingAtom commitAtom : this.context.getLedger().getAtomHandler().completed(Constants.MAX_PROPOSAL_TYPE_PRIMITIVES, 
 																							    o -> branch.references(o.getHash(), BlockHeader.COMMIT_SELECT_FILTER) != null ||
 																							     	 BlockBuilder.this.inventory.containsValue(o)))
 			{
@@ -336,7 +337,7 @@ class BlockBuilder
 				}				
 			}
 
-			for (PendingAtom uncommittedAtom : this.context.getLedger().getAtomHandler().uncommitted(BlockHeader.MAX_INVENTORY_TYPE_PRIMITIVES,
+			for (PendingAtom uncommittedAtom : this.context.getLedger().getAtomHandler().uncommitted(Constants.MAX_PROPOSAL_TYPE_PRIMITIVES,
 				  	 																				   o -> branch.references(o.getHash(), BlockHeader.UNCOMMITTED_SELECT_FILTER) != null ||
 				  	 																						BlockBuilder.this.inventory.containsValue(o)))
 			{
@@ -377,7 +378,7 @@ class BlockBuilder
 				}				
 			}
 			
-			for (PolyglotPackage pakage: this.context.getLedger().getPackageHandler().uncommitted(BlockHeader.MAX_PACKAGES, 
+			for (PolyglotPackage pakage: this.context.getLedger().getPackageHandler().uncommitted(Constants.MAX_PROPOSAL_PACKAGES, 
 																								     o -> branch.references(o.getHash(), InventoryType.PACKAGES) != null || 
 																								    	  BlockBuilder.this.inventory.containsValue(o)))
 			{
