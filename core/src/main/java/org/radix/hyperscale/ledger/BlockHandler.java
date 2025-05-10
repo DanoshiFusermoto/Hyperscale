@@ -1424,22 +1424,22 @@ public class BlockHandler implements Service
 	private QuorumCertificate updateView(final ProgressRound round, final BlockHeader head)
 	{
 		boolean isAdopted = false;
-		QuorumCertificate updatedView = round.getView();
+		final QuorumCertificate currentView = round.getView();
+		QuorumCertificate updatedView = currentView;
 		
 		// Try to construct a new view from received votes in this and previous rounds
-		// Current progress rounds view might be stale if there was stalled transition phase resolved via a commit trigger
-		for (long h=head.getHeight()+1 ; h <= round.clock() ; h++)
+		for (long clock=Math.max(currentView.getHeight(), head.getHeight()+1) ; clock <= round.clock() ; clock++)
 		{
 			final ProgressRound pastRound;
 			
 			// Important to handle this properly as a commit may have happened but a view update may not
 			try
 			{
-				pastRound = getProgressRound(h, false);
+				pastRound = getProgressRound(clock, false);
 			}
 			catch (IllegalStateException isex)
 			{
-				blocksLog.warn(this.context.getName()+": Progress round "+h+" not found when updating view QC in progress round "+round.clock());
+				blocksLog.warn(this.context.getName()+": Progress round "+clock+" not found when updating view QC in progress round "+round.clock());
 				continue;
 			}
 			
