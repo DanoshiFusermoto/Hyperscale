@@ -16,8 +16,8 @@ public final class AcceptTimeout extends AtomTimeout
 		// FOR SERIALIZER
 	}
 
-	public AcceptTimeout(final Hash atom) 
+	public AcceptTimeout(final Hash atom, final boolean active) 
 	{
-		super(atom);
+		super(atom, active);
 	}
 }

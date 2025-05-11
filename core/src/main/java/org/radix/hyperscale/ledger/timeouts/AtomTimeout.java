@@ -17,20 +17,25 @@ public abstract class AtomTimeout extends ExtendedObject implements Primitive
 	@JsonProperty("atom")
 	@DsonOutput(Output.ALL)
 	private Hash atom;
-		
+
+	/** Whether this timeout was triggered or passively created **/
+	private final transient boolean active;
+
 	AtomTimeout()
 	{
 		super();
-			
-		// FOR SERIALIZER
+
+		// If received via serializer, then must be active timeout
+		this.active = true;
 	}
 		
-	AtomTimeout(final Hash atom)
+	AtomTimeout(final Hash atom, final boolean active)
 	{
 		Objects.requireNonNull(atom, "Timeout atom is null");
 		Hash.notZero(atom, "Timeout atom hash is ZERO");
 
 		this.atom = atom;
+		this.active = active;
 	}
 
 	public final Hash getAtom()
@@ -38,9 +43,14 @@ public abstract class AtomTimeout extends ExtendedObject implements Primitive
 		return this.atom;
 	}
 	
+	public final boolean isActive()
+	{
+		return this.active;
+	}
+	
 	@Override
 	public String toString()
 	{
-		return super.toString()+" atom="+getAtom();
+		return super.toString()+" atom="+getAtom()+" active="+isActive();
 	}
 }
