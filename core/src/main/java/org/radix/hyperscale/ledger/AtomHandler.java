@@ -10,7 +10,6 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -53,10 +52,10 @@ import org.radix.hyperscale.ledger.events.AtomExecutableEvent;
 import org.radix.hyperscale.ledger.events.AtomExecuteLatentEvent;
 import org.radix.hyperscale.ledger.events.AtomExecutedEvent;
 import org.radix.hyperscale.ledger.events.AtomExecutionTimeoutEvent;
+import org.radix.hyperscale.ledger.events.AtomPrepareTimeoutEvent;
 import org.radix.hyperscale.ledger.events.AtomPreparedEvent;
 import org.radix.hyperscale.ledger.events.AtomProvisionedEvent;
 import org.radix.hyperscale.ledger.events.AtomTimeoutEvent;
-import org.radix.hyperscale.ledger.events.AtomUnpreparedTimeoutEvent;
 import org.radix.hyperscale.ledger.events.BlockCommittedEvent;
 import org.radix.hyperscale.ledger.events.SyncAcquiredEvent;
 import org.radix.hyperscale.ledger.exceptions.SyncStatusException;
@@ -92,12 +91,9 @@ public class AtomHandler implements Service, LedgerInterface
 	
 	private static final int ATOMS_PROCESS_BATCH_SIZE = 64;
 	
-	private static final boolean SKIP_EXECUTION_SIGNALS = false;
-	
 	private final Context context;
 	
 	private final Map<Hash, PendingAtom> pendingAtoms = new ConcurrentHashMap<Hash, PendingAtom>(1<<10);
-	private final Map<PendingAtom, Long> timeoutSchedule = Collections.synchronizedMap(new LinkedHashMap<>(1024));
 
 	private final Map<Hash, Long> latent = Collections.synchronizedMap(new LinkedHashMap<>(1024));
 	private final Map<Hash, Long> unaccepted = Collections.synchronizedMap(new LinkedHashMap<>(1024));
@@ -114,6 +110,8 @@ public class AtomHandler implements Service, LedgerInterface
 	
 	private LatchedProcessor atomProcessor = new LatchedProcessor(1, TimeUnit.SECONDS)
 	{
+		private long nextTimeoutPoll = 0l;
+		
 		@Override
 		public void process()
 		{
@@ -125,7 +123,13 @@ public class AtomHandler implements Service, LedgerInterface
 
 			_provisionAtoms(epoch, numShardGroups);
 			_prepareAtoms(epoch, numShardGroups);
-			_tryScheduledTimeouts();
+			
+			// Poll for timeouts per second
+			if (System.currentTimeMillis() >= this.nextTimeoutPoll)
+			{
+				_tryScheduledTimeouts();
+				this.nextTimeoutPoll = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(1);
+			}
 		}
 
 		@Override
@@ -448,9 +452,6 @@ public class AtomHandler implements Service, LedgerInterface
 					if (atomsLog.hasLevel(Logging.DEBUG))
 						atomsLog.debug(this.context.getName()+": Validating and preparing atom "+pendingAtom.getHash());
 	
-					// TODO Maybe a loaded/created atom event?
-					scheduleTimeout(pendingAtom, pendingAtom.getNextTimeoutAt());
-						
 					if (pendingAtom.isForcePrepareTimeout())
 						continue;
 						
@@ -501,42 +502,27 @@ public class AtomHandler implements Service, LedgerInterface
 
 	private void _tryScheduledTimeouts()
 	{
-		synchronized(this.timeoutSchedule)
-		{
-			final long timestamp = System.currentTimeMillis();
-			
-			// Timeout entries should be ordered by timestamp!
-			final Iterator<Entry<PendingAtom, Long>> timeoutScheduleIterator = this.timeoutSchedule.entrySet().iterator();
-			while (timeoutScheduleIterator.hasNext())
-			{
-				final Entry<PendingAtom, Long> timeoutEntry = timeoutScheduleIterator.next();
-				
-				if (timeoutEntry.getKey().isCompleted())
-				{
-					timeoutScheduleIterator.remove();
-					continue;
-				}
+		final long timestamp = System.currentTimeMillis();
 
-				if (timeoutEntry.getValue() > timestamp)
-					break;
-				
-				timeoutScheduleIterator.remove();
-				
-				try
+		for (final PendingAtom pendingAtom : this.pendingAtoms.values())
+		{
+			if (pendingAtom.isCompleted())
+				continue;
+
+			try
+			{
+				final AtomTimeout timeout = pendingAtom.tryTimeout(timestamp);
+				if (timeout != null)
 				{
-					final AtomTimeout timeout = timeoutEntry.getKey().tryTimeout(timestamp);
-					if (timeout != null)
-					{
-	//					if(atomsLog.hasLevel(Logging.DEBUG))
-							atomsLog.warn(this.context.getName()+": Timeout "+timeout.getClass().getSimpleName()+" is triggered at "+timestamp+" for "+timeoutEntry.getKey().getHash()+" with status "+timeoutEntry.getKey().getStatus().current());
+//					if(atomsLog.hasLevel(Logging.DEBUG))
+						atomsLog.info(this.context.getName()+": Timeout "+timeout.getHash()+" "+timeout.getClass().getSimpleName()+" is triggered at "+timestamp+" for "+pendingAtom.getHash()+" with status "+pendingAtom.getStatus().current());
 	
-						AtomHandler.this.context.getEvents().post(new AtomTimeoutEvent(timeoutEntry.getKey(), timeout));
-					}
+					AtomHandler.this.context.getEvents().post(new AtomTimeoutEvent(pendingAtom, timeout));
 				}
-				catch (Exception ex)
-				{
-					atomsLog.error(this.context.getName()+": Error processing atom timeout for "+timeoutEntry.getKey().getHash(), ex);
-				}
+			}
+			catch (Exception ex)
+			{
+				atomsLog.error(this.context.getName()+": Error processing atom timeout for "+pendingAtom.getHash(), ex);
 			}
 		}
 	}
@@ -670,6 +656,14 @@ public class AtomHandler implements Service, LedgerInterface
 			{
 				final PendingAtom pendingAtom = this.pendingAtoms.get(atom);
 				if (pendingAtom == null)
+					continue;
+				
+				final AtomTimeout timeout = pendingAtom.getTimeout(AcceptTimeout.class);
+				if (timeout == null)
+					// TODO Warn or throw?
+					continue;
+
+				if (timeout.isActive() == false)
 					continue;
 				
 				if (pendingAtom.isAccepted())
@@ -832,9 +826,12 @@ public class AtomHandler implements Service, LedgerInterface
 
 			for (final PendingAtom pendingAtom : this.unexecuted.values())
 			{
-				final AtomTimeout timeout = pendingAtom.getTimeout();
-				if (timeout == null || timeout instanceof ExecutionTimeout == false)
+				final AtomTimeout timeout = pendingAtom.getTimeout(ExecutionTimeout.class);
+				if (timeout == null)
 					// TODO Warn or throw?
+					continue;
+
+				if (timeout.isActive() == false)
 					continue;
 
 				if (pendingAtom.isExecuted())
@@ -865,9 +862,12 @@ public class AtomHandler implements Service, LedgerInterface
 
 			for (final PendingAtom pendingAtom : this.uncommitted.values())
 			{
-				final AtomTimeout timeout = pendingAtom.getTimeout();
-				if (timeout == null || timeout instanceof CommitTimeout == false)
+				final AtomTimeout timeout = pendingAtom.getTimeout(CommitTimeout.class);
+				if (timeout == null)
 					// TODO Warn or throw?
+					continue;
+				
+				if (timeout.isActive() == false)
 					continue;
 				
 				if (pendingAtom.isCompleted())
@@ -1147,34 +1147,19 @@ public class AtomHandler implements Service, LedgerInterface
 			throw new IllegalStateException(this.context.getName()+": Pending atom "+pendingAtom.getHash()+" is already present");
 		
 		// Manage timeout generation or scheduling
-		AtomTimeout timeout = pendingAtom.getTimeout();
+/*		AtomTimeout timeout = pendingAtom.getTimeout();
 		if (timeout == null)
 			timeout = pendingAtom.tryTimeout(head.getTimestamp());
 		
 		if (timeout == null)
 			scheduleTimeout(pendingAtom, pendingAtom.getNextTimeoutAt());
 		else
-			this.context.getEvents().post(new AtomTimeoutEvent(pendingAtom, timeout));
+			this.context.getEvents().post(new AtomTimeoutEvent(pendingAtom, timeout));*/
 
 		if (atomsLog.hasLevel(Logging.INFO))
 			atomsLog.info(AtomHandler.this.context.getName()+": Pushed pending atom "+pendingAtom.getHash());
 	}
 	
-	private void scheduleTimeout(final PendingAtom pendingAtom, final long timeoutAt)
-	{
-		synchronized(this.timeoutSchedule)
-		{
-			this.timeoutSchedule.remove(pendingAtom);
-			if (timeoutAt > -1)
-			{
-				this.timeoutSchedule.put(pendingAtom, timeoutAt);
-				
-				if (atomsLog.hasLevel(Logging.DEBUG))
-					atomsLog.debug(AtomHandler.this.context.getName()+": Scheduling timeout for Atom "+pendingAtom.getHash()+" with status "+pendingAtom.getStatus().current()+" at "+timeoutAt);
-			}
-		}
-	}
-
 	private void remove(final PendingAtom pendingAtom)
 	{
 		Objects.requireNonNull(pendingAtom, "Pending atom to remove is null");
@@ -1210,16 +1195,16 @@ public class AtomHandler implements Service, LedgerInterface
 			this.context.getMetaData().increment("ledger.atomtimeout.processed");
 			this.context.getMetaData().increment("ledger.atomtimeout.latency", pendingAtom.getTimeout().getAge(TimeUnit.MILLISECONDS));
 
-			if (pendingAtom.getTimeout() instanceof ExecutionTimeout)
+			if (pendingAtom.getTimeout(ExecutionTimeout.class) != null)
 			{
-				if (this.unexecuted.remove(pendingAtom.getTimeout().getHash(), pendingAtom) == false)
-					atomsLog.error(AtomHandler.this.context.getName()+": Execution timeout "+pendingAtom.getTimeout().getHash()+" for pending atom "+pendingAtom.getHash()+" was not removed");
+				if (this.unexecuted.remove(pendingAtom.getTimeout(ExecutionTimeout.class).getHash(), pendingAtom) == false)
+					atomsLog.error(AtomHandler.this.context.getName()+": Execution timeout "+pendingAtom.getTimeout(ExecutionTimeout.class).getHash()+" for pending atom "+pendingAtom.getHash()+" was not removed");
 			}
 	
-			if (pendingAtom.getTimeout() instanceof CommitTimeout)
+			if (pendingAtom.getTimeout(CommitTimeout.class) != null)
 			{
-				if (this.uncommitted.remove(pendingAtom.getTimeout().getHash(), pendingAtom) == false)
-					atomsLog.error(AtomHandler.this.context.getName()+": Commit timeout "+pendingAtom.getTimeout().getHash()+" for pending atom "+pendingAtom.getHash()+" was not removed");
+				if (this.uncommitted.remove(pendingAtom.getTimeout(CommitTimeout.class).getHash(), pendingAtom) == false)
+					atomsLog.error(AtomHandler.this.context.getName()+": Commit timeout "+pendingAtom.getTimeout(CommitTimeout.class).getHash()+" for pending atom "+pendingAtom.getHash()+" was not removed");
 			}
 		}
 
@@ -1308,7 +1293,7 @@ public class AtomHandler implements Service, LedgerInterface
 		}
 
 		@Subscribe
-		public void on(final AtomUnpreparedTimeoutEvent event) 
+		public void on(final AtomPrepareTimeoutEvent event) 
 		{
 			remove(event.getPendingAtom());
 			
@@ -1331,7 +1316,7 @@ public class AtomHandler implements Service, LedgerInterface
 		@Subscribe
 		public void on(final AtomExecutableEvent event)
 		{
-			if (SKIP_EXECUTION_SIGNALS)
+			if (Constants.SKIP_EXECUTION_SIGNALS)
 				return;
 
 			event.getPendingAtom().setExecuteSignalledAtBlock(event.getProposalHeader());
@@ -1347,7 +1332,6 @@ public class AtomHandler implements Service, LedgerInterface
 		public void on(final AtomExecutedEvent event)
 		{
 			AtomHandler.this.unexecuted.remove(event.getPendingAtom().getHash());
-			scheduleTimeout(event.getPendingAtom(), event.getPendingAtom().getNextTimeoutAt());
 		}
 
 		@Subscribe
@@ -1356,8 +1340,6 @@ public class AtomHandler implements Service, LedgerInterface
 			event.getPendingAtom().setExecuteLatentSignalledBlock(event.getProposalHeader());
 			AtomHandler.this.latent.remove(event.getPendingAtom().getHash());
 			
-			scheduleTimeout(event.getPendingAtom(), event.getPendingAtom().getNextTimeoutAt());
-
 			if (atomsLog.hasLevel(Logging.DEBUG))
 				atomsLog.debug(AtomHandler.this.context.getName()+": Atom "+event.getPendingAtom().getHash()+" execute latent at block "+event.getProposalHeader().getHeight()+":"+event.getProposalHeader().getHash());
 		}
@@ -1392,7 +1374,7 @@ public class AtomHandler implements Service, LedgerInterface
 		public void on(final AtomTimeoutEvent event)
 		{
 			if (event.getTimeout() instanceof PrepareTimeout)
-				AtomHandler.this.context.getEvents().post(new AtomUnpreparedTimeoutEvent(event.getPendingAtom()));
+				AtomHandler.this.context.getEvents().post(new AtomPrepareTimeoutEvent(event.getPendingAtom()));
 			
 			if (event.getTimeout() instanceof AcceptTimeout)
 				AtomHandler.this.unaccepted.putIfAbsent(event.getPendingAtom().getHash(), AtomHandler.this.context.getLedger().getHead().getHeight());
@@ -1411,7 +1393,6 @@ public class AtomHandler implements Service, LedgerInterface
 		public void on(final AtomPreparedEvent event)
 		{
 			event.getPendingAtom().setAcceptable();
-			scheduleTimeout(event.getPendingAtom(), event.getPendingAtom().getNextTimeoutAt());
 			AtomHandler.this.context.getEvents().post(new AtomAcceptableEvent(event.getPendingAtom()));
 		}
 
@@ -1446,8 +1427,6 @@ public class AtomHandler implements Service, LedgerInterface
 			// TODO is there a better way to manage this?
 			if (AtomHandler.this.unaccepted.remove(event.getPendingAtom().getHash(), event.getPendingAtom()) == true && atomsLog.hasLevel(Logging.DEBUG))
 				atomsLog.debug(AtomHandler.this.context.getName()+": Removed pending atom "+event.getPendingAtom().getHash()+" from UNACCEPTED that is now ACCEPTED");
-			
-			scheduleTimeout(event.getPendingAtom(), event.getPendingAtom().getNextTimeoutAt());
 		}
 
 		@Subscribe
@@ -1478,7 +1457,7 @@ public class AtomHandler implements Service, LedgerInterface
 			if (event.getPendingAtom().isForceExecutionTimeout())
 				return;
 			
-			if (SKIP_EXECUTION_SIGNALS)
+			if (Constants.SKIP_EXECUTION_SIGNALS)
 			{
 				event.getPendingAtom().setExecuteSignalledAtBlock(event.getPendingAtom().getBlockHeader());
 				AtomHandler.this.context.getEvents().post(new AtomExecutableEvent(event.getPendingAtom().getBlockHeader(), event.getPendingAtom()));
@@ -1518,7 +1497,6 @@ public class AtomHandler implements Service, LedgerInterface
 			AtomHandler.this.unexecuted.clear();
 			AtomHandler.this.uncommitted.clear();
 			AtomHandler.this.certificates.clear();
-			AtomHandler.this.timeoutSchedule.clear();
 
 			for (PendingAtom pendingAtom : event.getAtoms())
 				AtomHandler.this.push(pendingAtom, event.getHead());
@@ -1538,7 +1516,6 @@ public class AtomHandler implements Service, LedgerInterface
 			AtomHandler.this.unexecuted.clear();
 			AtomHandler.this.uncommitted.clear();
 			AtomHandler.this.certificates.clear();
-			AtomHandler.this.timeoutSchedule.clear();
 		}
 	};
 	
