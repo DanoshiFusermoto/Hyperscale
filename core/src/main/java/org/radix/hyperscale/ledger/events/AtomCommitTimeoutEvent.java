@@ -11,12 +11,9 @@ public final class AtomCommitTimeoutEvent extends AtomEventWithProposalHeader
 	{
 		super(header, pendingAtom);
 		
-		if (pendingAtom.getTimeout() == null)
+		if (pendingAtom.getTimeout(CommitTimeout.class) == null)
 			throw new IllegalStateException("No commit timeout present in pending atom "+pendingAtom.getHash());
 		
-		if (CommitTimeout.class.isAssignableFrom(pendingAtom.getTimeout().getClass()) == false)
-			throw new IllegalStateException("Timeout is not a commit timeout in pending atom "+pendingAtom.getHash());
-
 		if (pendingAtom.getBlockHeader() == null && pendingAtom.getOutputs(StateCertificate.class).isEmpty() == false)
 			throw new IllegalStateException("Can not timeout "+pendingAtom.getHash()+" which has state certificates before being included in a block");
 	}
