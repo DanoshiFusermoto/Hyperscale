@@ -23,7 +23,7 @@ import org.radix.hyperscale.ledger.events.AtomCommitEvent;
 import org.radix.hyperscale.ledger.events.AtomCommitTimeoutEvent;
 import org.radix.hyperscale.ledger.events.AtomExceptionEvent;
 import org.radix.hyperscale.ledger.events.AtomExecutionTimeoutEvent;
-import org.radix.hyperscale.ledger.events.AtomUnpreparedTimeoutEvent;
+import org.radix.hyperscale.ledger.events.AtomPrepareTimeoutEvent;
 import org.radix.hyperscale.ledger.primitives.Atom;
 import org.radix.hyperscale.logging.Logger;
 import org.radix.hyperscale.logging.Logging;
@@ -185,30 +185,30 @@ public final class WebSocketService extends WebSocketServer
 		}
 		
 		@Subscribe
-		public void on(AtomUnpreparedTimeoutEvent event) throws SerializationException
+		public void on(final AtomPrepareTimeoutEvent event) throws SerializationException
 		{
 			timedout(event.getPendingAtom(), "prepare");
 		}
 
 		@Subscribe
-		public void on(AtomAcceptedTimeoutEvent event) throws SerializationException 
+		public void on(final AtomAcceptedTimeoutEvent event) throws SerializationException 
 		{
 			timedout(event.getPendingAtom(), "accept");
 		}
 
 		@Subscribe
-		public void on(AtomExecutionTimeoutEvent event) throws SerializationException
+		public void on(final AtomExecutionTimeoutEvent event) throws SerializationException
 		{
 			timedout(event.getPendingAtom(), "execution");
 		}
 
 		@Subscribe
-		public void on(AtomCommitTimeoutEvent event)
+		public void on(final AtomCommitTimeoutEvent event)
 		{
 			timedout(event.getPendingAtom(), "commit");
 		}
 		
-		private void timedout(PendingAtom pendingAtom, String timeout)
+		private void timedout(final PendingAtom pendingAtom, final String timeout)
 		{
 			if (WebSocketService.this.connections.get() == 0)
 				return;

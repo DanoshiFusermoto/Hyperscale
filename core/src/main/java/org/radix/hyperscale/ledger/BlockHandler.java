@@ -675,7 +675,7 @@ public class BlockHandler implements Service
 					{
 						final Hash unacceptedHash = absentInventory.get(i);
 						final PendingAtom pendingAtom = this.context.getLedger().getAtomHandler().get(unacceptedHash);
-						if (pendingAtom == null || pendingAtom.getTimeout() == null || pendingAtom.getTimeout() instanceof AcceptTimeout == false)
+						if (pendingAtom == null || pendingAtom.getTimeout(AcceptTimeout.class) == null)
 						{
 							if (isLatent)
 							{
@@ -727,7 +727,7 @@ public class BlockHandler implements Service
 					{
 						final Hash latentHash = absentInventory.get(i);
 						final PendingAtom pendingAtom = this.context.getLedger().getAtomHandler().get(latentHash);
-						if (pendingAtom == null || pendingAtom.getTimeout() == null || pendingAtom.getTimeout() instanceof ExecutionLatentTimeout == false)
+						if (pendingAtom == null || pendingAtom.getTimeout(ExecutionLatentTimeout.class) == null)
 						{
 							if (isLatent)
 							{
@@ -778,8 +778,7 @@ public class BlockHandler implements Service
 					{
 						final Hash unexecutedHash = absentInventory.get(i);
 						final PendingAtom pendingAtom = this.context.getLedger().getAtomHandler().unexecuted(unexecutedHash);
-						if (pendingAtom == null || pendingAtom.getTimeout() == null || 
-							pendingAtom.getTimeout() instanceof ExecutionTimeout == false || pendingAtom.getTimeout().getHash().equals(unexecutedHash) == false)
+						if (pendingAtom == null || pendingAtom.getTimeout(ExecutionTimeout.class) == null || pendingAtom.getTimeout(ExecutionTimeout.class).getHash().equals(unexecutedHash) == false)
 						{
 							if (isLatent)
 							{
@@ -805,8 +804,7 @@ public class BlockHandler implements Service
 					{
 						final Hash uncommitedHash = absentInventory.get(i);
 						final PendingAtom pendingAtom = this.context.getLedger().getAtomHandler().uncommitted(uncommitedHash);
-						if (pendingAtom == null || pendingAtom.getTimeout() == null || 
-							pendingAtom.getTimeout() instanceof CommitTimeout == false || pendingAtom.getTimeout().getHash().equals(uncommitedHash) == false)
+						if (pendingAtom == null || pendingAtom.getTimeout(CommitTimeout.class) == null || pendingAtom.getTimeout(CommitTimeout.class).getHash().equals(uncommitedHash) == false)
 						{
 							if (isLatent)
 							{
@@ -1669,6 +1667,7 @@ public class BlockHandler implements Service
 		if (candidate.getHeight() > 0)
 		{
 			// Ensure there is a branch with candidate view `current` which has been extended at least one round
+			// if the provided progress round is ahead of the view
 			synchronized(this.pendingBranches)
 			{
 				final boolean intersectsToRound = this.pendingBranches.stream().anyMatch(b -> {
@@ -1689,6 +1688,14 @@ public class BlockHandler implements Service
 					blocksLog.warn(this.context.getName()+": Candidate view QC does not intersect to progress round "+round.clock()+" "+candidate);
 					return false;
 				}
+			}
+			
+			// There is an intersection, but is the referenced view QC tip a constructed and valid proposal
+			final PendingBlock pendingBlock = this.pendingBlocks.get(candidate.getCurrent());
+			if (pendingBlock.isConstructed() == false)
+			{
+				blocksLog.warn(this.context.getName()+": Candidate view QC does not reference a constructed `current` candidate in progress round "+round.clock()+" "+candidate);
+				return false;
 			}
 		}
 		

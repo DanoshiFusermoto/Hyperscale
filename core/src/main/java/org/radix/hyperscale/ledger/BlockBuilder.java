@@ -275,7 +275,7 @@ class BlockBuilder
 					
 					if (Block.MAX_BLOCK_SIZE != Integer.MAX_VALUE)
 					{
-						byte[] bytes = Serialization.getInstance().toDson(unexecutedAtom.getTimeout(), Output.WIRE);
+						byte[] bytes = Serialization.getInstance().toDson(unexecutedAtom.getTimeout(ExecutionTimeout.class), Output.WIRE);
 						if (blockSizeRemaining - bytes.length < 0)
 							break;
 						
@@ -357,7 +357,7 @@ class BlockBuilder
 					
 					if (Block.MAX_BLOCK_SIZE != Integer.MAX_VALUE)
 					{
-						byte[] bytes = Serialization.getInstance().toDson(uncommittedAtom.getTimeout(), Output.WIRE);
+						byte[] bytes = Serialization.getInstance().toDson(uncommittedAtom.getTimeout(CommitTimeout.class), Output.WIRE);
 						if (blockSizeRemaining - bytes.length < 0)
 							break;
 						
@@ -411,9 +411,9 @@ class BlockBuilder
 									ThreadLocalRandom.current().nextLong(), buildable.getNextIndex(), timestamp, this.context.getNode().getIdentity(), view, 
 									this.inventory.get(InventoryType.ACCEPTED).stream().map(PendingAtom.class::cast).map(pa -> pa.getAtom()).collect(Collectors.toList()), 
 									this.inventory.get(InventoryType.UNACCEPTED).stream().map(PendingAtom.class::cast).map(pa -> pa.getAtom()).collect(Collectors.toList()),
-									this.inventory.get(InventoryType.UNEXECUTED).stream().map(PendingAtom.class::cast).filter(pa -> pa.getTimeout() instanceof ExecutionTimeout).map(pa -> pa.<ExecutionTimeout>getTimeout()).collect(Collectors.toList()),
+									this.inventory.get(InventoryType.UNEXECUTED).stream().map(PendingAtom.class::cast).filter(pa -> pa.getTimeout(ExecutionTimeout.class) != null).map(pa -> pa.getTimeout(ExecutionTimeout.class)).collect(Collectors.toList()),
 									this.inventory.get(InventoryType.COMMITTED).stream().map(PendingAtom.class::cast).map(pa -> pa.getCertificate()).collect(Collectors.toList()),
-									this.inventory.get(InventoryType.UNCOMMITTED).stream().map(PendingAtom.class::cast).filter(pa -> pa.getTimeout() instanceof CommitTimeout).map(pa -> pa.<CommitTimeout>getTimeout()).collect(Collectors.toList()),
+									this.inventory.get(InventoryType.UNCOMMITTED).stream().map(PendingAtom.class::cast).filter(pa -> pa.getTimeout(CommitTimeout.class) != null).map(pa -> pa.getTimeout(CommitTimeout.class)).collect(Collectors.toList()),
 									this.inventory.get(InventoryType.EXECUTABLE).stream().map(PendingAtom.class::cast).map(pa -> pa.getHash()).collect(Collectors.toList()), 
 									this.inventory.get(InventoryType.LATENT).stream().map(PendingAtom.class::cast).map(pa -> pa.getHash()).collect(Collectors.toList()), 
 									this.inventory.get(InventoryType.PACKAGES).stream().map(PolyglotPackage.class::cast).collect(Collectors.toList()));
