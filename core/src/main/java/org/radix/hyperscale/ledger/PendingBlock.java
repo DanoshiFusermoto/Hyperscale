@@ -25,6 +25,7 @@ import org.radix.hyperscale.ledger.events.BlockConstructedEvent;
 import org.radix.hyperscale.ledger.primitives.Atom;
 import org.radix.hyperscale.ledger.primitives.AtomCertificate;
 import org.radix.hyperscale.ledger.sme.PolyglotPackage;
+import org.radix.hyperscale.ledger.timeouts.AcceptTimeout;
 import org.radix.hyperscale.ledger.timeouts.CommitTimeout;
 import org.radix.hyperscale.ledger.timeouts.ExecutionTimeout;
 import org.radix.hyperscale.logging.Logger;
@@ -342,26 +343,26 @@ public final class PendingBlock implements Hashable
 				List<ExecutionTimeout> unexecuted = new ArrayList<ExecutionTimeout>();
 				for (PendingAtom atom : this.unexecuted.values())
 				{
-					if (atom.getTimeout() == null || ExecutionTimeout.class.isAssignableFrom(atom.getTimeout().getClass()) == false)
+					if (atom.getTimeout(ExecutionTimeout.class) == null)
 						throw new ValidationException(getHeader(), "Atom "+atom.getHash()+" does not have execution timeout during construction of "+getHash());
 	
-					if (inventory.contains(atom.getTimeout().getHash()) == false)
-						throw new ValidationException(getHeader(), "Execution timeout "+atom.getTimeout().getHash()+" in atom "+atom.getHash()+" is not in inventory during construction of "+getHash());
+					if (inventory.contains(atom.getTimeout(ExecutionTimeout.class).getHash()) == false)
+						throw new ValidationException(getHeader(), "Execution timeout "+atom.getTimeout(ExecutionTimeout.class).getHash()+" in atom "+atom.getHash()+" is not in inventory during construction of "+getHash());
 	
-					unexecuted.add(atom.getTimeout());
+					unexecuted.add(atom.getTimeout(ExecutionTimeout.class));
 				}
 	
 				inventory = this.header.getInventory(InventoryType.UNCOMMITTED);
 				List<CommitTimeout> uncommitted = new ArrayList<CommitTimeout>();
 				for (PendingAtom atom : this.uncommitted.values())
 				{
-					if (atom.getTimeout() == null || CommitTimeout.class.isAssignableFrom(atom.getTimeout().getClass()) == false)
+					if (atom.getTimeout(CommitTimeout.class) == null)
 						throw new ValidationException(getHeader(), "Atom "+atom.getHash()+" does not have commit timeout during construction of "+getHash());
 	
-					if (inventory.contains(atom.getTimeout().getHash()) == false)
-						throw new ValidationException(getHeader(), "Commit timeout "+atom.getTimeout().getHash()+" in atom "+atom.getHash()+" is not in inventory during construction of "+getHash());
+					if (inventory.contains(atom.getTimeout(CommitTimeout.class).getHash()) == false)
+						throw new ValidationException(getHeader(), "Commit timeout "+atom.getTimeout(CommitTimeout.class).getHash()+" in atom "+atom.getHash()+" is not in inventory during construction of "+getHash());
 	
-					uncommitted.add(atom.getTimeout());
+					uncommitted.add(atom.getTimeout(CommitTimeout.class));
 				}
 	
 				final List<PolyglotPackage> packages = new ArrayList<PolyglotPackage>();
@@ -471,17 +472,17 @@ public final class PendingBlock implements Hashable
 					}
 					else if (type.equals(InventoryType.UNCOMMITTED))
 					{
-						if (pendingAtom.getTimeout() == null || this.absent.contains(pendingAtom.getTimeout().getHash()) == false)
+						if (pendingAtom.getTimeout(CommitTimeout.class) == null || this.absent.contains(pendingAtom.getTimeout(CommitTimeout.class).getHash()) == false)
 							continue;
 					}
 					else if (type.equals(InventoryType.UNEXECUTED))
 					{
-						if (pendingAtom.getTimeout() == null || this.absent.contains(pendingAtom.getTimeout().getHash()) == false)
+						if (pendingAtom.getTimeout(ExecutionTimeout.class) == null || this.absent.contains(pendingAtom.getTimeout(ExecutionTimeout.class).getHash()) == false)
 							continue;
 					}
 					else if (type.equals(InventoryType.UNACCEPTED))
 					{
-						if (pendingAtom.getTimeout() == null || this.absent.contains(pendingAtom.getTimeout().getHash()) == false)
+						if (pendingAtom.getTimeout(AcceptTimeout.class) == null || this.absent.contains(pendingAtom.getTimeout(AcceptTimeout.class).getHash()) == false)
 							continue;
 					}
 					else if (this.absent.contains(item.getHash()) == false)
@@ -635,8 +636,8 @@ public final class PendingBlock implements Hashable
 
 		synchronized(this)
 		{
-			ExecutionTimeout timeout = pendingAtom.getTimeout();
-			if (timeout == null || ExecutionTimeout.class.isAssignableFrom(timeout.getClass()) == false)
+			ExecutionTimeout timeout = pendingAtom.getTimeout(ExecutionTimeout.class);
+			if (timeout == null)
 				return false;
 			
 			if (this.unexecuted.containsKey(pendingAtom.getHash()) == false)
@@ -684,8 +685,8 @@ public final class PendingBlock implements Hashable
 
 		synchronized(this)
 		{
-			CommitTimeout timeout = pendingAtom.getTimeout();
-			if (timeout == null || CommitTimeout.class.isAssignableFrom(timeout.getClass()) == false)
+			CommitTimeout timeout = pendingAtom.getTimeout(CommitTimeout.class);
+			if (timeout == null)
 				return false;
 
 			if (this.uncommitted.containsKey(pendingAtom.getHash()) == false)

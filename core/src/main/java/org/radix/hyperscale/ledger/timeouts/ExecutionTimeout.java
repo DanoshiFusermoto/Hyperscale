@@ -16,8 +16,8 @@ public final class ExecutionTimeout extends AtomTimeout
 		// FOR SERIALIZER
 	}
 
-	public ExecutionTimeout(final Hash atom) 
+	public ExecutionTimeout(final Hash atom, final boolean active) 
 	{
-		super(atom);
+		super(atom, active);
 	}
 }

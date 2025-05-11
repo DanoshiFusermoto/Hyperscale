@@ -10,10 +10,7 @@ public final class AtomAcceptedTimeoutEvent extends AtomEventWithProposalHeader
 	{
 		super(header, pendingAtom);
 
-		if (pendingAtom.getTimeout() == null)
+		if (pendingAtom.getTimeout(AcceptTimeout.class) == null)
 			throw new IllegalStateException("No accept timeout present in pending atom "+pendingAtom.getHash());
-		
-		if (AcceptTimeout.class.isAssignableFrom(pendingAtom.getTimeout().getClass()) == false)
-			throw new IllegalStateException("Timeout is not an accept timeout in pending atom "+pendingAtom.getHash());
 	}
 }

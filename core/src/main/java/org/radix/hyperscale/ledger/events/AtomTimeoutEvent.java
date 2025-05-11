@@ -15,8 +15,11 @@ public final class AtomTimeoutEvent extends AtomEvent
 
 		this.timeout = Objects.requireNonNull(timeout, "Atom timeout is null");
 		
-		if (pendingAtom.getTimeout() != this.timeout)
-			throw new IllegalStateException("Timeout "+pendingAtom.getTimeout()+" in pending atom "+pendingAtom.getHash()+" does not match expected timeout "+timeout);
+		if (pendingAtom.getTimeout(timeout.getClass()) == null)
+			throw new IllegalStateException("Pending atom "+pendingAtom.getHash()+" does not hold a timeout of type "+timeout.getClass().getSimpleName());
+
+		if (pendingAtom.getTimeout(timeout.getClass()) != this.timeout)
+			throw new IllegalStateException("Timeout "+pendingAtom.getTimeout(timeout.getClass())+" in pending atom "+pendingAtom.getHash()+" does not match expected timeout "+timeout);
 	}
 	
 	public AtomTimeout getTimeout()

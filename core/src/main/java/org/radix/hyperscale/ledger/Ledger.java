@@ -37,7 +37,7 @@ import org.radix.hyperscale.ledger.ProgressRound.State;
 import org.radix.hyperscale.ledger.Substate.NativeField;
 import org.radix.hyperscale.ledger.events.AtomAcceptedEvent;
 import org.radix.hyperscale.ledger.events.AtomCommitEvent;
-import org.radix.hyperscale.ledger.events.AtomUnpreparedTimeoutEvent;
+import org.radix.hyperscale.ledger.events.AtomPrepareTimeoutEvent;
 import org.radix.hyperscale.ledger.events.BlockCommitEvent;
 import org.radix.hyperscale.ledger.events.BlockCommittedEvent;
 import org.radix.hyperscale.ledger.events.ProgressPhaseEvent;
@@ -626,7 +626,7 @@ public final class Ledger implements Service, LedgerSearchInterface
 	private EventListener asyncAtomListener = new EventListener()
 	{
 		@Subscribe
-		public void on(AtomUnpreparedTimeoutEvent event) 
+		public void on(final AtomPrepareTimeoutEvent event) 
 		{
 			context.getMetaData().increment("ledger.processed.atoms.timedout.prepare");
 		}

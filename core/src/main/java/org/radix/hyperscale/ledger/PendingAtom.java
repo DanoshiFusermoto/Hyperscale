@@ -65,32 +65,17 @@ public final class PendingAtom implements Hashable, StateAddressable
 	/** The wall clock timestamp when the Atom primitive was witnessed for this pending atom **/
 	private	volatile long 	witnessedAt;
 
-	/** The wall clock timeout if not prepared WARN subjective **/
-	private	volatile long 	prepareTimeoutAt;
-
 	/** The wall clock timestamp when the pending atom was agreed by all shard group validators to be included in a block **/
 	private	volatile long 	acceptableAt;
 	
 	/** The wall clock timestamp when the pending atom was accepted into a proposal **/
 	private	volatile long 	acceptedAt;
 
-	/** The wall clock timeout if not accepted into a proposal WARN subjective **/
-	private	volatile long 	acceptTimeoutAt;
-	
 	/** The proposal of an execution signal **/
 	private	volatile Hash 	executeSignalledBlock;
 	
 	/** The proposal of a latent execution signal **/
 	private	volatile Hash 	executeLatentSignalledBlock;
-	
-	/** The wall clock timeout at which an execution latent signal happens **/
-	private	volatile long 	executeLatentAt; 
-
-	/** The wall clock timeout at which an execution timeout happens **/
-	private	volatile long 	executeTimeoutAt; 
-
-	/** The wall clock timeout at which a commit timeout happens **/
-	private	volatile long 	commitTimeoutAt;
 	
 	private volatile BlockHeader  block;
 	private volatile StateMachine stateMachine;
@@ -100,7 +85,15 @@ public final class PendingAtom implements Hashable, StateAddressable
 	private final MutableMap<Hash, StateVoteBlock> stateVoteBlocks;
 	private final MutableMap<StateAddress, PendingState> pendingStates;
 	
+	/** Wall clock timestamps when the various timeouts become eligible **/
+	private final MutableMap<Class<? extends AtomTimeout>, Long> timeoutAt;
+
+	/** Timeout types which have been triggered **/
+	private final MutableMap<Class<? extends AtomTimeout>, AtomTimeout> timeouts;
+	
+	/** The current triggered timeout **/
 	private volatile AtomTimeout timeout;
+
 	private volatile AtomCertificate certificate;
 
 	// Faulty
@@ -138,17 +131,17 @@ public final class PendingAtom implements Hashable, StateAddressable
 		if (atom == null && witnessedAt != -1)
 			throw new IllegalArgumentException("Can not specify a witnessed timestamp if Atom is null");
 		
-		this.witnessedAt = witnessedAt;
-		this.prepareTimeoutAt = (this.witnessedAt == -1 ? Time.getSystemTime() : this.witnessedAt) + TimeUnit.SECONDS.toMillis(Constants.ATOM_PREPARE_TIMEOUT_SECONDS);
-
 		this.acceptedAt = -1;
 		this.acceptableAt = -1;
-		
+		this.witnessedAt = witnessedAt;
+
 		this.executeSignalledBlock = Hash.ZERO;
 		this.executeLatentSignalledBlock = Hash.ZERO;
-		this.executeLatentAt = -1;
-		this.executeTimeoutAt = -1;
-		this.commitTimeoutAt= -1;
+		
+		this.timeouts = Maps.mutable.<Class<? extends AtomTimeout>, AtomTimeout>ofInitialCapacity(4).asSynchronized();
+		this.timeoutAt = Maps.mutable.<Class<? extends AtomTimeout>, Long>ofInitialCapacity(4).asSynchronized();
+		this.timeoutAt.put(PrepareTimeout.class, (this.witnessedAt == -1 ? Time.getSystemTime() : this.witnessedAt) + TimeUnit.SECONDS.toMillis(Constants.ATOM_PREPARE_TIMEOUT_SECONDS));
+		
 		this.pendingStates = Maps.mutable.<StateAddress, PendingState>ofInitialCapacity(4).asSynchronized();
 		this.stateVoteBlocks = Maps.mutable.<Hash, StateVoteBlock>ofInitialCapacity(4).asSynchronized();
 		
@@ -158,31 +151,31 @@ public final class PendingAtom implements Hashable, StateAddressable
 			hash.asLong() % this.context.getConfiguration().get("ledger.faults.force.atom.timeout.commit.interval", 0l) == 0)
 		{
 			this.forceCommitTimeout = true;
-			atomsLog.warn(this.context.getName()+": Atom "+getHash()+" is forcing commit timeout");
+			atomStatusLog.warn(this.context.getName()+": Atom "+getHash()+" is forcing commit timeout");
 		}
 		else if (this.context.getConfiguration().get("ledger.faults.force.atom.timeout.execution.interval", 0l) > 0 && 
 				 hash.asLong() % this.context.getConfiguration().get("ledger.faults.force.atom.timeout.execution.interval", 0l) == 0)
 		{
 			this.forceExecutionTimeout = true;
-			atomsLog.warn(this.context.getName()+": Atom "+getHash()+" is forcing execution timeout");
+			atomStatusLog.warn(this.context.getName()+": Atom "+getHash()+" is forcing execution timeout");
 		}
 		else if (this.context.getConfiguration().get("ledger.faults.force.atom.latency.execution.interval", 0l) > 0 && 
 				 hash.asLong() % this.context.getConfiguration().get("ledger.faults.force.atom.latency.execution.interval", 0l) == 0)
 		{
 			this.forceLatentExecution = true;
-			atomsLog.warn(this.context.getName()+": Atom "+getHash()+" is forcing latent execution");
+			atomStatusLog.warn(this.context.getName()+": Atom "+getHash()+" is forcing latent execution");
 		}
 		else if (this.context.getConfiguration().get("ledger.faults.force.atom.timeout.accept.interval", 0l) > 0 && 
 				 hash.asLong() % this.context.getConfiguration().get("ledger.faults.force.atom.timeout.accept.interval", 0l) == 0)
 		{
 			this.forceAcceptTimeout = true;
-			atomsLog.warn(this.context.getName()+": Atom "+getHash()+" is forcing accept timeout");
+			atomStatusLog.warn(this.context.getName()+": Atom "+getHash()+" is forcing accept timeout");
 		}
 		else if (this.context.getConfiguration().get("ledger.faults.force.atom.timeout.prepare.interval", 0l) > 0 && 
 				 hash.asLong() % this.context.getConfiguration().get("ledger.faults.force.atom.timeout.prepare.interval", 0l) == 0)
 		{
 			this.forcePrepareTimeout = true;
-			atomsLog.warn(this.context.getName()+": Atom "+getHash()+" is forcing prepare timeout");
+			atomStatusLog.warn(this.context.getName()+": Atom "+getHash()+" is forcing prepare timeout");
 		}
 
 		if (atom != null) 
@@ -201,39 +194,14 @@ public final class PendingAtom implements Hashable, StateAddressable
 		return this.address;
 	}
 	
-	long getExecuteLatentAt()
-	{
-		return this.executeLatentAt;
-	}
-
-	long getExecuteTimeoutAt()
-	{
-		return this.executeTimeoutAt;
-	}
-
-	long getCommitTimeoutAt()
-	{
-		return this.commitTimeoutAt;
-	}
-
 	public long getWitnessedAt()
 	{
 		return this.witnessedAt;
 	}
 
-	long getPrepareTimeoutAt()
-	{
-		return this.prepareTimeoutAt;
-	}
-
 	public long getAcceptableAt()
 	{
 		return this.acceptableAt;
-	}
-
-	long getAcceptTimeoutAt()
-	{
-		return this.acceptTimeoutAt;
 	}
 
 	public long getAcceptedAt()
@@ -264,10 +232,10 @@ public final class PendingAtom implements Hashable, StateAddressable
 			// More instructions generally means more shards are touched, therefore more latency for 
 			// all required shard groups to be ready to accept if there is some state contention.
 			double additionalTimeout = Math.log(atom.getManifest().size()) * Constants.ATOM_ACCEPT_TIMEOUT_SECONDS;
-			this.acceptTimeoutAt = this.witnessedAt + TimeUnit.SECONDS.toMillis((long) (Constants.ATOM_ACCEPT_TIMEOUT_SECONDS + additionalTimeout));
+			scheduleTimeout(AcceptTimeout.class, this.witnessedAt + TimeUnit.SECONDS.toMillis((long) (Constants.ATOM_ACCEPT_TIMEOUT_SECONDS + additionalTimeout)));
+
 			if (this.context.getConfiguration().get("ledger.atompool", Boolean.TRUE) == Boolean.FALSE)
 				this.acceptableAt = this.witnessedAt;
-
 		}
 	}
 	
@@ -460,7 +428,9 @@ public final class PendingAtom implements Hashable, StateAddressable
 			this.stateMachine = new StateMachine(this.context, this, this.pendingStates);
 			this.stateMachine.prepare();
 			
-			this.prepareTimeoutAt = -1;
+			if (cancelTimeout(PrepareTimeout.class) == false)
+				clearTimeout(PrepareTimeout.class);
+
 			this.status.set(AtomStatus.State.PREPARED);
 			
 			if (atomsLog.hasLevel(Logging.INFO))
@@ -495,16 +465,14 @@ public final class PendingAtom implements Hashable, StateAddressable
 			this.block = header;
 			this.stateMachine.accepted(this.block);
 			this.status.set(AtomStatus.State.ACCEPTED);
-
 			this.acceptedAt = header.getTimestamp();
-			this.acceptTimeoutAt = -1;
-			this.executeLatentAt = this.acceptedAt + TimeUnit.SECONDS.toMillis(Constants.ATOM_EXECUTE_LATENT_SECONDS);
-			this.executeTimeoutAt = this.acceptedAt + TimeUnit.SECONDS.toMillis(Constants.ATOM_EXECUTE_TIMEOUT_SECONDS);
+			
+			clearTimeout(AcceptTimeout.class);
+			scheduleTimeout(ExecutionLatentTimeout.class, this.acceptedAt + TimeUnit.SECONDS.toMillis(Constants.ATOM_EXECUTE_LATENT_SECONDS));
+			scheduleTimeout(ExecutionTimeout.class, this.acceptedAt + TimeUnit.SECONDS.toMillis(Constants.ATOM_EXECUTE_TIMEOUT_SECONDS));
 			
 			if (atomsLog.hasLevel(Logging.INFO))
 				atomsLog.info(this.context.getName()+": Pending atom "+getHash()+" accepted into block "+header.getHeight()+":"+header.getHash());
-			
-			clearTimeout();
 		}
 	}
 	
@@ -528,11 +496,7 @@ public final class PendingAtom implements Hashable, StateAddressable
 			if (canComplete == false)
 				throw new IllegalStateException("Pending atom "+this.hash+" state can not be set as COMPLETED without an AtomCertificate, AtomTimeout or thrown exception");
 
-			this.prepareTimeoutAt = -1;
-			this.acceptTimeoutAt = -1;
-			this.executeLatentAt = -1;
-			this.executeTimeoutAt = -1;
-			this.commitTimeoutAt = -1;
+			clearTimeout(CommitTimeout.class);
 			this.status.set(AtomStatus.State.COMPLETED);
 			
 			if (atomsLog.hasLevel(Logging.INFO))
@@ -541,7 +505,7 @@ public final class PendingAtom implements Hashable, StateAddressable
 				if (this.certificate != null)
 					completedVia = "via certificate "+this.certificate.getHash();
 				else if (this.timeout != null)
-					completedVia = "via timeout "+this.timeout.getClass().getSimpleName()+":"+this.timeout.getHash();
+					completedVia = "via "+this.timeout;
 				else if (this.status.thrown() != null)
 					completedVia = "via exception "+this.status.thrown().getClass().getName()+":"+this.status.thrown().getMessage();
 				else
@@ -549,8 +513,6 @@ public final class PendingAtom implements Hashable, StateAddressable
 				
 				atomsLog.info(this.context.getName()+": Pending atom "+getHash()+" is completed "+completedVia);
 			}
-			
-			clearTimeout();
 		}
 	}
 
@@ -696,11 +658,9 @@ public final class PendingAtom implements Hashable, StateAddressable
 		
 				this.status.set(AtomStatus.State.EXECUTING);
 				this.stateMachine.execute();
-				this.status.set(AtomStatus.State.FINALIZING);
 				
-				this.executeLatentAt = -1;
-				this.executeTimeoutAt = -1;
-				clearTimeout();
+				clearTimeout(ExecutionTimeout.class);
+				this.status.set(AtomStatus.State.FINALIZING);
 				
 				if (atomsLog.hasLevel(Logging.INFO))
 					atomsLog.info(this.context.getName()+": Atom "+getHash()+" is executed");
@@ -850,9 +810,6 @@ public final class PendingAtom implements Hashable, StateAddressable
 				throw new IllegalStateException("Pending atom "+getHash()+" is already ACCEPTED with state "+getStatus().current());
 
 			this.acceptableAt = Time.getSystemTime();
-			
-			// NOTE remove this to cause less rare disjoint timeouts across validator sets 
-			this.acceptTimeoutAt = this.acceptableAt + TimeUnit.SECONDS.toMillis(Constants.ATOM_ACCEPT_TIMEOUT_SECONDS);
 		}
 	}
 
@@ -905,7 +862,7 @@ public final class PendingAtom implements Hashable, StateAddressable
 				throw new IllegalStateException("Execution signal has already been made for "+this);
 			
 			this.executeSignalledBlock = header.getHash();
-			this.commitTimeoutAt = header.getTimestamp() + TimeUnit.SECONDS.toMillis(Constants.ATOM_COMMIT_TIMEOUT_SECONDS);
+			scheduleTimeout(CommitTimeout.class, header.getTimestamp() + TimeUnit.SECONDS.toMillis(Constants.ATOM_COMMIT_TIMEOUT_SECONDS));
 			
 			if (atomsLog.hasLevel(Logging.INFO))
 			{
@@ -929,7 +886,7 @@ public final class PendingAtom implements Hashable, StateAddressable
 			if (this.executeLatentSignalledBlock != Hash.ZERO)
 				return true;
 			
-			if (this.status.after(AtomStatus.State.PREPARED) && this.status.before(AtomStatus.State.EXECUTING) && header.getTimestamp() >= this.executeLatentAt)
+			if (this.status.after(AtomStatus.State.PREPARED) && this.status.before(AtomStatus.State.EXECUTING) && this.timeouts.containsKey(ExecutionTimeout.class))
 				return true;
 			
 			return false;
@@ -962,8 +919,6 @@ public final class PendingAtom implements Hashable, StateAddressable
 			
 			if (atomsLog.hasLevel(Logging.INFO))
 				atomsLog.info(this.context.getName()+": Atom "+getHash()+" is signalled execute latent at "+this.executeLatentSignalledBlock);
-			
-			clearTimeout();
 		}
 	}
 	
@@ -1090,17 +1045,6 @@ public final class PendingAtom implements Hashable, StateAddressable
 			if (stateLog.hasLevel(Logging.INFO))
 				stateLog.info(this.context.getName()+": Adding state output "+output+" to "+getHash());
 				
-			// Not in a block yet but has at least one state certificate so effectively cancel the inclusion timeout
-			if (this.block == null)
-			{
-				// TODO this actually should never happen if the local replica is healthy as StateCertificates
-				// 		can not be created unless the atom is accepted in all relevant shard groups
-				this.acceptTimeoutAt = Long.MAX_VALUE;
-				
-				if (atomsLog.hasLevel(Logging.DEBUG))
-					atomsLog.debug(this.context.getName()+": Atom "+this.getHash()+" accept timeout cancelled due to state certificate prior to ACCEPTED");
-			}
-			
 			final PendingState pendingState = this.pendingStates.computeIfAbsent(output.getAddress(), sa -> new PendingState(this.context, sa, this));
 			pendingState.setStateOutput(output);
 		}
@@ -1122,33 +1066,14 @@ public final class PendingAtom implements Hashable, StateAddressable
 		return (T) this.pendingStates.get(stateAddress).getStateOutput();
 	}
 	
-	/** Return the wall clock timestamp for the next eligible timeout
+	/** Creates and possibly triggers any timeouts due for this PendingAtom.
 	 * 
-	 */
-	long getNextTimeoutAt()
-	{
-		// Commit timeout
-		if (this.status.after(AtomStatus.State.EXECUTING) && this.status.before(AtomStatus.State.COMPLETED))
-			return getCommitTimeoutAt();
-		// Execution timeout
-		else if (this.status.after(AtomStatus.State.PREPARED) && this.status.before(AtomStatus.State.EXECUTING) && isExecuteLatentSignalled() == true)
-			return getExecuteTimeoutAt();
-		// Execution latent 
-		else if (this.status.after(AtomStatus.State.PREPARED) && this.status.before(AtomStatus.State.EXECUTING) && isExecuteLatentSignalled() == false)
-			return getExecuteLatentAt();
-		// Accept timeout
-		else if (this.status.current(AtomStatus.State.PREPARED))
-			return getAcceptTimeoutAt();
-		// Prepare timeout
-		else if (this.status.before(AtomStatus.State.PREPARED))
-			return getPrepareTimeoutAt();
-		
-		return -1;
-	}
-	
-	/** Creates any timeouts due for this PendingAtom.
+	 * 	A timeout may be created, but not triggered.  Such as cases where the local replica considers a 
+	 *  PendingAtom executed, but a majority of remote replicas may not.  The remote replicas may include
+	 *  an execution timeout in their proposals (because it triggered), and the local replica will be unable 
+	 *  to validate the proposal unless it also has created the timeout object.
 	 * 
-	 * @return
+	 * @return AtomTimeout
 	 */
 	AtomTimeout tryTimeout(long timestamp)
 	{
@@ -1158,121 +1083,203 @@ public final class PendingAtom implements Hashable, StateAddressable
 				throw new IllegalStateException("Atom "+getHash()+" is completed");
 			
 			AtomTimeout timeout = null;
-			// Commit timeout
-			if (this.status.after(AtomStatus.State.EXECUTING) && this.status.before(AtomStatus.State.COMPLETED) && timestamp >= getCommitTimeoutAt())
-				timeout = new CommitTimeout(getHash(), getInputs());
-			// Execution timeout
-			else if (this.status.after(AtomStatus.State.PREPARED) && this.status.before(AtomStatus.State.EXECUTING) && isExecuteLatentSignalled() == true && timestamp >= getExecuteTimeoutAt())
-				timeout = new ExecutionTimeout(getHash());
-			// Execution latent 
-			else if (this.status.after(AtomStatus.State.PREPARED) && this.status.before(AtomStatus.State.EXECUTING) && isExecuteLatentSignalled() == false && timestamp >= getExecuteLatentAt())
-				timeout = new ExecutionLatentTimeout(getHash());
-			// Accept timeout
-			else if (this.status.current(AtomStatus.State.PREPARED) && timestamp >= getAcceptTimeoutAt())
-				timeout = new AcceptTimeout(getHash());
-			// Prepare timeout
-			else if (this.status.before(AtomStatus.State.PREPARED) && timestamp >= getPrepareTimeoutAt())
-				timeout = new PrepareTimeout(getHash());
+			for (final Class<? extends AtomTimeout> type : this.timeoutAt.keySet())
+			{
+				final long timeoutAt = this.timeoutAt.get(type);
+				if (this.timeouts.containsKey(type))
+					continue;
+				
+				if (timestamp < timeoutAt)
+					continue;
+				
+				timeout = createTimeout(type);
+				break;
+			}
 			
 			if (timeout != null)
 			{
-				// Debug conditionals to check timeouts should actually be triggered
-				boolean falsePositive = false;
-				boolean checkedInputs = false;
-				boolean checkedOutputs = false;
-				PendingState missingInput = null;
-				PendingState missingOutput = null;
-				if (timeout instanceof CommitTimeout)
+				if (timeout.isActive())
 				{
-					falsePositive = true;
-					checkedInputs = true;
-					checkedOutputs = true;
-					for (final PendingState pendingState : getStates())
+					// Debug conditionals to check timeouts should actually be triggered
+					boolean falsePositive = false;
+					boolean checkedInputs = false;
+					boolean checkedOutputs = false;
+					PendingState missingInput = null;
+					PendingState missingOutput = null;
+					if (timeout instanceof CommitTimeout)
 					{
-						if (pendingState.getStateInput() == null)
+						falsePositive = true;
+						checkedInputs = true;
+						checkedOutputs = true;
+						for (final PendingState pendingState : getStates())
 						{
-							falsePositive = false;
-							missingInput = pendingState;
-							break;
+							if (pendingState.getStateInput() == null)
+							{
+								falsePositive = false;
+								missingInput = pendingState;
+								break;
+							}
 						}
-					}
-
-					for (final PendingState pendingState : getStates())
-					{
-						if (pendingState.getStateOutput() == null)
-						{
-							falsePositive = false;
-							missingOutput = pendingState;
-							break;
-						}
-					}
-
-					if (this.certificate == null)
-						falsePositive = false;
-					else
-						atomStatusLog.error(this.context.getName()+": "+timeout.getClass().getSimpleName()+" for "+getHash()+" but has atom certificate "+this.certificate.getHash());
-
-				}
-				else if (timeout instanceof ExecutionLatentTimeout)
-				{
-					falsePositive = true;
-					checkedInputs = true;
-					for (final PendingState pendingState : getStates())
-					{
-						if (pendingState.getStateInput() == null)
-						{
-							falsePositive = false;
-							missingInput = pendingState;
-							break;
-						}
-					}
-				}
 	
-				if (checkedInputs)
-				{
-					if (missingInput == null)
-						atomStatusLog.error(this.context.getName()+": "+timeout.getClass().getSimpleName()+" for "+getHash()+" but has all state inputs");
-					else
-						atomStatusLog.error(this.context.getName()+": "+timeout.getClass().getSimpleName()+" for "+getHash()+" is missing state input "+missingInput);
+						for (final PendingState pendingState : getStates())
+						{
+							if (pendingState.getStateOutput() == null)
+							{
+								falsePositive = false;
+								missingOutput = pendingState;
+								break;
+							}
+						}
+	
+						if (this.certificate == null)
+							falsePositive = false;
+						else
+							atomStatusLog.error(this.context.getName()+": "+timeout.getClass().getSimpleName()+" for "+getHash()+" but has atom certificate "+this.certificate.getHash());
+	
+					}
+					else if (timeout instanceof ExecutionLatentTimeout)
+					{
+						falsePositive = true;
+						checkedInputs = true;
+						for (final PendingState pendingState : getStates())
+						{
+							if (pendingState.getStateInput() == null)
+							{
+								falsePositive = false;
+								missingInput = pendingState;
+								break;
+							}
+						}
+					}
+		
+					if (checkedInputs)
+					{
+						if (missingInput == null)
+							atomStatusLog.error(this.context.getName()+": "+timeout.getClass().getSimpleName()+" for "+getHash()+" but has all state inputs");
+						else
+							atomStatusLog.error(this.context.getName()+": "+timeout.getClass().getSimpleName()+" for "+getHash()+" is missing state input "+missingInput);
+					}
+					
+					if (checkedOutputs)
+					{
+						if (missingOutput == null)
+							atomStatusLog.error(this.context.getName()+": "+timeout.getClass().getSimpleName()+" for "+getHash()+" but has all state outputs");
+						else
+							atomStatusLog.error(this.context.getName()+": "+timeout.getClass().getSimpleName()+" for "+getHash()+" is missing state output "+missingOutput);
+					}
+	
+					if (falsePositive)
+						atomStatusLog.error(this.context.getName()+": "+timeout.getClass().getSimpleName()+" for "+getHash()+" is false positive");
 				}
 				
-				if (checkedOutputs)
-				{
-					if (missingOutput == null)
-						atomStatusLog.error(this.context.getName()+": "+timeout.getClass().getSimpleName()+" for "+getHash()+" but has all state outputs");
-					else
-						atomStatusLog.error(this.context.getName()+": "+timeout.getClass().getSimpleName()+" for "+getHash()+" is missing state output "+missingOutput);
-				}
-
-				if (falsePositive)
-					atomStatusLog.error(this.context.getName()+": "+timeout.getClass().getSimpleName()+" for "+getHash()+" is false positive");
-			
 				setTimeout(timeout);
 			}
 			
 			return timeout;
 		}
 	}
+	
+	private <T> T createTimeout(final Class<T> type)
+	{
+		boolean isActive = false;
+		
+		// Creating an active timeout?
+		if (type.isAssignableFrom(CommitTimeout.class) && this.status.after(AtomStatus.State.EXECUTING) && this.status.before(AtomStatus.State.COMPLETED))
+			isActive = true;
+		else if (type.isAssignableFrom(ExecutionTimeout.class) && this.status.after(AtomStatus.State.PREPARED) && this.status.before(AtomStatus.State.EXECUTING) && isExecuteLatentSignalled() == true)
+			isActive = true;
+		else if (type.isAssignableFrom(ExecutionLatentTimeout.class) && this.status.after(AtomStatus.State.PREPARED) && this.status.before(AtomStatus.State.EXECUTING) && isExecuteLatentSignalled() == false)
+			isActive = true;
+		else if (type.isAssignableFrom(AcceptTimeout.class) && this.status.current(AtomStatus.State.PREPARED) && this.pendingStates.allSatisfy(ps -> ps.getStateOutput() == null))
+			isActive = true;
+		else if (type.isAssignableFrom(PrepareTimeout.class) && this.status.before(AtomStatus.State.PREPARED))
+			isActive = true;
+
+		final AtomTimeout timeout;
+		// Create the timeout
+		if (type.isAssignableFrom(CommitTimeout.class))
+			timeout = new CommitTimeout(getHash(), getInputs(), isActive);
+		else if (type.isAssignableFrom(ExecutionTimeout.class))
+			timeout = new ExecutionTimeout(getHash(), isActive);
+		else if (type.isAssignableFrom(ExecutionLatentTimeout.class))
+			timeout = new ExecutionLatentTimeout(getHash(), isActive);
+		else if (type.isAssignableFrom(AcceptTimeout.class))
+			timeout = new AcceptTimeout(getHash(), isActive);
+		else if (type.isAssignableFrom(PrepareTimeout.class))
+			timeout = new PrepareTimeout(getHash(), isActive);
+		else
+			throw new IllegalArgumentException("Timeout type "+type.getSimpleName()+" is not supported");
+
+		return (T) timeout;
+	}
+
+	public AtomTimeout getTimeout()
+	{
+		return this.timeout;
+	}
 
 	@SuppressWarnings("unchecked")
-	public <T extends AtomTimeout> T getTimeout()
+	public <T extends AtomTimeout> T getTimeout(final Class<T> type)
 	{
-		return (T) this.timeout;
+		return (T) this.timeouts.get(type);
 	}
 	
-	<T extends AtomTimeout> T clearTimeout()
+	/** 
+	 * Clears the current active timeout if it is of the specified type
+	 */
+	private <T extends AtomTimeout> T clearTimeout(final Class<T> type)
 	{
 		synchronized(this)
 		{
-			if (this.timeout == null)
-				return null;
+			if (this.timeout != null && this.timeout.getClass().isAssignableFrom(type))
+			{
+				final T timeout = (T) this.timeout;
+				this.timeout = null;
+
+				if (atomStatusLog.hasLevel(Logging.INFO))
+					atomStatusLog.info(this.context.getName()+": Cleared "+timeout+" for Atom "+getHash());
+				
+				return timeout;
+			}
 			
-			if (atomsLog.hasLevel(Logging.INFO))
-				atomsLog.info(this.context.getName()+": Cleared "+this.timeout.getClass().getSimpleName()+" on "+this.status.current()+" for Atom "+getHash());
+			return null;
+		}
+	}
+
+	private boolean cancelTimeout(final Class<? extends AtomTimeout> type)
+	{
+		synchronized(this)
+		{
+			if (this.timeoutAt.get(type) == null)
+				throw new IllegalStateException(type.getSimpleName()+" is not scheduled for atom "+getHash());
 			
-			T timeout = (T) this.timeout;
-			this.timeout = null;
-			return timeout;
+			if (this.timeouts.get(type) == null)
+			{
+				this.timeoutAt.remove(type);
+				
+				if (atomStatusLog.hasLevel(Logging.INFO))
+					atomStatusLog.info(this.context.getName()+": Scheduled "+type.getSimpleName()+" is cancelled for atom "+getHash());
+				
+				return true;
+			}
+			else 
+				atomStatusLog.warn(this.context.getName()+": Scheduled "+type.getSimpleName()+" exists for atom "+getHash());
+			
+			return false;
+		}
+	}
+
+	private void scheduleTimeout(final Class<? extends AtomTimeout> type, final long timeoutAt)
+	{
+		synchronized(this)
+		{
+			if (this.timeoutAt.get(type) != null)
+				throw new IllegalStateException(type.getSimpleName()+" is already scheduled at "+this.timeoutAt.get(type)+" for atom "+getHash());
+			
+			this.timeoutAt.put(type, timeoutAt);
+
+			if (atomStatusLog.hasLevel(Logging.INFO))
+				atomStatusLog.info(this.context.getName()+": Scheduled "+type.getSimpleName()+" at "+timeoutAt+" for atom "+getHash());
 		}
 	}
 
@@ -1280,16 +1287,23 @@ public final class PendingAtom implements Hashable, StateAddressable
 	{
 		synchronized(this)
 		{
-			if (this.timeout != null)
-				throw new IllegalStateException("Atom timeout "+this.timeout.getClass().getSimpleName()+" is already set when processing "+timeout);
+			if (this.timeouts.get(timeout.getClass()) != null)
+				throw new IllegalStateException(timeout.getClass().getSimpleName()+" is already set for atom "+getHash());
 			
 			if (Objects.requireNonNull(timeout).getAtom().equals(getHash()) == false)
 				throw new IllegalArgumentException("Atom timeout "+timeout.getHash()+" does not reference "+getHash());
 			
-			if (atomStatusLog.hasLevel(Logging.INFO))
-				atomStatusLog.info(this.context.getName()+": Atom "+getHash()+" is signalling timeout "+timeout);
+			this.timeouts.put(timeout.getClass(), timeout);
 			
-			this.timeout = timeout;
+			if (timeout.isActive())
+			{
+				if (atomStatusLog.hasLevel(Logging.INFO))
+					atomStatusLog.info(this.context.getName()+": Atom "+getHash()+" is signalling "+timeout);
+				
+				this.timeout = timeout;
+			}
+			else if (atomStatusLog.hasLevel(Logging.INFO))
+				atomStatusLog.info(this.context.getName()+": Created "+timeout+" for atom "+getHash());
 		}
 	}
 	

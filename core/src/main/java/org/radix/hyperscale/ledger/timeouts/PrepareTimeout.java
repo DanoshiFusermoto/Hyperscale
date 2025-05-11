@@ -16,8 +16,8 @@ public final class PrepareTimeout extends AtomTimeout
 		// FOR SERIALIZER
 	}
 
-	public PrepareTimeout(final Hash atom) 
+	public PrepareTimeout(final Hash atom, final boolean active) 
 	{
-		super(atom);
+		super(atom, active);
 	}
 }

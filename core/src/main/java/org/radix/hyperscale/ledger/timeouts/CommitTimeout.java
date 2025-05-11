@@ -31,9 +31,9 @@ public final class CommitTimeout extends AtomTimeout
 		// FOR SERIALIZER
 	}
 
-	public CommitTimeout(final Hash atom, final Collection<StateInput> inputs)
+	public CommitTimeout(final Hash atom, final Collection<StateInput> inputs, final boolean active) 
 	{
-		super(atom);
+		super(atom, active);
 		
 		Objects.requireNonNull(inputs, "Timeout inputs is null");
 		if (inputs.isEmpty())
