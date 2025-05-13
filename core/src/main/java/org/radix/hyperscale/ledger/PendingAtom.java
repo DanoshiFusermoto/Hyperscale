@@ -1307,6 +1307,21 @@ public final class PendingAtom implements Hashable, StateAddressable
 		}
 	}
 	
+	public void setTimeout(final Class<? extends AtomTimeout> type)
+	{
+		synchronized(this)
+		{
+			final AtomTimeout timeout = this.timeouts.get(type); 
+			if (timeout == null)
+				throw new IllegalStateException(type.getSimpleName()+" is not triggered for pending atom "+getHash());
+			
+			if (atomStatusLog.hasLevel(Logging.INFO))
+				atomStatusLog.info(this.context.getName()+": Assigning "+type+" to pending atom "+getHash());
+				
+			this.timeout = timeout;
+		}
+	}
+
 	AtomCertificate tryFinalize() throws ValidationException
 	{
 		synchronized(this)

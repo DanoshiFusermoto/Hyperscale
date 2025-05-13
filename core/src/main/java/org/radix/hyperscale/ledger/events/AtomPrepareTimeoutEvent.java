@@ -8,8 +8,11 @@ public class AtomPrepareTimeoutEvent extends AtomEvent
 	public AtomPrepareTimeoutEvent(final PendingAtom pendingAtom)
 	{
 		super(pendingAtom);
-
-		if (pendingAtom.getTimeout(PrepareTimeout.class) == null)
-			throw new IllegalStateException("No prepare timeout present in pending atom "+pendingAtom.getHash());
+		
+		final PrepareTimeout timeout = pendingAtom.getTimeout(PrepareTimeout.class); 
+		if (timeout == null)
+			throw new IllegalStateException(PrepareTimeout.class.getSimpleName()+" is not triggered for pending atom "+pendingAtom.getHash());
+		
+		pendingAtom.setTimeout(timeout.getClass());
 	}
 }
