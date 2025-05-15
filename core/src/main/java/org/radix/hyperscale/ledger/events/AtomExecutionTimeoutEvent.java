@@ -1,9 +1,9 @@
 package org.radix.hyperscale.ledger.events;
 
 import org.radix.hyperscale.ledger.BlockHeader;
+import org.radix.hyperscale.ledger.BlockHeader.InventoryType;
 import org.radix.hyperscale.ledger.PendingAtom;
-import org.radix.hyperscale.ledger.primitives.StateCertificate;
-import org.radix.hyperscale.ledger.timeouts.ExecutionLatentTimeout;
+import org.radix.hyperscale.ledger.timeouts.ExecutionTimeout;
 
 public final class AtomExecutionTimeoutEvent extends AtomEventWithProposalHeader
 {
@@ -11,11 +11,17 @@ public final class AtomExecutionTimeoutEvent extends AtomEventWithProposalHeader
 	{
 		super(header, pendingAtom);
 		
-		if (pendingAtom.getTimeout(ExecutionLatentTimeout.class) == null)
-			throw new IllegalStateException("No execution timeout present in pending atom "+pendingAtom.getHash());
+		if (pendingAtom.getBlockHeader() == null)
+			throw new IllegalStateException("Can not "+ExecutionTimeout.class.getSimpleName()+" "+pendingAtom.getHash()+" which has not been included in a block");
+
+		final ExecutionTimeout timeout = pendingAtom.getTimeout(ExecutionTimeout.class); 
+		if (timeout == null)
+			throw new IllegalStateException(ExecutionTimeout.class.getSimpleName()+" is not triggered for pending atom "+pendingAtom.getHash());
 		
-		if (pendingAtom.getBlockHeader() == null && pendingAtom.getOutputs(StateCertificate.class).isEmpty() == false)
-			throw new IllegalStateException("Can not timeout "+pendingAtom.getHash()+" which has state certificates before being included in a block");
+		if (header.contains(timeout.getHash(), InventoryType.UNEXECUTED) == false)
+			throw new IllegalStateException(ExecutionTimeout.class.getSimpleName()+" for pending atom "+pendingAtom.getHash()+" is not referenced in block "+header);
+		
+		pendingAtom.setTimeout(timeout.getClass());
 	}
 }
 
