@@ -24,6 +24,9 @@ public class StandardConnectionFilter implements ConnectionFilter<AbstractConnec
 	private Boolean 		  stale;
 	private ConnectionState[] states;
 	private Function<AbstractConnection, Boolean> with;
+
+	// TODO cached for now but should be integrated with Node object
+	private volatile int numShardGroups = -1;
 	
 	public static final StandardConnectionFilter build(final Context context)
 	{
@@ -68,6 +71,7 @@ public class StandardConnectionFilter implements ConnectionFilter<AbstractConnec
 	public StandardConnectionFilter setShardGroupID(final ShardGroupID shardGroupID)
 	{
 		this.shardGroupID = Objects.requireNonNull(shardGroupID, "Shard group ID is null");
+		this.numShardGroups = this.context.getLedger().numShardGroups();
 		return this;
 	}
 
@@ -100,7 +104,7 @@ public class StandardConnectionFilter implements ConnectionFilter<AbstractConnec
 		if (this.synced != null && (connection.getNode() == null || this.synced != connection.getNode().isSynced()))
 			return false;
 		
-		if (this.shardGroupID != null && (connection.getNode() == null || ShardMapper.toShardGroup(connection.getNode().getIdentity(), this.context.getLedger().numShardGroups()).equals(this.shardGroupID) == false))
+		if (this.shardGroupID != null && (connection.getNode() == null || ShardMapper.toShardGroup(connection.getNode().getIdentity(), this.numShardGroups).equals(this.shardGroupID) == false))
 			return false;
 
 		if (this.protocol != null && connection.getProtocol().equals(this.protocol) == false)
