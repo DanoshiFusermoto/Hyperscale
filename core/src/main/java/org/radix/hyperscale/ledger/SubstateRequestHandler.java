@@ -65,7 +65,20 @@ public final class SubstateRequestHandler implements Service
 			this.address = address;
 			this.version = version;
 			this.reattempts = 0;
-			this.connection = connection;
+			this.connection = null;
+		}
+		
+		private void reset()
+		{
+			// Reset request quotas on old connection
+			if (this.connection != null)
+			{
+				this.connection.decrementPendingRequests();
+				this.connection.decrementPendingRequested();
+				this.connection.decrementPendingWeight();
+			}
+			
+			this.connection = null;
 		}
 		
 		boolean isTimeout()
@@ -89,9 +102,7 @@ public final class SubstateRequestHandler implements Service
 			else
 				this.connection.updateLatency(this.witnessedAt - this.reattemptedAt);
 			
-			connection.decrementPendingRequests();
-			connection.decrementPendingRequested();
-			connection.decrementPendingWeight();
+			reset();
 			
 			return super.complete(substate);
 		}
@@ -142,6 +153,8 @@ public final class SubstateRequestHandler implements Service
 		
 		private void send(final AbstractConnection connection) throws IOException
 		{
+			reset();
+			
 			this.connection = connection;
 			
 			final GetSubstateMessage getSubstateMessage = new GetSubstateMessage(this.address, this.version);
