@@ -37,7 +37,7 @@ public class Messaging
 {
 	private static final Logger messagingLog = Logging.getLogger("messaging");
 	
-	private final Map<Class<? extends Message>, Map<Class<?>, MessageProcessor>> listeners = new HashMap<Class<? extends Message>, Map<Class<?>, MessageProcessor>>();
+	private final Map<Class<? extends Message>, Map<Class<?>, MessageProcessor>> listeners = Collections.synchronizedMap(new HashMap<Class<? extends Message>, Map<Class<?>, MessageProcessor>>());
 
 	private final Context context;
 	
@@ -71,7 +71,7 @@ public class Messaging
 		synchronized(this.listeners)
 		{
 			if (this.listeners.containsKey(type) == false)
-				this.listeners.put(type, new HashMap<Class<?>, MessageProcessor>());
+				this.listeners.put(type, Collections.synchronizedMap(new HashMap<Class<?>, MessageProcessor>()));
 
 			if (this.listeners.get(type).containsKey(owner) == false)
 				listeners.get(type).put(owner, listener);
@@ -187,13 +187,20 @@ public class Messaging
 		
 		connection.receive(message);
 		
+		// SIMULATED LATENCY //
+		final int simulatedNetworkLatency = Messaging.this.context.getConfiguration().get("network.latency", 0);
+		final int simulatedNetworkLatencyJitter;
+		if (simulatedNetworkLatency > 0)
+			simulatedNetworkLatencyJitter = ThreadLocalRandom.current().nextInt(Messaging.this.context.getConfiguration().get("network.latency.jitter", 0)) - (Messaging.this.context.getConfiguration().get("network.latency.jitter", 0)/2);
+		else
+			simulatedNetworkLatencyJitter = 0;
+
 		// MESSAGING PROCESSING //
 		final TransportParameters transportParameters = message.getClass().getAnnotation(TransportParameters.class);
-		synchronized (Messaging.this.listeners)
+		final Map<Class<?>, MessageProcessor> listeners = this.listeners.get(message.getClass());
+		if (listeners != null)
 		{
-			final Map<Class<?>, MessageProcessor> listeners = this.listeners.get(message.getClass());
-
-			if (listeners != null)
+			synchronized (listeners)
 			{
 				for (final MessageProcessor listener : listeners.values())
 				{
@@ -213,14 +220,7 @@ public class Messaging
 						}
 					};
 					
-					final int simulatedNetworkLatency = Messaging.this.context.getConfiguration().get("network.latency", 0);
-					final int simulatedNetworkLatencyJitter;
-					if (simulatedNetworkLatency > 0)
-						simulatedNetworkLatencyJitter = ThreadLocalRandom.current().nextInt(Messaging.this.context.getConfiguration().get("network.latency.jitter", 0)) - (Messaging.this.context.getConfiguration().get("network.latency.jitter", 0)/2);
-					else
-						simulatedNetworkLatencyJitter = 0;
-					
-					if (simulatedNetworkLatency + simulatedNetworkLatencyJitter > 0 && (transportParameters == null || transportParameters.async() == false))
+					if (simulatedNetworkLatency + simulatedNetworkLatencyJitter == 0 && (transportParameters == null || transportParameters.async() == false))
 						Executor.getInstance().submit(executor);
 					else
 						Executor.getInstance().schedule(executor, simulatedNetworkLatency + simulatedNetworkLatencyJitter, TimeUnit.MILLISECONDS);
