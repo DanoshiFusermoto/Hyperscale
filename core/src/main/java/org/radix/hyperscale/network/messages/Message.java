@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.concurrent.atomic.AtomicLong;
 
+import org.radix.hyperscale.Constants;
 import org.radix.hyperscale.Universe;
 import org.radix.hyperscale.common.Direction;
 import org.radix.hyperscale.crypto.CryptoException;
@@ -148,22 +149,7 @@ public abstract class Message extends Serializable implements Hashable
 					throw new IOException("Message payload size "+payloadBuffer.position()+" is too large");
 				
 				final TransportParameters transportParameters = message.getClass().getAnnotation(TransportParameters.class);
-				if (transportParameters != null && transportParameters.cache())
-				{
-					payloadBytes = new byte[payloadBuffer.position()];
-					payloadLength = payloadBytes.length;
-
-					System.arraycopy(payloadBuffer.array(), 0, payloadBytes, 0, payloadBuffer.position());
-					message.setCachedPayload(payloadBytes);
-					message.setCachedPayloadCompressed(payloadCompressed);
-				}
-				else
-				{
-					payloadBytes = payloadBuffer.array();
-					payloadLength = payloadBuffer.position();
-				}
-	
-/*				if (ALWAYS_COMPRESS || payloadBuffer.position() > Constants.COMPRESS_PAYLOADS_THRESHOLD)
+				if (ALWAYS_COMPRESS || payloadBuffer.position() > Constants.COMPRESS_PAYLOADS_THRESHOLD)
 				{
 					payloadCompressed = true;
 					final int maxCompressedLength = Snappy.maxCompressedLength(payloadBuffer.position());
@@ -171,16 +157,32 @@ public abstract class Message extends Serializable implements Hashable
 					
 					final int compressedLength = Snappy.compress(payloadBuffer.array(), 0, payloadBuffer.position(), compressionBuffer.array(), 0);
 					payloadBytes = new byte[compressedLength];
+					payloadLength = payloadBytes.length;
 					System.arraycopy(compressionBuffer.array(), 0, payloadBytes, 0, compressedLength);
+					
+					if (transportParameters != null && transportParameters.cache())
+					{
+						message.setCachedPayload(payloadBytes);
+						message.setCachedPayloadCompressed(payloadCompressed);
+					}
 				}
 				else
 				{
-					payloadBytes = new byte[payloadBuffer.position()];
-					System.arraycopy(payloadBuffer.array(), 0, payloadBytes, 0, payloadBuffer.position());
-				}
+					if (transportParameters != null && transportParameters.cache())
+					{
+						payloadBytes = new byte[payloadBuffer.position()];
+						payloadLength = payloadBytes.length;
+						System.arraycopy(payloadBuffer.array(), 0, payloadBytes, 0, payloadBuffer.position());
 
-				message.setCachedPayload(payloadBytes);
-				message.setCachedPayloadCompressed(payloadCompressed);*/
+						message.setCachedPayload(payloadBytes);
+						message.setCachedPayloadCompressed(payloadCompressed);
+					}
+					else
+					{
+						payloadBytes = payloadBuffer.array();
+						payloadLength = payloadBuffer.position();
+					}
+				}
 			}
 			else
 			{
