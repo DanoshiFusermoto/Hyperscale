@@ -4,10 +4,10 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.Map.Entry;
 
 import org.eclipse.collections.api.multimap.Multimap;
@@ -84,12 +84,15 @@ public final class InventoryMessage extends Message
 		Objects.requireNonNull(item, "Item is null");
 		Hash.notZero(item, "Item has is ZERO");
 		
-		if (this.inventory == null)
-			this.inventory = new HashMap<String, LinkedHashSet<Hash>>();
-		
-		Numbers.greaterThan(this.inventory.size(), Constants.MAX_BROADCAST_INVENTORY_ITEMS, "Broadcast items greater than allowed max of "+Constants.MAX_BROADCAST_INVENTORY_ITEMS);
-
-		return this.inventory.computeIfAbsent(Serialization.getInstance().getIdForClass(type), t -> new LinkedHashSet<>()).add(item);
+		synchronized(this)
+		{
+			if (this.inventory == null)
+				this.inventory = new HashMap<String, LinkedHashSet<Hash>>();
+			
+			Numbers.greaterThan(this.inventory.size(), Constants.MAX_BROADCAST_INVENTORY_ITEMS, "Broadcast items greater than allowed max of "+Constants.MAX_BROADCAST_INVENTORY_ITEMS);
+	
+			return this.inventory.computeIfAbsent(Serialization.getInstance().getIdForClass(type), t -> new LinkedHashSet<>()).add(item);
+		}
 	}
 	
 	public List<InventoryItem> asInventory()
@@ -115,19 +118,34 @@ public final class InventoryMessage extends Message
 	public Multimap<Class<? extends Primitive>, Hash> getTyped()
 	{
 		final MutableMultimap<Class<? extends Primitive>, Hash> typed = Multimaps.mutable.list.empty();
-		if (this.inventory != null && this.inventory.isEmpty() == false)
+		synchronized(this)
 		{
-			for (final Entry<String, LinkedHashSet<Hash>> items : this.inventory.entrySet())
+			if (this.inventory != null && this.inventory.isEmpty() == false)
 			{
-				final Class<?> clazz = Serialization.getInstance().getClassForId(items.getKey());
-				for (final Hash item : items.getValue())
-					typed.put(clazz.asSubclass(Primitive.class), item);
+				for (final Entry<String, LinkedHashSet<Hash>> items : this.inventory.entrySet())
+				{
+					final Class<?> clazz = Serialization.getInstance().getClassForId(items.getKey());
+					for (final Hash item : items.getValue())
+						typed.put(clazz.asSubclass(Primitive.class), item);
+				}
 			}
 		}
 		
 		return typed;
 	}	
 	
+	public List<Hash> getTyped(final Class<? extends Primitive> type)
+	{
+		synchronized(this)
+		{
+			final String clazz = Serialization.getInstance().getIdForClass(type);
+			if (this.inventory != null && this.inventory.isEmpty() == false && this.inventory.containsKey(clazz))
+				return new ArrayList<Hash>(this.inventory.get(clazz));
+		}
+		
+		return Collections.emptyList();
+	}	
+
 	@Override
 	public boolean isUrgent()
 	{

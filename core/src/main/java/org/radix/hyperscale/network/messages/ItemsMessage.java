@@ -88,6 +88,25 @@ public final class ItemsMessage extends Message
 		return items;
 	}	
 	
+	public List<Hash> getTyped(final Class<? extends Primitive> type)
+	{
+		synchronized(this)
+		{
+			if (this.inventory != null && this.inventory.isEmpty() == false)
+			{
+				final List<Hash> items = new ArrayList<Hash>();
+				for (final Primitive item : this.inventory)
+				{
+					if (item.getClass().equals(type))
+						items.add(item.getHash());
+				}
+				return items;
+			}
+		}
+		
+		return Collections.emptyList();
+	}	
+	
 	@Override
 	public boolean isUrgent()
 	{
