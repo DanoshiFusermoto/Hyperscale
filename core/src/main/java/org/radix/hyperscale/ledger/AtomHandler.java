@@ -206,15 +206,19 @@ public class AtomHandler implements Service, LedgerInterface
 						continue;
 					}
 					
-					final State pendingAtomStatus = AtomHandler.this.status(item);
-					if (pendingAtomStatus.equals(State.NONE) == false)
+					if (AtomHandler.this.context.getLedger().getLedgerStore().has(item, type))
+					{
+						requiredIterator.remove();
+						continue;
+					}
+
+					if (AtomHandler.this.status(item).equals(State.NONE) == false)
 					{
 						requiredIterator.remove();
 						continue;
 					}
 				}
 				
-				required.removeAll(AtomHandler.this.context.getLedger().getLedgerStore().has(required, type));
 				return required;
 			}
 		});
@@ -340,12 +344,14 @@ public class AtomHandler implements Service, LedgerInterface
 					if (AtomHandler.this.context.getNode().isSynced() == false)
 						return;
 					
-					final Collection<Hash> inventory = submitAtomsMessage.getAtoms().stream().map(a -> a.getHash()).collect(Collectors.toSet());
-					final Collection<Hash> required = AtomHandler.this.context.getNetwork().getGossipHandler().required(inventory, Atom.class, connection);
-					if (required.isEmpty())
-						return;
+					submit(submitAtomsMessage.getAtoms(), false);
 					
-					submit(submitAtomsMessage.getAtoms().stream().filter(a -> required.contains(a.getHash())).collect(Collectors.toList()), false);
+//					final Collection<Hash> inventory = submitAtomsMessage.getAtoms().stream().map(a -> a.getHash()).collect(Collectors.toSet());
+//					final Collection<Hash> required = AtomHandler.this.context.getNetwork().getGossipHandler().required(inventory, Atom.class, connection);
+//					if (required.isEmpty())
+//						return;
+					
+//					submit(submitAtomsMessage.getAtoms().stream().filter(a -> required.contains(a.getHash())).collect(Collectors.toList()), false);
 				}
 				catch (Exception ex)
 				{

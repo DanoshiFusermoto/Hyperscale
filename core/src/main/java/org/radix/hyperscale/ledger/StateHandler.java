@@ -27,6 +27,7 @@ import org.radix.hyperscale.collections.MappedBlockingQueue;
 import org.radix.hyperscale.common.Primitive;
 import org.radix.hyperscale.crypto.CryptoException;
 import org.radix.hyperscale.crypto.Hash;
+import org.radix.hyperscale.crypto.Identity;
 import org.radix.hyperscale.crypto.bls12381.BLS12381;
 import org.radix.hyperscale.crypto.bls12381.BLSPublicKey;
 import org.radix.hyperscale.events.EventListener;
@@ -197,7 +198,7 @@ public final class StateHandler implements Service
 		this.context.getNetwork().getGossipHandler().register(StateCertificate.class, new GossipFilter<StateCertificate>(this.context) 
 		{
 			@Override
-			public Set<ShardGroupID> filter(StateCertificate stateCertificate)
+			public Set<ShardGroupID> filter(final StateCertificate stateCertificate)
 			{
 				return Collections.singleton(ShardMapper.toShardGroup(StateHandler.this.context.getNode().getIdentity(), StateHandler.this.context.getLedger().numShardGroups()));
 			}
@@ -228,14 +229,16 @@ public final class StateHandler implements Service
 		this.context.getNetwork().getGossipHandler().register(StateCertificate.class, new GossipReceiver<StateCertificate>() 
 		{
 			@Override
-			public void receive(Collection<StateCertificate> stateCertificates, AbstractConnection connection) throws IOException, CryptoException
+			public void receive(final Collection<StateCertificate> stateCertificates, final AbstractConnection connection) throws IOException, CryptoException
 			{
 				if (StateHandler.this.context.getNode().isSynced() == false)
 					return;
 				
+				final int numShardGroups = StateHandler.this.context.getLedger().numShardGroups();
+				final Identity localIdentity = StateHandler.this.context.getNode().getIdentity();
 				for (StateCertificate stateCertificate : stateCertificates)
 				{
-					if (ShardMapper.equal(StateHandler.this.context.getLedger().numShardGroups(), stateCertificate.getAddress(), StateHandler.this.context.getNode().getIdentity()) == true)
+					if (ShardMapper.equal(numShardGroups, stateCertificate.getAddress(), localIdentity) == true)
 					{
 						stateLog.warn(StateHandler.this.context.getName()+": Received state certificate "+stateCertificate+" for local shard (has sync just happened?)");
 						// 	Disconnected and ban
@@ -258,7 +261,7 @@ public final class StateHandler implements Service
 		this.context.getNetwork().getGossipHandler().register(StateCertificate.class, new GossipFetcher<StateCertificate>() 
 		{
 			@Override
-			public Collection<StateCertificate> fetch(Collection<Hash> items, AbstractConnection connection) throws IOException
+			public Collection<StateCertificate> fetch(final Collection<Hash> items, AbstractConnection connection) throws IOException
 			{
 				final Set<Hash> toFetch = Sets.mutable.ofAll(items);
 				final List<StateCertificate> fetched = new ArrayList<StateCertificate>(items.size());
@@ -277,7 +280,7 @@ public final class StateHandler implements Service
 		this.context.getNetwork().getGossipHandler().register(StateInput.class, new GossipFilter<StateInput>(this.context) 
 		{
 			@Override
-			public Set<ShardGroupID> filter(StateInput stateInput)
+			public Set<ShardGroupID> filter(final StateInput stateInput)
 			{
 				return Collections.singleton(ShardMapper.toShardGroup(StateHandler.this.context.getNode().getIdentity(), StateHandler.this.context.getLedger().numShardGroups()));
 			}
@@ -307,14 +310,16 @@ public final class StateHandler implements Service
 		this.context.getNetwork().getGossipHandler().register(StateInput.class, new GossipReceiver<StateInput>() 
 		{
 			@Override
-			public void receive(Collection<StateInput> stateInputs, AbstractConnection connection) throws IOException, CryptoException
+			public void receive(final Collection<StateInput> stateInputs, final AbstractConnection connection) throws IOException, CryptoException
 			{
 				if (StateHandler.this.context.getNode().isSynced() == false)
 					return;
 
+				final int numShardGroups = StateHandler.this.context.getLedger().numShardGroups();
+				final Identity localIdentity = StateHandler.this.context.getNode().getIdentity();
 				for (final StateInput stateInput : stateInputs)
 				{
-					if (ShardMapper.equal(StateHandler.this.context.getLedger().numShardGroups(), stateInput.getSubstate().getAddress(), StateHandler.this.context.getNode().getIdentity()) == true)
+					if (ShardMapper.equal(numShardGroups, stateInput.getSubstate().getAddress(), localIdentity) == true)
 					{
 						if (stateLog.hasLevel(Logging.DEBUG))
 							stateLog.debug(StateHandler.this.context.getName()+": Received state input "+stateInput+" for local shard (possible consequence of gossip");
