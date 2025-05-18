@@ -215,9 +215,6 @@ public final class StateHandler implements Service
 					return Collections.emptyList();
 				}
 				
-				if (StateHandler.this.context.getNode().isSynced() == false)
-					return Collections.emptyList();
-				
 				final List<Hash> required = new ArrayList<Hash>(items);
 				required.removeAll(StateHandler.this.stateCertificatesToProcessQueue.contains(required));
 				required.removeAll(StateHandler.this.context.getLedger().getLedgerStore().has(required, type));
@@ -231,9 +228,6 @@ public final class StateHandler implements Service
 			@Override
 			public void receive(final Collection<StateCertificate> stateCertificates, final AbstractConnection connection) throws IOException, CryptoException
 			{
-				if (StateHandler.this.context.getNode().isSynced() == false)
-					return;
-				
 				final int numShardGroups = StateHandler.this.context.getLedger().numShardGroups();
 				final Identity localIdentity = StateHandler.this.context.getNode().getIdentity();
 				for (StateCertificate stateCertificate : stateCertificates)
@@ -297,9 +291,6 @@ public final class StateHandler implements Service
 					return Collections.emptyList();
 				}
 					
-				if (StateHandler.this.context.getNode().isSynced() == false)
-					return Collections.emptyList();
-				
 				final List<Hash> required = new ArrayList<Hash>(items);
 				required.removeAll(StateHandler.this.stateInputsToProcessQueue.contains(required));
 				required.removeAll(StateHandler.this.context.getLedger().getLedgerStore().has(required, type));
@@ -312,9 +303,6 @@ public final class StateHandler implements Service
 			@Override
 			public void receive(final Collection<StateInput> stateInputs, final AbstractConnection connection) throws IOException, CryptoException
 			{
-				if (StateHandler.this.context.getNode().isSynced() == false)
-					return;
-
 				final int numShardGroups = StateHandler.this.context.getLedger().numShardGroups();
 				final Identity localIdentity = StateHandler.this.context.getNode().getIdentity();
 				for (final StateInput stateInput : stateInputs)

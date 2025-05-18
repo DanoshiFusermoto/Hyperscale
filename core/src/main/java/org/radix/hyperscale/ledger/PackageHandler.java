@@ -98,9 +98,6 @@ public final class PackageHandler implements Service
 					return Collections.emptyList();
 				}
 				
-				if (PackageHandler.this.context.getNode().isSynced() == false)
-					return Collections.emptyList();
-				
 				final List<Hash> required = new ArrayList<Hash>(items);
 				final Iterator<Hash> requiredIterator = required.iterator();
 				synchronized(PackageHandler.this.uncommitted)
@@ -122,9 +119,6 @@ public final class PackageHandler implements Service
 			@Override
 			public void receive(final Collection<PolyglotPackage> polyglotPackages, final AbstractConnection connection) throws IOException, CryptoException
 			{
-				if (PackageHandler.this.context.getNode().isSynced() == false)
-					return;
-				
 				final BlockHeader head = PackageHandler.this.context.getLedger().getHead();
 				for (final PolyglotPackage polyglotPackage : polyglotPackages)
 				{

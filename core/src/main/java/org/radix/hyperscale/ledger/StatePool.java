@@ -144,9 +144,6 @@ public final class StatePool implements Service
 			@Override
 			public Collection<Hash> required(final Class<? extends Primitive> type, final Collection<Hash> items, final AbstractConnection connection) throws IOException
 			{
-				if (StatePool.this.context.getNode().isSynced() == false)
-					return Collections.emptyList();
-				
 				if (type.equals(StateVoteBlock.class) == false)
 				{
 					gossipLog.error(StatePool.this.context.getName()+": State vote block type expected but got "+type);
@@ -171,14 +168,11 @@ public final class StatePool implements Service
 			@Override
 			public void receive(final Collection<StateVoteBlock> stateVoteBlocks, final AbstractConnection connection) throws IOException, CryptoException
 			{
-				if (StatePool.this.context.getNode().isSynced() == false)
-					return;
-				
 				final int numShardGroups = StatePool.this.context.getLedger().numShardGroups();
 				final ShardGroupID localShardGroupID = ShardMapper.toShardGroup(StatePool.this.context.getNode().getIdentity(), numShardGroups); 
 				for (final StateVoteBlock stateVoteBlock : stateVoteBlocks)
 				{
-					if (statePoolLog.hasLevel(Logging.DEBUG))
+					if (statePoolLog.hasLevel(Logging.INFO))
 					{
 						if (stateVoteBlock.isHeader() == false)
 							statePoolLog.info(StatePool.this.context.getName()+": Received state vote block "+stateVoteBlock);
