@@ -24,6 +24,7 @@ import org.radix.hyperscale.serialization.DsonOutput.Output;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 @SerializerId2("gossip.items.get")
+@TransportParameters(cache = true, priority = 10)
 public final class GetItemsMessage extends Message
 {
 	@JsonProperty("inventory")

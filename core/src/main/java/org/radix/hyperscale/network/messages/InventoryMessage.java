@@ -7,7 +7,6 @@ import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 import java.util.Map.Entry;
 
 import org.eclipse.collections.api.multimap.Multimap;
@@ -27,7 +26,7 @@ import org.radix.hyperscale.utils.Numbers;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 @SerializerId2("gossip.inventory")
-@TransportParameters(cache = true)
+@TransportParameters(cache = true, priority = 0)
 public final class InventoryMessage extends Message
 {
 	@JsonProperty("inventory")
