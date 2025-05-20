@@ -5,13 +5,17 @@ Hyperscale is a prototype sharded Layer 1 blockchain demonstrating novel consens
 ## Key Features
 
 ### Cassandra Consensus
+
 Hyperscale introduces Cassandra, a hybrid consensus mechanism that combines:
+
 - Classical BFT-style safety guarantees during healthy network conditions
 - Nakamoto-style probabilistic safety during network distress
 - Maintained liveness throughout all network conditions
 
 ### Cross-Shard Atomic Commitment
+
 Built on Cerberus principles, Hyperscale implements atomic cross-shard transactions through:
+
 - Coordinated consensus orchestration between shards
 - Deterministic commit/abort decisions
 - Fault-tolerant message propagation
@@ -19,6 +23,7 @@ Built on Cerberus principles, Hyperscale implements atomic cross-shard transacti
 ## Technical Implementation
 
 The prototype includes core cryptographic and consensus elements:
+
 - Validator signature verification
 - Merkle proof generation and validation
 - Validator voting mechanics
@@ -28,18 +33,22 @@ The prototype includes core cryptographic and consensus elements:
 ## Scope and Limitations
 
 This prototype is designed to demonstrate the feasibility of:
+
 1. High-throughput transaction processing
 2. Low-finality confirmation times
 3. Atomic cross-shard consensus
 4. Permissionless validator participation
 
 ### Intellectual Property Protection
+
 Several critical mechanisms required to develop a main net deployment are intentionally omitted to protect valuable intellectual property, including:
+
 - Shard reconfiguration algorithms to dynamically adjust to changing load over time
 - Validator shuffling mechanisms between shards (designed to prevent adversarial shard control)
 - Novel asymmetric proposal weighting function that creates computational overhead for attackers while remaining efficient for honest participants
 
 ### Implementation Notes
+
 - This codebase was developed as a research prototype to demonstrate consensus mechanisms and cross-shard atomic commitment
 - Code quality reflects research priorities rather than production standards
 - Contains expected "code smell" as the focus was on proving theoretical concepts rather than maintaining optimal code structure
@@ -50,6 +59,7 @@ While the implementation includes all essential elements to prove these capabili
 ## Architecture Overview
 
 The system operates through several key components:
+
 - Consensus engine (Cassandra)
 - Cross-shard communication protocol
 - Validator management system
@@ -62,10 +72,58 @@ This is a research prototype intended to demonstrate the viability of specific c
 ## Research Background
 
 Hyperscale builds on and extends several key areas of distributed systems research:
+
 - Byzantine Fault Tolerance protocols
 - Nakamoto consensus
 - Cross-shard atomic commitment
 - Distributed validator coordination
+
+## Installation / building from source
+
+### MacOS
+
+On MacOS, you can install the correct OpenJDK using [Homebrew](https://brew.sh):
+
+```
+brew install openjdk@21
+```
+
+On Apple Silicon macs, homebrew should install the openjdk to `/opt/homebrew/opt/openjdk@21`
+This may be different for intel macs, it could be `/usr/local/opt/openjdk@21`.
+
+To use this openjdk in the current shell session, export the JAVA_HOME variable using the following command:
+
+```bash
+export JAVA_HOME="/opt/homebrew/opt/openjdk@21"
+```
+
+This will only change the Java version in your current running terminal, so you'd need to run it every time you want to build/run Hyperscale. To make this persist across shell restarts, add it to `~/.zshrc`:
+
+```bash
+cat << 'EOF' >> ~/.zshrc
+# Set the openjdk version 21 as JAVA_HOME
+export JAVA_HOME="/opt/homebrew/opt/openjdk@21"
+EOF
+```
+
+You can build Hyperscale by running the gradle wrapper script
+
+```
+./gradlew jar
+```
+
+## Running
+
+After building Hyperscale you can find a `hyperscale.jar` file in `core/build/libs/`.
+
+- Copy the `hyperscale.jar` jar file into a new directory.
+- Copy the `node-0.key` and `universe.key` files from `core/` into the same directory.
+
+You can now start Hyperscale by going to the newly created directory and run:
+
+```
+java -jar hyperscale.jar -console -singleton
+```
 
 ## Contributing
 
