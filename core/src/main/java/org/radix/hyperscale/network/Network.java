@@ -723,8 +723,8 @@ public final class Network implements Service
 		final List<AbstractConnection> connections;
 		synchronized(this.connections)
 		{
-			final int count = count(filter);
-			connections = new ArrayList<AbstractConnection>(count);
+			int estimatedSize = 1 << (32 - Integer.numberOfLeadingZeros(this.connections.size()) / 2);
+			connections = new ArrayList<AbstractConnection>(estimatedSize);
 			for (int i = 0 ; i < this.connections.size() ; i++)
 			{
 				final AbstractConnection connection = this.connections.get(i);

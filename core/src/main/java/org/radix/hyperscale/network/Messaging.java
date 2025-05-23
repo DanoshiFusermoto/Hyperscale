@@ -130,7 +130,7 @@ public class Messaging
 
 		if (Time.getSystemTime() - message.getTimestamp() > (this.context.getConfiguration().get("messaging.time_to_live", 30)*1000l))
 		{
-			messagingLog.warn(this.context.getName()+": Inbound "+message+" with expired TTL of "+(Time.getSystemTime()-message.getTimestamp()));
+			messagingLog.warn(this.context.getName()+": Inbound "+message+" with expired TTL of "+(Time.getSystemTime()-message.getTimestamp())+" from "+connection);
 			return;
 		}
 		
