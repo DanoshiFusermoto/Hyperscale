@@ -6,6 +6,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -130,8 +131,8 @@ public class GossipHandler implements Service
 					getConnection().updateLatency(latency);
 					getConnection().decrementPendingRequests();
 					
-					if (latency > Constants.MIN_GOSSIP_REQUEST_TIMEOUT_MILLISECONDS)
-						gossipLog.warn(GossipHandler.this.context.getName()+": Fulfilled GossipTask "+hashCode()+" latently "+getID()+" in "+latency+"ms for "+getConnection());
+					if (latency > Constants.GOSSIP_REQUEST_LATENT_MILLISECONDS)
+						gossipLog.warn(GossipHandler.this.context.getName()+": Fulfilled GossipTask "+getID()+" latently in "+latency+"ms for "+getConnection());
 					else if (gossipLog.hasLevel(Logging.INFO))
 						gossipLog.info(GossipHandler.this.context.getName()+": Fulfilled GossipTask "+getID()+" in "+latency+"ms for "+getConnection());
 				}
@@ -142,7 +143,7 @@ public class GossipHandler implements Service
 				GossipHandler.this.context.getMetaData().increment("gossip.received.items");
 				GossipHandler.this.context.getMetaData().increment("gossip.received.items.interval", latency);
 					
-				if (latency > Constants.MIN_GOSSIP_REQUEST_TIMEOUT_MILLISECONDS)
+				if (latency > Constants.GOSSIP_REQUEST_LATENT_MILLISECONDS)
 				{
 					GossipHandler.this.context.getMetaData().increment("gossip.received.items.latent");
 					GossipHandler.this.context.getMetaData().increment("gossip.received.items.latent.interval", latency);
@@ -163,7 +164,7 @@ public class GossipHandler implements Service
 		private SourceType auditSources(final InventoryItem item)
 		{
 			SourceType sourceType = SourceType.NONE;
-			Set<AbstractConnection> sources = GossipHandler.this.itemSources.get(item);
+			final Set<AbstractConnection> sources = GossipHandler.this.itemSources.get(item);
 			if (sources.isEmpty() == false)
 			{
 				for (final AbstractConnection source : sources)
@@ -171,9 +172,11 @@ public class GossipHandler implements Service
 					if (source.getState() != ConnectionState.CONNECTED)
 						continue;
 					
-					if (source.isStale() && sourceType == SourceType.NONE)
+					if (source.isStale())
 					{
-						sourceType = SourceType.STALE;
+						if (sourceType == SourceType.NONE)
+							sourceType = SourceType.STALE;
+						
 						continue;
 					}
 					
@@ -353,8 +356,8 @@ public class GossipHandler implements Service
 			if (System.currentTimeMillis() - this.lastQueueSizeWarn > 1000)
 			{
 				final int broadcastQueueSize = GossipHandler.this.broadcastQueue.size();
-				final long EWMAResult = MathUtils.EWMA(GossipHandler.this.context.getMetaData().get("gossip.broadcast.queue", 0l), broadcastQueueSize, 0.9);
-				GossipHandler.this.context.getMetaData().put("gossip.broadcast.queue", EWMAResult);
+				final long broadcastEWMAResult = MathUtils.EWMA(GossipHandler.this.context.getMetaData().get("gossip.broadcast.queue", 0l), broadcastQueueSize, 0.25);
+				GossipHandler.this.context.getMetaData().put("gossip.broadcast.queue", broadcastEWMAResult);
 				
 				if (broadcastQueueSize > Constants.WARN_ON_QUEUE_SIZE)
 					gossipLog.warn(GossipHandler.this.context.getName()+": Broadcast queue is "+broadcastQueueSize);
@@ -412,11 +415,22 @@ public class GossipHandler implements Service
 		{
 			if (System.currentTimeMillis() - this.lastQueueSizeWarn > 1000)
 			{
-				GossipHandler.this.context.getMetaData().put("gossip.events.queue", MathUtils.EWMA(GossipHandler.this.context.getMetaData().get("gossip.events.queue", 0l), GossipHandler.this.eventQueue.size(), 0.9));
+				GossipHandler.this.context.getMetaData().put("gossip.events.queue", MathUtils.EWMA(GossipHandler.this.context.getMetaData().get("gossip.events.queue", 0l), GossipHandler.this.eventQueue.size(), 0.25));
 
+				final int eventQueueSize = GossipHandler.this.eventQueue.size();
+				final long eventEWMAResult = MathUtils.EWMA(GossipHandler.this.context.getMetaData().get("gossip.events.queue", 0l), eventQueueSize, 0.25);
+				GossipHandler.this.context.getMetaData().put("gossip.events.queue", eventEWMAResult);
+				
 				if (GossipHandler.this.eventQueue.size() > Constants.WARN_ON_QUEUE_SIZE)
 					gossipLog.warn(GossipHandler.this.context.getName()+": Gossip event queue is "+GossipHandler.this.eventQueue.size());
-					
+
+				final int requestQueueSize = GossipHandler.this.toRequest.size();
+				final long requestEWMAResult = MathUtils.EWMA(GossipHandler.this.context.getMetaData().get("gossip.requests.queue", 0l), requestQueueSize, 0.25);
+				GossipHandler.this.context.getMetaData().put("gossip.requests.queue", requestEWMAResult);
+
+				if (GossipHandler.this.toRequest.size() > Constants.WARN_ON_QUEUE_SIZE)
+					gossipLog.warn(GossipHandler.this.context.getName()+": Gossip request queue is "+GossipHandler.this.toRequest.size());
+
 				this.lastQueueSizeWarn = System.currentTimeMillis();
 			}
 
@@ -455,52 +469,28 @@ public class GossipHandler implements Service
 		});
 		
 		this.eventQueue = new PriorityBlockingQueue<GossipEvent>(this.context.getConfiguration().get("ledger.gossip.message.queue", 1<<12), new Comparator<GossipEvent>() {
-            final long AGE_THRESHOLD = Constants.BROADCAST_POLL_TIMEOUT;
-
             @Override
 	        public int compare(final GossipEvent m1, final GossipEvent m2) 
             {
-	            // Calculate logical age of events
-	            long logicalAge1 = System.currentTimeMillis() - m1.getMessage().getTimestamp();
-	            long logicalAge2 = System.currentTimeMillis() - m2.getMessage().getTimestamp();
-	            
-	            // If m1 is old enough, it gains priority regardless of urgency
-	            if (m1.isUrgent() == false && logicalAge1 > AGE_THRESHOLD && m2.isUrgent())
-	                return -1;
-	            
-	            // If m2 is old enough, it gains priority regardless of urgency
-	            if (m2.isUrgent() == false && logicalAge2 > AGE_THRESHOLD && m1.isUrgent())
-	                return 1;
-	            
-	            if (m1.isUrgent() && m2.isUrgent() == false)
-	                return -1;
-
-	            if (m1.isUrgent() == false && m2.isUrgent())
-	                return 1;
-	            
-	            // For messages of the same urgency, prioritize based on logical timestamp
-	            // (accounting for connection latency)
-	            long logicalTimestamp1 = m1.getMessage().getTimestamp() + m1.getConnection().getLatency();
-	            long logicalTimestamp2 = m2.getMessage().getTimestamp() + m2.getConnection().getLatency();
-	            
-	            // Bucket by BROADCAST_POLL_TIMEOUT for timestamp-based priority
-	            long timstampBucket1 = logicalTimestamp1 / Constants.BROADCAST_POLL_TIMEOUT;
-	            long timstampBucket2 = logicalTimestamp2 / Constants.BROADCAST_POLL_TIMEOUT;
-	            
-	            if (timstampBucket1 < timstampBucket2)
-	                return -1;
-
-	            if (timstampBucket1 > timstampBucket2)
-	                return 1;
-	            
-	            // For messages in the same time bucket, prioritize high latency connections
-	            if (m1.getConnection().getLatency() > m2.getConnection().getLatency())
-	                return -1;
-
-	            if (m1.getConnection().getLatency() < m2.getConnection().getLatency())
-	                return 1;
-	            
-	            return 0;
+            	long m1Seconds = TimeUnit.MILLISECONDS.toSeconds(m1.getMessage().getTimestamp());
+            	long m2Seconds = TimeUnit.MILLISECONDS.toSeconds(m2.getMessage().getTimestamp());
+            	
+            	if (m1Seconds < m2Seconds)
+            		return -1;
+            	
+            	if (m1Seconds > m2Seconds)
+            		return 1;
+            	
+            	int m1Priority = m1.getMessage().getClass().getAnnotation(TransportParameters.class).priority();
+            	int m2Priority = m1.getMessage().getClass().getAnnotation(TransportParameters.class).priority();
+            	
+            	if (m1Priority > m2Priority)
+            		return -1;
+            	
+            	if (m1Priority < m2Priority)
+            		return 1;
+            	
+            	return 0;
 	        }
 	    });
 	}
@@ -592,26 +582,29 @@ public class GossipHandler implements Service
 				GossipHandler.this.lock.lock();
 				try
 				{
-					final Iterator<InventoryItem> itemIterator = GossipHandler.this.toRequest.iterator();
-					while(itemIterator.hasNext())
+					synchronized(GossipHandler.this.toRequest)
 					{
-						final InventoryItem item = itemIterator.next();
-
-						boolean hasSource = false;
-						for (final AbstractConnection connection : GossipHandler.this.itemSources.get(item))
+						final Iterator<InventoryItem> itemIterator = GossipHandler.this.toRequest.iterator();
+						while(itemIterator.hasNext())
 						{
-							if (connection.getState().equals(ConnectionState.CONNECTED) == false || connection.isStale())
-								continue;
+							final InventoryItem item = itemIterator.next();
+	
+							boolean hasSource = false;
+							for (final AbstractConnection connection : GossipHandler.this.itemSources.get(item))
+							{
+								if (connection.getState().equals(ConnectionState.CONNECTED) == false || connection.isStale())
+									continue;
+									
+								hasSource = true;
+								break;
+							}
 								
-							hasSource = true;
-							break;
-						}
-							
-						if (hasSource == false)
-						{
-							itemIterator.remove();
-							GossipHandler.this.itemSources.removeAll(item);
-							gossipLog.warn(GossipHandler.this.context.getName()+": No sources available for "+item);
+							if (hasSource == false)
+							{
+								itemIterator.remove();
+								GossipHandler.this.itemSources.removeAll(item);
+								gossipLog.warn(GossipHandler.this.context.getName()+": No sources available for "+item);
+							}
 						}
 					}
 				}
@@ -638,7 +631,7 @@ public class GossipHandler implements Service
 	{
 		boolean hasUrgentTransport = false;
 		long pollLatchTimer = System.currentTimeMillis();
-		long nextPollTimer = Constants.BROADCAST_POLL_TIMEOUT;
+		long nextPollTimer = (long) (Constants.BROADCAST_POLL_TIMEOUT + Math.sqrt(this.broadcastQueue.size()));
 
 		final MutableMultimap<ShardGroupID, GossipBroadcast> toBroadcast = Multimaps.mutable.set.empty();
 		try
@@ -782,8 +775,12 @@ public class GossipHandler implements Service
 	private void _processGossipEvents()
 	{
 		GossipEvent event;
+		int processedEvents = 0 ;
+		int processedInventory = 0 ;
+		int processedReceive = 0 ;
+		int processedFetch = 0 ;
 		long pollLatchTimer = System.currentTimeMillis();
-		long nextPollTimer = Constants.BROADCAST_POLL_TIMEOUT;
+		long nextPollTimer = (long) (Constants.BROADCAST_POLL_TIMEOUT + Math.sqrt(this.eventQueue.size()));
 		
 		try
 		{
@@ -795,17 +792,31 @@ public class GossipHandler implements Service
 				// For remote instances requesting items, process them as not doing so would cause a 
 				// disconnection and the remote instance would have to locate them elsewhere, causing latency.
 				if (event.getMessage() instanceof InventoryMessage inventoryMessage && this.context.getNode().isSynced())
+				{
 					inventory(inventoryMessage, event.getConnection());
+					processedInventory++;
+				}
 				else if (event.getMessage() instanceof ItemsMessage itemsMessage && this.context.getNode().isSynced())
+				{
 					received(itemsMessage, event.getConnection());
+					processedReceive++;
+				}
 				else if (event.getMessage() instanceof GetItemsMessage getItemsMessage)
+				{
 					fetch(getItemsMessage, event.getConnection());
+					processedFetch++;
+				}
 					
+				processedEvents++;
+				
 				// Adjust the poll timer based on elapsed time so we have a consistent Constants.BROADCAST_POLL_TIMEOUT interval
 				nextPollTimer = Constants.BROADCAST_POLL_TIMEOUT - (System.currentTimeMillis() - pollLatchTimer);
 				if (nextPollTimer <= 0)
 					break;
 			}
+
+			if (processedEvents > 0 && gossipLog.hasLevel(Logging.DEBUG))
+				gossipLog.debug(GossipHandler.this.context.getName()+": Processed "+processedEvents+" gossip events: INV="+processedInventory+" RECV="+processedReceive+" FETCH="+processedFetch);
 		} 
 		catch (InterruptedException ex) 
 		{
@@ -819,104 +830,112 @@ public class GossipHandler implements Service
 	
 	private void _actionRequests()
 	{
-		// Get weighted connections using filter
-		final StandardConnectionFilter standardPeerFilter = StandardConnectionFilter.build(this.context).setStates(ConnectionState.CONNECTED).setSynced(true).setStale(false);
-		final List<AbstractConnection> connections = this.context.getNetwork().get(standardPeerFilter);
+		final Map<AbstractConnection, List<InventoryItem>> nextToRequest;
 
-		final Map<AbstractConnection, List<InventoryItem>> nextToRequest = new HashMap<>(connections.size());
 		this.lock.lock();
 		try
 		{
-			for (final InventoryItem item : this.toRequest)
-			{
-				if (this.inventoryProcessors.get(item.getType()) == null)
+			// Get weighted connections using filter
+			final StandardConnectionFilter standardPeerFilter = StandardConnectionFilter.build(this.context).setStates(ConnectionState.CONNECTED).setSynced(true).setStale(false).with(c -> {
+				// Filter connections if can only serve one pending request task at a time 
+				if (this.context.getConfiguration().get("network.gossip.requests.singleton", false).equals(Boolean.TRUE))
 				{
-					gossipLog.error(this.context.getName()+": Inventory processor for "+item+" is not found");
-					continue;
+					for (final GossipRequestTask gossipRequestTask : this.requestTasks.get(c))
+					{
+						if (gossipRequestTask.numRemaining() > 0)
+							return false;
+					}
 				}
 				
-				if (connections.isEmpty())
-					break;
-				
-				final Iterator<AbstractConnection> connectionsIterator = connections.iterator();
-				while(connectionsIterator.hasNext())
-				{
-					final AbstractConnection connection = connectionsIterator.next();
-					
-					// Connection went stale during this request iteration
-					if (connection.isStale())
-					{
-						connectionsIterator.remove();
-						continue;
-					}
-					
-					// Max iteration quota reached for this connection
-					int queuedRequests = nextToRequest.getOrDefault(connection, Collections.emptyList()).size();					
-					if (queuedRequests >= Constants.MAX_REQUEST_INVENTORY_ITEMS)
-					{
-						connectionsIterator.remove();
-						continue;
-					}
-					
-					// Max quota reached for this connection
-					int outstandingRequests = MathUtils.sqr(connection.pendingRequests()) + connection.pendingWeight() + queuedRequests;
-					if (outstandingRequests >= Constants.MAX_REQUEST_INVENTORY_ITEMS_TOTAL)
-					{
-						connectionsIterator.remove();
-						continue;
-					}
-					
-					// Check if connection can only serve one pending request task at a time 
-					if (this.context.getConfiguration().get("network.gossip.requests.singleton", false).equals(Boolean.TRUE))
-					{
-						boolean connectionAvailable = true;
-						for (final GossipRequestTask gossipRequestTask : this.requestTasks.get(connection))
-						{
-							if (gossipRequestTask.numRemaining() > 0)
-							{
-								connectionAvailable = false;
-								break;
-							}
-						}
+				return true;
+			});
 
-						if (connectionAvailable == false)
+			final List<AbstractConnection> connections = this.context.getNetwork().get(standardPeerFilter);
+			final Set<AbstractConnection> connectionsToSkip = new HashSet<AbstractConnection>(connections.size());
+			nextToRequest = new HashMap<>(connections.size());
+
+			synchronized(this.toRequest)
+			{
+				for (final InventoryItem item : this.toRequest)
+				{
+					if (this.inventoryProcessors.get(item.getType()) == null)
+					{
+						gossipLog.error(this.context.getName()+": Inventory processor for "+item+" is not found");
+						continue;
+					}
+					
+					if (connections.size() == connectionsToSkip.size())
+						break;
+					
+					for (int i = 0 ; i < connections.size() ; i++)
+					{
+						final AbstractConnection connection = connections.get(i);
+						if (connectionsToSkip.contains(connection))
+							continue;
+						
+						// Connection went stale during this request iteration
+						if (connection.isStale())
 						{
-							connectionsIterator.remove();
+							connectionsToSkip.add(connection);
 							continue;
 						}
+						
+						// Max quota reached for this connection
+						int queuedRequests = nextToRequest.getOrDefault(connection, Collections.emptyList()).size();					
+						int outstandingRequests = MathUtils.sqr(connection.pendingRequests()) + connection.pendingWeight() + queuedRequests;
+						if (outstandingRequests >= Constants.MAX_REQUEST_INVENTORY_ITEMS_TOTAL)
+						{
+							gossipLog.warn(this.context.getName()+": Request quota reached for connection "+connection);
+							connectionsToSkip.add(connection);
+							continue;
+						}
+						
+						// Connection has not signalled it has the item
+						if (this.itemSources.containsKeyAndValue(item, connection) == false)
+							continue;
+	
+						// Add item to request inventory for this connection
+						nextToRequest.computeIfAbsent(connection, c -> new ArrayList<InventoryItem>());
+						nextToRequest.get(connection).add(item);
+						
+						break;
 					}
-
-					// Connection has not signalled it has the item
-					if (this.itemSources.containsKeyAndValue(item, connection) == false)
-						continue;
-
-					// Add item to request inventory for this connection
-					nextToRequest.computeIfAbsent(connection, c -> new ArrayList<InventoryItem>());
-					nextToRequest.get(connection).add(item);
-					
-					// Perform only one urgent request per connection per iteration
-					if (item.isUrgent())
-						connectionsIterator.remove();
-
-					break;
-				}
-			}
-			
-			for (final Entry<AbstractConnection, List<InventoryItem>> entry : nextToRequest.entrySet())
-			{
-				try
-				{
-					request(entry.getKey(), entry.getValue());
-				}
-				catch (IOException ex)
-				{
-					gossipLog.error(this.context.getName()+": Unable to send request of "+entry.getValue()+" items in shard group to "+entry.getKey().toString(), ex);
 				}
 			}
 		}
 		finally
 		{
 			this.lock.unlock();
+		}
+			
+		for (final Entry<AbstractConnection, List<InventoryItem>> entry : nextToRequest.entrySet())
+		{
+			int requestStart = 0;
+			int requestEnd;
+
+			// Split a large request into multiple smaller requests to improve responsiveness
+			while(requestStart < entry.getValue().size())
+			{
+				requestEnd = Math.min(requestStart + Constants.MAX_REQUEST_INVENTORY_ITEMS, entry.getValue().size());
+					
+				final List<InventoryItem> requestItems = entry.getValue().subList(requestStart, requestEnd);
+				
+				this.lock.lock();
+				try
+				{
+					request(entry.getKey(), requestItems);
+				}
+				catch (IOException ex)
+				{
+					gossipLog.error(this.context.getName()+": Unable to send request of "+requestItems+" items in shard group to "+entry.getKey().toString(), ex);
+				}
+				finally
+				{
+					this.lock.unlock();
+				}
+					
+				requestStart = requestEnd;
+			}
 		}
 	}
 	
@@ -1319,6 +1338,14 @@ public class GossipHandler implements Service
 						if (requestTask == null)
 						{
 							this.itemSources.put(item, connection);
+							
+							if (gossipLog.hasLevel(Logging.DEBUG))
+							{
+								final int numSources = this.itemSources.get(item).size();
+								if (numSources > 1)
+									gossipLog.debug(this.context.getName()+": Item "+item+" has "+numSources+" sources");
+							}
+								
 							this.toRequest.add(item);
 						}
 						else
@@ -1331,6 +1358,14 @@ public class GossipHandler implements Service
 							if (requestTask.getStatus(item).equals(GossipRequestTask.Status.PENDING))
 							{
 								this.itemSources.put(item, connection);
+
+								if (gossipLog.hasLevel(Logging.DEBUG))
+								{
+									final int numSources = this.itemSources.get(item).size();
+									if (numSources > 1)
+										gossipLog.debug(this.context.getName()+": Item "+item+" has "+numSources+" sources");
+								}
+
 								continue;
 							}
 								
@@ -1367,74 +1402,89 @@ public class GossipHandler implements Service
 		
 		int itemsWeight = 0;
 		int itemsPending = 0;
+
+		GossipRequestTask requestTask = null;
 		final MutableSet<InventoryItem> itemsToRequest = Sets.mutable.withInitialCapacity(items.size());
-		this.lock.lock();
 		try
 		{
-			if (GossipHandler.this.context.getConfiguration().get("network.gossip.requests.singleton", false).equals(Boolean.TRUE))
-			{
-				for (final GossipRequestTask gossipRequestTask : GossipHandler.this.requestTasks.get(connection))
-				{
-					if (gossipRequestTask.numRemaining() != 0)
-						throw new IOException("Gossip task already pending for "+connection);
-				}
-			}
-
-			for (int i = 0 ; i < items.size() ; i++)
-			{
-				final InventoryItem item = items.get(i);
-				if (this.itemsRequested.containsKey(item) == false)
-					itemsToRequest.add(item);
-
-				itemsPending++;
-			}
-
-			if (itemsPending == 0)
-			{
-				gossipLog.warn(GossipHandler.this.context.getName()+": No items required from "+connection.toString());
-				return Collections.emptySet();
-			}
-			
-			if (itemsToRequest.isEmpty())
-				return Collections.emptySet();
-
-			final long gossipRequestTimeout = connection.getNextTimeout(itemsToRequest.size(), TimeUnit.MILLISECONDS);
-			final GossipRequestTask gossipRequestTask = new GossipRequestTask(connection, itemsToRequest, Math.min(gossipRequestTimeout, Constants.MAX_GOSSIP_REQUEST_TIMEOUT_MILLISECONDS), TimeUnit.MILLISECONDS);
+			this.lock.lock();
 			try
 			{
+				if (GossipHandler.this.context.getConfiguration().get("network.gossip.requests.singleton", false).equals(Boolean.TRUE))
+				{
+					for (final GossipRequestTask existingRequestTask : GossipHandler.this.requestTasks.get(connection))
+					{
+						if (existingRequestTask.numRemaining() != 0)
+							throw new IOException("Gossip task already pending for "+connection);
+					}
+				}
+
+				for (int i = 0 ; i < items.size() ; i++)
+				{
+					final InventoryItem item = items.get(i);
+					if (this.itemsRequested.containsKey(item) == false)
+						itemsToRequest.add(item);
+
+					itemsPending++;
+				}
+
+				if (itemsPending == 0)
+				{
+					gossipLog.warn(GossipHandler.this.context.getName()+": No items required from "+connection.toString());
+					return Collections.emptySet();
+				}
+			
+				if (itemsToRequest.isEmpty())
+					return Collections.emptySet();
+
+				final long requestTimeout = connection.getNextTimeout(itemsToRequest.size(), TimeUnit.MILLISECONDS);
+				requestTask = new GossipRequestTask(connection, itemsToRequest, Math.min(requestTimeout, Constants.MAX_GOSSIP_REQUEST_TIMEOUT_MILLISECONDS), TimeUnit.MILLISECONDS);
 				for (final InventoryItem itemToRequest : itemsToRequest)
 				{
-					if (this.itemsRequested.putIfAbsent(itemToRequest, gossipRequestTask) != null)
+					if (this.itemsRequested.putIfAbsent(itemToRequest, requestTask) != null)
 						throw new IllegalStateException("Request task already associated with item "+itemToRequest);
 					
 					itemsWeight += itemToRequest.getWeight();
 				}
 				
 				this.toRequest.removeAll(itemsToRequest);
-				this.requestTasks.put(connection, gossipRequestTask);
-				
-				this.context.getNetwork().getMessaging().send(new GetItemsMessage(itemsToRequest), connection);
-				
-				Executor.getInstance().schedule(gossipRequestTask);
-				
-				if (gossipLog.hasLevel(Logging.INFO))
-					gossipLog.info(GossipHandler.this.context.getName()+": Requested "+itemsToRequest.size()+" items "+itemsToRequest+" with request ID "+gossipRequestTask.getID()+":"+gossipRequestTimeout+"ms from "+connection.toString());
+				this.requestTasks.put(connection, requestTask);
 			}
-			catch (Throwable t)
+			finally
 			{
-				gossipRequestTask.cancel();
-				
-				for (final InventoryItem itemToRequest : itemsToRequest)
-				{
-					this.toRequest.add(itemToRequest);
-					this.itemsRequested.remove(itemToRequest);
-				}
-				throw t;
+				this.lock.unlock();
 			}
+				
+			this.context.getNetwork().getMessaging().send(new GetItemsMessage(itemsToRequest), connection);
+			Executor.getInstance().schedule(requestTask);
+				
+			if (gossipLog.hasLevel(Logging.INFO))
+				gossipLog.info(GossipHandler.this.context.getName()+": Requested "+itemsToRequest.size()+" items "+itemsToRequest+" with request ID "+requestTask.getID()+":"+requestTask.getInitialDelay()+"ms from "+connection.toString());
 		}
-		finally
+		catch (Throwable t)
 		{
-			this.lock.unlock();
+			// Never created a request so have to revert manually
+			if (requestTask == null)
+			{
+				this.lock.lock();
+				try
+				{
+					for (final InventoryItem itemToRequest : itemsToRequest)
+					{
+						this.toRequest.add(itemToRequest);
+						this.itemsRequested.remove(itemToRequest);
+					}
+				}
+				finally
+				{
+					this.lock.unlock();
+				}
+			}
+			// Request task was created so cancel() will do the reversion
+			else
+				requestTask.cancel();
+			
+			throw t;
 		}
 		
 		final ObjectLongHashMap<String> itemCountsByType = ObjectLongHashMap.newMap();
@@ -1467,6 +1517,7 @@ public class GossipHandler implements Service
 			if (gossipLog.hasLevel(Logging.INFO))
 				gossipLog.info(GossipHandler.this.context.getName()+": Processing received items "+inventory.stream().map(i -> i.getHash()).collect(Collectors.toList())+" from "+connection.toString());
 
+			final MutableMap<InventoryItem, GossipRequestTask> itemsToTasks = Maps.mutable.ofInitialCapacity(inventory.size());
 			final MutableSetMultimap<Class<? extends Primitive>, Primitive> itemsByType = Multimaps.mutable.set.empty();
 			this.lock.lock();
 			try
@@ -1481,17 +1532,22 @@ public class GossipHandler implements Service
 						continue;
 					}
 					
-					itemRequestTask.received(item);
-					itemsByType.put(item.getType(), item.getPrimitive());
+					itemsToTasks.put(item, itemRequestTask);
 					this.itemSources.removeAll(item);
-
-					if (gossipLog.hasLevel(Logging.TRACE) && item.getHash().asLong() % 1000 == 0)
-						gossipLog.trace(GossipHandler.this.context.getName()+": Witnessed item "+item.getType()+":"+item.getHash());
 				}
 			}
 			finally
 			{
 				this.lock.unlock();
+			}
+			
+			for (final Entry<InventoryItem, GossipRequestTask> itemAndTask : itemsToTasks.entrySet())
+			{
+				itemAndTask.getValue().received(itemAndTask.getKey());
+				itemsByType.put(itemAndTask.getKey().getType(), itemAndTask.getKey().getPrimitive());
+
+				if (gossipLog.hasLevel(Logging.TRACE) && itemAndTask.getKey().getHash().asLong() % 1000 == 0)
+					gossipLog.trace(GossipHandler.this.context.getName()+": Witnessed item "+itemAndTask.getKey().getType()+":"+itemAndTask.getKey().getHash());
 			}
 			
 			for (final Class<? extends Primitive> type : itemsByType.keySet())
