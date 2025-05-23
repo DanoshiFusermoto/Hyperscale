@@ -52,6 +52,7 @@ import org.radix.hyperscale.network.peers.Peer;
 import org.radix.hyperscale.network.peers.PeerHandler;
 import org.radix.hyperscale.node.Node;
 import org.radix.hyperscale.time.Time;
+import org.radix.hyperscale.utils.MathUtils;
 import org.radix.hyperscale.utils.UInt128;
 import org.radix.hyperscale.utils.URIs;
 
@@ -723,7 +724,7 @@ public final class Network implements Service
 		final List<AbstractConnection> connections;
 		synchronized(this.connections)
 		{
-			int estimatedSize = 1 << (32 - Integer.numberOfLeadingZeros(this.connections.size()) / 2);
+			int estimatedSize = this.connections.size() <= 0 ? 4 : Math.max(4, MathUtils.log2(this.connections.size()));
 			connections = new ArrayList<AbstractConnection>(estimatedSize);
 			for (int i = 0 ; i < this.connections.size() ; i++)
 			{
