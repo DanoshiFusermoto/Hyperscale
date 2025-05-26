@@ -48,7 +48,6 @@ import org.radix.hyperscale.ledger.events.AtomExceptionEvent;
 import org.radix.hyperscale.ledger.events.AtomExecutableEvent;
 import org.radix.hyperscale.ledger.events.AtomExecutedEvent;
 import org.radix.hyperscale.ledger.events.AtomExecutionTimeoutEvent;
-import org.radix.hyperscale.ledger.events.AtomPreparedEvent;
 import org.radix.hyperscale.ledger.events.AtomProvisionedEvent;
 import org.radix.hyperscale.ledger.events.BlockCommittedEvent;
 import org.radix.hyperscale.ledger.events.ProgressPhaseEvent;
@@ -513,13 +512,16 @@ public final class StateHandler implements Service
 						final Substate substate = entry.getKey().get();
        					final PendingAtom pendingAtom = entry.getValue();
 
-       					// Provisioning completed via a different route, or failure occurred 
-       					if (pendingAtom.getStatus().after(AtomStatus.State.PROVISIONING))
-       						continue;
-       						
                  		// Create a state input for this substate request
      					final StateInput stateInput = new StateInput(pendingAtom.getHash(), substate);
-     					
+
+     					// Provisioning completed via a different route, or failure occurred 
+       					if (pendingAtom.getStatus().after(AtomStatus.State.PROVISIONING))
+       					{
+    						stateLog.warn(this.context.getName()+": Pending atom is "+pendingAtom.getStatus()+" for state input provisioning "+stateInput);
+       						continue;
+       					}
+       						
      					if (stateLog.hasLevel(Logging.INFO))
      						stateLog.info(this.context.getName()+": Read remote state "+stateInput+" is completed for atom "+pendingAtom.getHash());
 
@@ -633,7 +635,12 @@ public final class StateHandler implements Service
 	        						stateLog.warn(this.context.getName()+": Failed to store state input "+stateInput);
 	        				}
 	        				else
+	        				{
 	        					this.pendingSubstateRequests.put(substateRequest, pendingAtom);
+	        					
+	        					if (stateLog.hasLevel(Logging.DEBUG))
+	        						stateLog.debug(this.context.getName()+": Requested read remote state "+pendingState+" for atom "+pendingAtom.getHash());
+	        				}
 	                	}
 					}
 				}
@@ -985,9 +992,15 @@ public final class StateHandler implements Service
 	private EventListener asyncAtomListener = new EventListener()
 	{
 		@Subscribe
-		public void on(final AtomPreparedEvent event)
+		public void on(final AtomAcceptedEvent event)
 		{
-			final Epoch epoch = StateHandler.this.context.getLedger().getEpoch();
+			// Provision accepted atom
+			PendingAtom pendingAtom = event.getPendingAtom();
+			if (pendingAtom.getStatus().before(AtomStatus.State.ACCEPTED))
+				throw new IllegalStateException(StateHandler.this.context.getName()+": Pending atom "+pendingAtom.getHash()+" accepted in block "+pendingAtom.getBlockHeader().getHash()+" is before ACCEPTED state");
+
+			// The epoch the atom was accepted in
+			final Epoch epoch = Epoch.from(event.getPendingAtom().getBlockHeader());
 			
 			// Broadcast any StateCertificate / StateInputs received early
 			event.getPendingAtom().forStates(StateLockMode.WRITE, ps -> {
@@ -999,15 +1012,7 @@ public final class StateHandler implements Service
 				if (stateOutput instanceof StateCertificate stateCertificate)
 					StateHandler.this.broadcast(event.getPendingAtom(), stateCertificate, epoch);
 			});
-		}
-		
-		@Subscribe
-		public void on(final AtomAcceptedEvent event)
-		{
-			// Provision accepted atom
-			PendingAtom pendingAtom = event.getPendingAtom();
-			if (pendingAtom.getStatus().before(AtomStatus.State.ACCEPTED))
-				throw new IllegalStateException(StateHandler.this.context.getName()+": Pending atom "+pendingAtom.getHash()+" accepted in block "+pendingAtom.getBlockHeader().getHash()+" is before ACCEPTED state");
+
 				
 			if (stateLog.hasLevel(Logging.DEBUG))
 				stateLog.debug(StateHandler.this.context.getName()+": Queuing pending atom "+pendingAtom.getHash()+" for provisioning");
@@ -1037,6 +1042,7 @@ public final class StateHandler implements Service
 		public void on(final AtomProvisionedEvent event) 
 		{
 			// Atoms may be signalled executable BEFORE they are provisioned in certain edge cases such as the desync / sync sequence
+			// TODO why? Suspect these additional conditionals may cause executions to be missed
 			if (event.getPendingAtom().isExecuteSignalled() && event.getPendingAtom().isExecuted() == false)
 				queueForExecution(event.getPendingAtom());
 		}
@@ -1044,6 +1050,7 @@ public final class StateHandler implements Service
 		@Subscribe
 		public void on(final AtomExecutableEvent event)
 		{
+			// TODO why? Suspect these additional conditionals may cause executions to be missed
 			if (event.getPendingAtom().isProvisioned() && event.getPendingAtom().isExecuted() == false)
 				queueForExecution(event.getPendingAtom());
 		}

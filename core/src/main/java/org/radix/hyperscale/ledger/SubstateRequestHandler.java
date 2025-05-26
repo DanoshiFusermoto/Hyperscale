@@ -62,6 +62,7 @@ public final class SubstateRequestHandler implements Service
 		SubstateRequest(final StateAddress address, final Hash version)
 		{
 			this.requestedAt = System.currentTimeMillis();
+			this.witnessedAt = Long.MAX_VALUE;
 			this.address = address;
 			this.version = version;
 			this.reattempts = 0;
@@ -83,10 +84,24 @@ public final class SubstateRequestHandler implements Service
 		
 		boolean isTimeout()
 		{
+			if (isDone())
+				return false;
+			
 			if (this.reattempts == 0)
 				return (System.currentTimeMillis() - this.requestedAt) > this.timeout;
 			else
 				return (System.currentTimeMillis() - this.reattemptedAt) > this.timeout;
+		}
+		
+		boolean isStale()
+		{
+			if (isDone() == false)
+				return false;
+			
+			if (System.currentTimeMillis() - this.witnessedAt < SubstateRequestHandler.SUBSTATE_RECORD_LIFETIME_MS)
+				return false;
+			
+			return true;
 		}
 		
 		@Override
@@ -105,6 +120,14 @@ public final class SubstateRequestHandler implements Service
 			reset();
 			
 			return super.complete(substate);
+		}
+		
+		@Override
+		public boolean completeExceptionally(final Throwable ex)
+		{
+		    reset();
+		    
+		    return super.completeExceptionally(ex);
 		}
 
 		protected long getRequestedAt()
@@ -165,6 +188,9 @@ public final class SubstateRequestHandler implements Service
 			connection.incrementPendingWeight();
 			connection.updateRequests(1);
 			connection.updateRequested(1);
+			
+			if (gossipLog.hasLevel(Logging.DEBUG))
+				gossipLog.debug(SubstateRequestHandler.this.context.getName()+": Sent remote substate read for "+this.address+" version "+this.version+" to "+this.connection);
 		}
 	}
 	
@@ -195,15 +221,15 @@ public final class SubstateRequestHandler implements Service
 					this.timedoutSubstateRequests.add(substateRequest);
 				}
 				
-				SubstateRequestHandler.this.reattempt(this.timedoutSubstateRequests);
+				if (this.timedoutSubstateRequests.isEmpty() == false)
+					SubstateRequestHandler.this.reattempt(this.timedoutSubstateRequests);
 				
 				final Iterator<SubstateRequest> completedRequestsIterator = SubstateRequestHandler.this.completedRequests.values().iterator();
 				while(completedRequestsIterator.hasNext())
 				{
 					final SubstateRequest completedSubstateRequest = completedRequestsIterator.next();
 
-					// Expired?
-					if (System.currentTimeMillis() - completedSubstateRequest.getWitnessedAt() < SubstateRequestHandler.SUBSTATE_RECORD_LIFETIME_MS)
+					if (completedSubstateRequest.isStale() == false)
 						continue;
 					
 					completedRequestsIterator.remove();
@@ -317,7 +343,7 @@ public final class SubstateRequestHandler implements Service
 						
 						substateRequest.complete(substateMessage.getSubstate());
 						if (substateRequest.reattempts() > 0)
-							gossipLog.log(SubstateRequestHandler.this.context.getName()+": Substate request fulfilled on attempt "+substateRequest.reattempts()+" for "+substateMessage.getSubstate().getAddress()+" version "+substateMessage.getVersion()+" from "+connection);
+							gossipLog.warn(SubstateRequestHandler.this.context.getName()+": Substate request fulfilled on attempt "+substateRequest.reattempts()+" for "+substateMessage.getSubstate().getAddress()+" version "+substateMessage.getVersion()+" from "+connection);
 							
 						SubstateRequestHandler.this.completedRequests.put(lookupHash, substateRequest);
 					}
@@ -375,8 +401,7 @@ public final class SubstateRequestHandler implements Service
 			final SubstateRequest completedRequestFuture = this.completedRequests.get(lookupHash);
 			if (completedRequestFuture != null)
 			{
-				// Expired?
-				if (System.currentTimeMillis() - completedRequestFuture.getWitnessedAt() < SubstateRequestHandler.SUBSTATE_RECORD_LIFETIME_MS)
+				if (completedRequestFuture.isStale() == false)
 					return completedRequestFuture;
 				
 				if (this.completedRequests.remove(lookupHash, completedRequestFuture) == false)
@@ -412,21 +437,22 @@ public final class SubstateRequestHandler implements Service
 			final List<AbstractConnection> connections = this.context.getNetwork().get(connectionFilter);
 			if (connections.isEmpty())
 				throw new IOException("No remote connections available to request substate "+address+" version "+version);
-
+			
 			this.pendingRequests.put(lookupHash, pendingRequestFuture);
 
 			final AbstractConnection requestConnection = connections.getFirst();
 			try
 			{
+				this.requestAssignment.put(requestConnection, lookupHash);
+
 				long timeout = Math.min(requestConnection.getNextTimeout(1, TimeUnit.MILLISECONDS), Constants.MAX_DIRECT_REQUEST_TIMEOUT_MILLISECONDS);
 				pendingRequestFuture.request(requestConnection, timeout, TimeUnit.MILLISECONDS);	
-				this.requestAssignment.put(requestConnection, lookupHash);
 			}
 			catch(Exception ex)
 			{
 				// Clean up failed request
-				this.pendingRequests.remove(lookupHash, pendingRequestFuture);
 				this.requestAssignment.remove(requestConnection, lookupHash);
+				this.pendingRequests.remove(lookupHash, pendingRequestFuture);
 				throw ex;
 			}
 			
@@ -452,6 +478,8 @@ public final class SubstateRequestHandler implements Service
 				try
 				{
 					final AbstractConnection requestConnection = request.getConnection();
+					this.requestAssignment.remove(requestConnection, lookupHash);
+					
 					try
 					{
 						if (requestConnection.getState().equals(ConnectionState.CONNECTED) || requestConnection.getState().equals(ConnectionState.CONNECTING))
