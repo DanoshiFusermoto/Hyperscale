@@ -12,13 +12,14 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketException;
 import java.net.URI;
-import java.util.Comparator;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.PriorityBlockingQueue;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
@@ -62,7 +63,6 @@ public abstract class AbstractConnection extends Serializable implements Compara
 	private static final Logger networkLog = Logging.getLogger("network");
 
 	private static final int DEFAULT_BANTIME_SECONDS = 60 * 60;
-	private static final boolean USE_PRIORITY_OUTBOUND_QUEUE = false;
 	
 	private static boolean bufferWarning = false;
 	
@@ -146,67 +146,23 @@ public abstract class AbstractConnection extends Serializable implements Compara
 	private TCPOutboundProcessor outboundProcessor = null;
 	private class TCPOutboundProcessor implements Runnable
 	{
+		private long lastFlush = 0;
+		private boolean requiresFlush = true;
+		private final DataOutputStream dataOutputStream;
 		private final BlockingQueue<Message> outboundQueue;
 		
 		TCPOutboundProcessor()
 		{
-			if (AbstractConnection.USE_PRIORITY_OUTBOUND_QUEUE)
-			{
-				this.outboundQueue = new PriorityBlockingQueue<Message>(AbstractConnection.this.context.getConfiguration().get("messaging.outbound.queue_max", 1<<12), new Comparator<Message>() {
-		            long AGE_THRESHOLD = Constants.BROADCAST_POLL_TIMEOUT;
-	
-		            @Override
-			        public int compare(final Message m1, final Message m2) 
-			        {
-			            // Get current time to calculate age
-			            long currentTime = System.currentTimeMillis();
-			            
-			            // Calculate age of messages
-			            long age1 = currentTime - m1.getTimestamp();
-			            long age2 = currentTime - m2.getTimestamp();
-			            
-			            // If m1 is old enough, it gains priority regardless of urgency
-			            if (m1.isUrgent() == false && age1 > AGE_THRESHOLD && m2.isUrgent())
-			                return -1;
-			            
-			            // If m2 is old enough, it gains priority regardless of urgency
-			            if (m2.isUrgent() == false && age2 > AGE_THRESHOLD && m1.isUrgent())
-			                return 1;
-			            
-			            // Otherwise, use the simple urgency-based comparison
-			            if (m1.isUrgent() && m2.isUrgent() == false)
-			                return -1;
-			            if (m1.isUrgent() == false && m2.isUrgent())
-			                return 1;
-			            
-			            // For same urgency, older messages get higher priority
-			            if (m1.getTimestamp() < m2.getTimestamp())
-			                return -1;
-			            if (m1.getTimestamp() > m2.getTimestamp())
-			                return 1;
-			            
-			            return 0;
-			        }
-			    });
-			}
-			else
-				this.outboundQueue = new ArrayBlockingQueue<Message>(AbstractConnection.this.context.getConfiguration().get("messaging.outbound.queue_max", 1<<12));
+			BufferedOutputStream bufferedOutputStream = new BufferedOutputStream(AbstractConnection.this.outputStream, 1<<14);
+			this.dataOutputStream = new DataOutputStream(bufferedOutputStream);
+			this.outboundQueue = new ArrayBlockingQueue<Message>(AbstractConnection.this.context.getConfiguration().get("messaging.outbound.queue_max", 1<<12));
 		}
 		
 		@Override
-		public void run ()
+		public void run()
 		{
-			Message message = null;
-			long lastFlush = 0;
-			boolean requiresFlush = true;
-
-			final DataOutputStream dataOutputStream;
-			final BufferedOutputStream bufferedOutputStream;
 			try
 			{
-				bufferedOutputStream = new BufferedOutputStream(AbstractConnection.this.outputStream, 1<<14);
-				dataOutputStream = new DataOutputStream(bufferedOutputStream);
-
 				while (AbstractConnection.this.socket.isConnected() && 
 					   AbstractConnection.this.getState().equals(ConnectionState.DISCONNECTING) == false && 
 					   AbstractConnection.this.getState().equals(ConnectionState.DISCONNECTED) == false)
@@ -221,42 +177,35 @@ public abstract class AbstractConnection extends Serializable implements Compara
 							AbstractConnection.this.strikeResetAt = Long.MAX_VALUE;
 					}
 					
-					try 
-					{
-						message = this.outboundQueue.poll(Constants.BROADCAST_POLL_TIMEOUT, TimeUnit.MILLISECONDS);
-					} 
-					catch (InterruptedException ex) 
-					{
-						Thread.currentThread().interrupt();
-						messagingLog.warn(AbstractConnection.this.context.getName()+": Message outbound processing was interrupted for "+AbstractConnection.this, ex);
-						continue;
-					}
+					// Get the batch of messages to send in priority order
+					final List<Message> prioritized = getPrioritizedForDispatch(Constants.BROADCAST_POLL_TIMEOUT, TimeUnit.MILLISECONDS);
 					
-					if (requiresFlush == true && System.currentTimeMillis() > lastFlush + Constants.BROADCAST_POLL_TIMEOUT)
+					// Check if a flush is required before processing
+					flush();
+					
+					if (prioritized.isEmpty() == false)
 					{
-						dataOutputStream.flush();
-						requiresFlush = false;
-						lastFlush = System.currentTimeMillis();
-					}
-
-					if (message == null)
-						continue;
-
-					try
-					{
-						Message.outbound(message, dataOutputStream, AbstractConnection.this);
-						requiresFlush = true;
-						
-						AbstractConnection.this.totalEgress.addAndGet(message.getSize());
-						AbstractConnection.this.context.getMetaData().increment("network.transferred.outbound", message.getSize());
-						
-						AbstractConnection.this.timeseries.increment("outbound", message.getSize(), System.currentTimeMillis(), TimeUnit.MILLISECONDS);
-						AbstractConnection.this.context.getTimeSeries("bandwidth").increment("outbound", message.getSize(), System.currentTimeMillis(), TimeUnit.MILLISECONDS);
-					}
-					catch (Exception ex)
-					{
-						disconnect("Exception in message sending", ex);
-						return;
+						for(final Message message : prioritized)
+						{
+							try
+							{
+								Message.outbound(message, this.dataOutputStream, AbstractConnection.this);
+								this.requiresFlush = true;
+								
+								AbstractConnection.this.totalEgress.addAndGet(message.getSize());
+								AbstractConnection.this.context.getMetaData().increment("network.transferred.outbound", message.getSize());
+								
+								AbstractConnection.this.timeseries.increment("outbound", message.getSize(), System.currentTimeMillis(), TimeUnit.MILLISECONDS);
+								AbstractConnection.this.context.getTimeSeries("bandwidth").increment("outbound", message.getSize(), System.currentTimeMillis(), TimeUnit.MILLISECONDS);
+							}
+							catch (Exception ex)
+							{
+								disconnect("Exception in message sending", ex);
+								return;
+							}
+							
+							flush();
+						}
 					}
 				}
 				
@@ -267,6 +216,43 @@ public abstract class AbstractConnection extends Serializable implements Compara
 			{
 				networkLog.error("TCPProcessor thread "+AbstractConnection.this.outboundThread.getName()+" threw uncaught "+t);
 			}
+		}
+		
+		private void flush() throws IOException
+		{
+			if (this.requiresFlush == true && System.currentTimeMillis() > this.lastFlush + Constants.BROADCAST_POLL_TIMEOUT)
+			{
+				this.dataOutputStream.flush();
+				this.requiresFlush = false;
+				this.lastFlush = System.currentTimeMillis();
+			}
+		}
+		
+		private List<Message> getPrioritizedForDispatch(final long timeout, final TimeUnit timeUnit)
+		{
+			Message message;
+			try 
+			{
+				message = this.outboundQueue.poll(timeout, timeUnit);
+			} 
+			catch (InterruptedException ex) 
+			{
+				Thread.currentThread().interrupt();
+				messagingLog.warn(AbstractConnection.this.context.getName()+": Message outbound processing was interrupted for "+AbstractConnection.this, ex);
+				return Collections.emptyList();
+			}
+			
+			if (message == null)
+				return Collections.emptyList();
+			
+			final int numDispatchItems = Math.max(this.outboundQueue.size()+1, Constants.MAX_REQUEST_INVENTORY_ITEMS_TOTAL);
+			final List<Message> messages = new ArrayList<>(numDispatchItems);
+			messages.add(message);
+			this.outboundQueue.drainTo(messages, numDispatchItems-1);
+			
+			Collections.sort(messages);
+			
+			return messages;
 		}
 	}
 
@@ -303,6 +289,8 @@ public abstract class AbstractConnection extends Serializable implements Compara
 
 	private final AtomicInteger latency = new AtomicInteger(1000);
 	private final AtomicInteger timeout = new AtomicInteger(1000);
+	
+	private volatile int maximumRequestQuota = Constants.MAX_REQUEST_INVENTORY_ITEMS_TOTAL;
 	private final AtomicInteger pendingRequests = new AtomicInteger();
 	private final AtomicInteger pendingRequested = new AtomicInteger();
 	private final AtomicInteger pendingWeight = new AtomicInteger();
@@ -753,6 +741,7 @@ public abstract class AbstractConnection extends Serializable implements Compara
 		this.latency.updateAndGet(v -> (int) MathUtils.EWMA(v, latency, 0.1));
 	}
 
+	// REQUESTS //
 	public final int pendingRequests()
 	{
 		return this.pendingRequests.intValue();
@@ -846,6 +835,16 @@ public abstract class AbstractConnection extends Serializable implements Compara
 		return this.totalRequested.intValue();
 	}
 	
+	public int availableRequestQuota()
+	{
+		return this.maximumRequestQuota - (pendingRequests() + pendingWeight());
+	}
+	
+	public int allocatedRequestQuota()
+	{
+		return pendingRequests() + pendingWeight();
+	}
+
 	public long getNextTimeout(int requestWeight, TimeUnit timeUnit)
 	{
 		final long baselineTimeout = Constants.MIN_GOSSIP_REQUEST_TIMEOUT_MILLISECONDS;

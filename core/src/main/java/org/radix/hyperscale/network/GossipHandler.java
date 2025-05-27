@@ -14,6 +14,7 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.PriorityBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -330,6 +331,7 @@ public class GossipHandler implements Service
 	
 	private final Context context;
 
+	private final List<GossipEvent> eventProcessQueue;
 	private final BlockingQueue<GossipEvent> eventQueue;
 	private final BlockingQueue<GossipBroadcast> broadcastQueue;
 	
@@ -455,7 +457,7 @@ public class GossipHandler implements Service
 		this.context = Objects.requireNonNull(context, "Context is null");
 		this.lock = new MonitoredReentrantLock(this.context.getName()+" Gossip Handler Lock", true);
 
-		this.broadcastQueue = new PriorityBlockingQueue<GossipBroadcast>(this.context.getConfiguration().get("ledger.gossip.broadcast.queue", 1<<12), new Comparator<GossipBroadcast>() {
+		this.broadcastQueue = new PriorityBlockingQueue<GossipBroadcast>(this.context.getConfiguration().get("ledger.gossip.broadcast.queue", 1<<14), new Comparator<GossipBroadcast>() {
 			@Override
 			public int compare(final GossipBroadcast m1, final GossipBroadcast m2) 
 			{
@@ -468,31 +470,8 @@ public class GossipHandler implements Service
 	        }
 		});
 		
-		this.eventQueue = new PriorityBlockingQueue<GossipEvent>(this.context.getConfiguration().get("ledger.gossip.message.queue", 1<<12), new Comparator<GossipEvent>() {
-            @Override
-	        public int compare(final GossipEvent m1, final GossipEvent m2) 
-            {
-            	long m1Seconds = TimeUnit.MILLISECONDS.toSeconds(m1.getMessage().getTimestamp());
-            	long m2Seconds = TimeUnit.MILLISECONDS.toSeconds(m2.getMessage().getTimestamp());
-            	
-            	if (m1Seconds < m2Seconds)
-            		return -1;
-            	
-            	if (m1Seconds > m2Seconds)
-            		return 1;
-            	
-            	int m1Priority = m1.getMessage().getClass().getAnnotation(TransportParameters.class).priority();
-            	int m2Priority = m1.getMessage().getClass().getAnnotation(TransportParameters.class).priority();
-            	
-            	if (m1Priority > m2Priority)
-            		return -1;
-            	
-            	if (m1Priority < m2Priority)
-            		return 1;
-            	
-            	return 0;
-	        }
-	    });
+		this.eventQueue = new ArrayBlockingQueue<GossipEvent>(this.context.getConfiguration().get("ledger.gossip.message.queue", 1<<14));
+		this.eventProcessQueue = new ArrayList<GossipEvent>(Constants.MAX_REQUEST_INVENTORY_ITEMS_TOTAL);
 	}
 
 	@Override
@@ -774,45 +753,63 @@ public class GossipHandler implements Service
 	// GOSSIP PIPELINE //
 	private void _processGossipEvents()
 	{
-		GossipEvent event;
 		int processedEvents = 0 ;
 		int processedInventory = 0 ;
 		int processedReceive = 0 ;
 		int processedFetch = 0 ;
-		long pollLatchTimer = System.currentTimeMillis();
-		long nextPollTimer = (long) (Constants.BROADCAST_POLL_TIMEOUT + Math.sqrt(this.eventQueue.size()));
+		long pollLatchTimer = (long) (System.currentTimeMillis() + (Constants.BROADCAST_POLL_TIMEOUT + Math.sqrt(this.eventQueue.size())));
 		
 		try
 		{
-			while((event = this.eventQueue.poll(nextPollTimer, TimeUnit.MILLISECONDS)) != null)
+			while(System.currentTimeMillis() < pollLatchTimer)
 			{
+				if (this.eventProcessQueue.isEmpty())
+				{
+					GossipEvent event = this.eventQueue.poll(pollLatchTimer - System.currentTimeMillis(), TimeUnit.MILLISECONDS);
+					if (event == null)
+						break;
+						
+					final int numProcessItems = Math.max(this.eventQueue.size()+1, Constants.MAX_REQUEST_INVENTORY_ITEMS_TOTAL);
+					this.eventProcessQueue.add(event);
+					this.eventQueue.drainTo(this.eventProcessQueue, numProcessItems-1);
+					Collections.sort(this.eventProcessQueue);
+				}
+				
 				// No not process inventory & items only if local instance is not in sync as dont need 
 				// them anymore and re-syncing is currently handled in a different pipeline.
 				//
 				// For remote instances requesting items, process them as not doing so would cause a 
 				// disconnection and the remote instance would have to locate them elsewhere, causing latency.
-				if (event.getMessage() instanceof InventoryMessage inventoryMessage && this.context.getNode().isSynced())
+				Iterator<GossipEvent> eventProcessQueueIterator = this.eventProcessQueue.iterator();
+				while(eventProcessQueueIterator.hasNext())
 				{
-					inventory(inventoryMessage, event.getConnection());
-					processedInventory++;
-				}
-				else if (event.getMessage() instanceof ItemsMessage itemsMessage && this.context.getNode().isSynced())
-				{
-					received(itemsMessage, event.getConnection());
-					processedReceive++;
-				}
-				else if (event.getMessage() instanceof GetItemsMessage getItemsMessage)
-				{
-					fetch(getItemsMessage, event.getConnection());
-					processedFetch++;
-				}
+					final GossipEvent event = eventProcessQueueIterator.next();
 					
-				processedEvents++;
-				
-				// Adjust the poll timer based on elapsed time so we have a consistent Constants.BROADCAST_POLL_TIMEOUT interval
-				nextPollTimer = Constants.BROADCAST_POLL_TIMEOUT - (System.currentTimeMillis() - pollLatchTimer);
-				if (nextPollTimer <= 0)
-					break;
+					try
+					{
+						if (event.getMessage() instanceof InventoryMessage inventoryMessage && this.context.getNode().isSynced())
+						{
+							inventory(inventoryMessage, event.getConnection());
+							processedInventory++;
+						}
+						else if (event.getMessage() instanceof ItemsMessage itemsMessage && this.context.getNode().isSynced())
+						{
+							received(itemsMessage, event.getConnection());
+							processedReceive++;
+						}
+						else if (event.getMessage() instanceof GetItemsMessage getItemsMessage)
+						{
+							fetch(getItemsMessage, event.getConnection());
+							processedFetch++;
+						}
+							
+						processedEvents++;
+					}
+					finally
+					{
+						eventProcessQueueIterator.remove();
+					}
+				}
 			}
 
 			if (processedEvents > 0 && gossipLog.hasLevel(Logging.DEBUG))
@@ -882,10 +879,9 @@ public class GossipHandler implements Service
 						
 						// Max quota reached for this connection
 						int queuedRequests = nextToRequest.getOrDefault(connection, Collections.emptyList()).size();					
-						int outstandingRequests = MathUtils.sqr(connection.pendingRequests()) + connection.pendingWeight() + queuedRequests;
-						if (outstandingRequests >= Constants.MAX_REQUEST_INVENTORY_ITEMS_TOTAL)
+						if (connection.availableRequestQuota() - queuedRequests <= 0)
 						{
-							gossipLog.warn(this.context.getName()+": Request quota reached for connection "+connection);
+							gossipLog.warn(this.context.getName()+": Request quota reached: outstanding="+connection.allocatedRequestQuota()+" queued="+queuedRequests+" for connection "+connection);
 							connectionsToSkip.add(connection);
 							continue;
 						}

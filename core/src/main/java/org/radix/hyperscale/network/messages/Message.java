@@ -27,7 +27,7 @@ import org.xerial.snappy.Snappy;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
-public abstract class Message extends Serializable implements Hashable
+public abstract class Message extends Serializable implements Hashable, Comparable<Message>
 {
 	public static final int HEADER_SIZE = Integer.BYTES+Byte.BYTES+Short.BYTES;
 	public static final int PAYLOAD_BUFFER_SIZE = 1<<20;
@@ -305,7 +305,7 @@ public abstract class Message extends Serializable implements Hashable
 		if (transportParameters == null)
 			return false;
 		
-		return true;
+		return transportParameters.urgent();
 	}
 	
 	public int getPriority()
@@ -315,6 +315,32 @@ public abstract class Message extends Serializable implements Hashable
 			return 0;
 		
 		return transportParameters.priority();
+	}
+	
+	@Override
+	public final int compareTo(final Message other)
+	{
+    	// Inspect urgency
+    	boolean m1Urgent = this.isUrgent();
+    	boolean m2Urgent = other.isUrgent();
+
+        if (m1Urgent == true && m2Urgent == false)
+            return -1;
+        if (m1Urgent == false && m2Urgent == true)
+            return 1;
+        
+        // Now inspect message priority
+    	int m1Priority = this.getPriority();
+    	int m2Priority = other.getPriority();
+    	
+    	if (m1Priority > m2Priority)
+    		return -1;
+    	
+    	if (m1Priority < m2Priority)
+    		return 1;
+        
+        // For same urgency and priority, older messages get higher priority
+        return Long.compare(this.getTimestamp(), other.getTimestamp());
 	}
 
 	@Override
