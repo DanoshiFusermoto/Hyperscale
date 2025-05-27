@@ -12,12 +12,14 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketException;
 import java.net.URI;
-import java.util.Comparator;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.PriorityBlockingQueue;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
@@ -27,8 +29,6 @@ import org.radix.hyperscale.Constants;
 import org.radix.hyperscale.Context;
 import org.radix.hyperscale.common.Agent;
 import org.radix.hyperscale.common.Direction;
-import org.radix.hyperscale.crypto.Hash;
-import org.radix.hyperscale.crypto.Identity;
 import org.radix.hyperscale.crypto.bls12381.BLSSignature;
 import org.radix.hyperscale.crypto.ed25519.EDKeyPair;
 import org.radix.hyperscale.crypto.ed25519.EDPublicKey;
@@ -79,7 +79,7 @@ public abstract class AbstractConnection extends Serializable implements Compara
 			final BufferedInputStream bufferedInputStream;
 			try
 			{
-				bufferedInputStream = new BufferedInputStream(AbstractConnection.this.inputStream, 1<<18);
+				bufferedInputStream = new BufferedInputStream(AbstractConnection.this.inputStream, 1<<14);
 				dataInputStream = new DataInputStream(bufferedInputStream);
 
 				if (AbstractConnection.this.direction.equals(Direction.INBOUND))
@@ -146,55 +146,23 @@ public abstract class AbstractConnection extends Serializable implements Compara
 	private TCPOutboundProcessor outboundProcessor = null;
 	private class TCPOutboundProcessor implements Runnable
 	{
-		private final BlockingQueue<Message> outboundQueue = new PriorityBlockingQueue<Message>(AbstractConnection.this.context.getConfiguration().get("messaging.outbound.queue_max", 1<<12), new Comparator<Message>() {
-            long AGE_THRESHOLD = Constants.BROADCAST_POLL_TIMEOUT;
-
-            @Override
-	        public int compare(final Message m1, final Message m2) 
-	        {
-	            // Get current time to calculate age
-	            long currentTime = System.currentTimeMillis();
-	            
-	            // Calculate age of messages
-	            long age1 = currentTime - m1.getTimestamp();
-	            long age2 = currentTime - m2.getTimestamp();
-	            
-	            // If m1 is old enough, it gains priority regardless of urgency
-	            if (m1.isUrgent() == false && age1 > AGE_THRESHOLD && m2.isUrgent())
-	                return -1;
-	            
-	            // If m2 is old enough, it gains priority regardless of urgency
-	            if (m2.isUrgent() == false && age2 > AGE_THRESHOLD && m1.isUrgent())
-	                return 1;
-	            
-	            // Otherwise, use the simple urgency-based comparison
-	            if (m1.isUrgent() && m2.isUrgent() == false)
-	                return -1;
-	            if (m1.isUrgent() == false && m2.isUrgent())
-	                return 1;
-	            
-	            // For same urgency, older messages get higher priority
-	            if (m1.getTimestamp() < m2.getTimestamp())
-	                return -1;
-	            if (m1.getTimestamp() > m2.getTimestamp())
-	                return 1;
-	            
-	            return 0;
-	        }
-	    });
+		private long lastFlush = 0;
+		private boolean requiresFlush = true;
+		private final DataOutputStream dataOutputStream;
+		private final BlockingQueue<Message> outboundQueue;
+		
+		TCPOutboundProcessor()
+		{
+			BufferedOutputStream bufferedOutputStream = new BufferedOutputStream(AbstractConnection.this.outputStream, 1<<14);
+			this.dataOutputStream = new DataOutputStream(bufferedOutputStream);
+			this.outboundQueue = new ArrayBlockingQueue<Message>(AbstractConnection.this.context.getConfiguration().get("messaging.outbound.queue_max", 1<<12));
+		}
 		
 		@Override
-		public void run ()
+		public void run()
 		{
-			Message message = null;
-
-			final DataOutputStream dataOutputStream;
-			final BufferedOutputStream bufferedOutputStream;
 			try
 			{
-				bufferedOutputStream = new BufferedOutputStream(AbstractConnection.this.outputStream, 1<<18);
-				dataOutputStream = new DataOutputStream(bufferedOutputStream);
-
 				while (AbstractConnection.this.socket.isConnected() && 
 					   AbstractConnection.this.getState().equals(ConnectionState.DISCONNECTING) == false && 
 					   AbstractConnection.this.getState().equals(ConnectionState.DISCONNECTED) == false)
@@ -209,38 +177,35 @@ public abstract class AbstractConnection extends Serializable implements Compara
 							AbstractConnection.this.strikeResetAt = Long.MAX_VALUE;
 					}
 					
-					try 
+					// Get the batch of messages to send in priority order
+					final List<Message> prioritized = getPrioritizedForDispatch(Constants.BROADCAST_POLL_TIMEOUT, TimeUnit.MILLISECONDS);
+					
+					// Check if a flush is required before processing
+					flush();
+					
+					if (prioritized.isEmpty() == false)
 					{
-						message = this.outboundQueue.poll(1, TimeUnit.SECONDS);
-					} 
-					catch (InterruptedException ex) 
-					{
-						Thread.currentThread().interrupt();
-						messagingLog.warn(AbstractConnection.this.context.getName()+": Message outbound processing was interrupted for "+AbstractConnection.this, ex);
-						continue;
-					}
-
-					if (message == null)
-						continue;
-
-					try
-					{
-						Message.outbound(message, dataOutputStream, AbstractConnection.this);
-						
-						// Send now
-						if (this.outboundQueue.peek() == null)
-							dataOutputStream.flush();
-						
-						AbstractConnection.this.totalEgress.addAndGet(message.getSize());
-						AbstractConnection.this.context.getMetaData().increment("network.transferred.outbound", message.getSize());
-						
-						AbstractConnection.this.timeseries.increment("outbound", message.getSize(), System.currentTimeMillis(), TimeUnit.MILLISECONDS);
-						AbstractConnection.this.context.getTimeSeries("bandwidth").increment("outbound", message.getSize(), System.currentTimeMillis(), TimeUnit.MILLISECONDS);
-					}
-					catch (Exception ex)
-					{
-						disconnect("Exception in message sending", ex);
-						return;
+						for(final Message message : prioritized)
+						{
+							try
+							{
+								Message.outbound(message, this.dataOutputStream, AbstractConnection.this);
+								this.requiresFlush = true;
+								
+								AbstractConnection.this.totalEgress.addAndGet(message.getSize());
+								AbstractConnection.this.context.getMetaData().increment("network.transferred.outbound", message.getSize());
+								
+								AbstractConnection.this.timeseries.increment("outbound", message.getSize(), System.currentTimeMillis(), TimeUnit.MILLISECONDS);
+								AbstractConnection.this.context.getTimeSeries("bandwidth").increment("outbound", message.getSize(), System.currentTimeMillis(), TimeUnit.MILLISECONDS);
+							}
+							catch (Exception ex)
+							{
+								disconnect("Exception in message sending", ex);
+								return;
+							}
+							
+							flush();
+						}
 					}
 				}
 				
@@ -251,6 +216,43 @@ public abstract class AbstractConnection extends Serializable implements Compara
 			{
 				networkLog.error("TCPProcessor thread "+AbstractConnection.this.outboundThread.getName()+" threw uncaught "+t);
 			}
+		}
+		
+		private void flush() throws IOException
+		{
+			if (this.requiresFlush == true && System.currentTimeMillis() > this.lastFlush + Constants.BROADCAST_POLL_TIMEOUT)
+			{
+				this.dataOutputStream.flush();
+				this.requiresFlush = false;
+				this.lastFlush = System.currentTimeMillis();
+			}
+		}
+		
+		private List<Message> getPrioritizedForDispatch(final long timeout, final TimeUnit timeUnit)
+		{
+			Message message;
+			try 
+			{
+				message = this.outboundQueue.poll(timeout, timeUnit);
+			} 
+			catch (InterruptedException ex) 
+			{
+				Thread.currentThread().interrupt();
+				messagingLog.warn(AbstractConnection.this.context.getName()+": Message outbound processing was interrupted for "+AbstractConnection.this, ex);
+				return Collections.emptyList();
+			}
+			
+			if (message == null)
+				return Collections.emptyList();
+			
+			final int numDispatchItems = Math.max(this.outboundQueue.size()+1, Constants.MAX_REQUEST_INVENTORY_ITEMS_TOTAL);
+			final List<Message> messages = new ArrayList<>(numDispatchItems);
+			messages.add(message);
+			this.outboundQueue.drainTo(messages, numDispatchItems-1);
+			
+			Collections.sort(messages);
+			
+			return messages;
 		}
 	}
 
@@ -287,6 +289,8 @@ public abstract class AbstractConnection extends Serializable implements Compara
 
 	private final AtomicInteger latency = new AtomicInteger(1000);
 	private final AtomicInteger timeout = new AtomicInteger(1000);
+	
+	private volatile int maximumRequestQuota = Constants.MAX_REQUEST_INVENTORY_ITEMS_TOTAL;
 	private final AtomicInteger pendingRequests = new AtomicInteger();
 	private final AtomicInteger pendingRequested = new AtomicInteger();
 	private final AtomicInteger pendingWeight = new AtomicInteger();
@@ -425,6 +429,8 @@ public abstract class AbstractConnection extends Serializable implements Compara
 		return this.uri;
 	}
 
+	@JsonProperty("node")
+	@DsonOutput(Output.API)
 	public Node getNode()
 	{
 		return this.node;
@@ -441,34 +447,6 @@ public abstract class AbstractConnection extends Serializable implements Compara
 	public URI getHost()
 	{
 		return URIs.toHostAndPort(this.uri);
-	}
-	
-	@JsonProperty("identity")
-	@DsonOutput(Output.API)
-	private Identity getIdentity()
-	{
-		return this.node.getIdentity();
-	}
-
-	@JsonProperty("head")
-	@DsonOutput(Output.API)
-	private Hash getHead()
-	{
-		return this.node.getHead().getHash();
-	}
-
-	@JsonProperty("sync")
-	@DsonOutput(Output.API)
-	private boolean isSynced()
-	{
-		return this.node.isSynced();
-	}
-
-	@JsonProperty("drift")
-	@DsonOutput(Output.API)
-	private int getDrift()
-	{
-		return this.node.getDrift();
 	}
 
 	@JsonProperty("direction")
@@ -760,9 +738,10 @@ public abstract class AbstractConnection extends Serializable implements Compara
 	public final void updateLatency(final long latency)
 	{
 		Numbers.isNegative(latency, "Latency is negative");
-		this.latency.updateAndGet(v -> (int) MathUtils.EWMA(v, latency, 0.9));
+		this.latency.updateAndGet(v -> (int) MathUtils.EWMA(v, latency, 0.1));
 	}
 
+	// REQUESTS //
 	public final int pendingRequests()
 	{
 		return this.pendingRequests.intValue();
@@ -856,12 +835,23 @@ public abstract class AbstractConnection extends Serializable implements Compara
 		return this.totalRequested.intValue();
 	}
 	
+	public int availableRequestQuota()
+	{
+		return this.maximumRequestQuota - (pendingRequests() + pendingWeight());
+	}
+	
+	public int allocatedRequestQuota()
+	{
+		return pendingRequests() + pendingWeight();
+	}
+
 	public long getNextTimeout(int requestWeight, TimeUnit timeUnit)
 	{
 		final long baselineTimeout = Constants.MIN_GOSSIP_REQUEST_TIMEOUT_MILLISECONDS;
-		final long timeoutWeightAllowance = (long) (Math.sqrt(baselineTimeout) * pendingWeight()); // Additional allowance for outstanding requests weight
-		final long timeoutRequestAllowance = (long) (getLatency() * pendingRequests()); // Additional allowance for outstanding requests
-		final long gossipRequestTimeout = (long) (baselineTimeout + timeoutRequestAllowance + timeoutWeightAllowance + (Math.sqrt(baselineTimeout) * requestWeight)); // Sum with additional allowance for request size
+		final long sqrtBaselineTimeout = (long) Math.sqrt(baselineTimeout);
+		final long timeoutWeightAllowance = sqrtBaselineTimeout * pendingWeight(); // Additional allowance for outstanding requests weight
+		final long timeoutRequestAllowance = Math.max(sqrtBaselineTimeout, getLatency()) * pendingRequests(); // Additional allowance for outstanding requests
+		final long gossipRequestTimeout = baselineTimeout + timeoutRequestAllowance + timeoutWeightAllowance + (sqrtBaselineTimeout * requestWeight); // Sum with additional allowance for request size
 		this.timeout.updateAndGet(v -> (int) MathUtils.EWMA(v, gossipRequestTimeout, 0.95));
 		return timeUnit.convert(gossipRequestTimeout, TimeUnit.MILLISECONDS);
 	}

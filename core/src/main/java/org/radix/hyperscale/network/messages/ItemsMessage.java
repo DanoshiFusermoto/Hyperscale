@@ -22,6 +22,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 
 @SerializerId2("gossip.items")
+@TransportParameters(cache = true, priority = 50)
 public final class ItemsMessage extends Message
 {
 	@JsonProperty("inventory")
@@ -86,6 +87,25 @@ public final class ItemsMessage extends Message
 		}
 		
 		return items;
+	}	
+	
+	public List<Hash> getTyped(final Class<? extends Primitive> type)
+	{
+		synchronized(this)
+		{
+			if (this.inventory != null && this.inventory.isEmpty() == false)
+			{
+				final List<Hash> items = new ArrayList<Hash>();
+				for (final Primitive item : this.inventory)
+				{
+					if (item.getClass().equals(type))
+						items.add(item.getHash());
+				}
+				return items;
+			}
+		}
+		
+		return Collections.emptyList();
 	}	
 	
 	@Override

@@ -24,6 +24,7 @@ import org.radix.hyperscale.serialization.DsonOutput.Output;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 @SerializerId2("gossip.items.get")
+@TransportParameters(cache = true, priority = 10)
 public final class GetItemsMessage extends Message
 {
 	@JsonProperty("inventory")
@@ -99,6 +100,16 @@ public final class GetItemsMessage extends Message
 		
 		return typed;
 	}		
+	
+	public List<Hash> getTyped(final Class<? extends Primitive> type)
+	{
+		final String clazz = Serialization.getInstance().getIdForClass(type);
+		if (this.inventory != null && this.inventory.isEmpty() == false && this.inventory.containsKey(clazz))
+			return new ArrayList<Hash>(this.inventory.get(clazz));
+		
+		return Collections.emptyList();
+	}	
+
 	@Override
 	public boolean isUrgent()
 	{

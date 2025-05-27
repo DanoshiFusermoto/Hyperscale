@@ -19,7 +19,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Predicate;
-import java.util.stream.Collectors;
 
 import org.eclipse.collections.api.factory.Sets;
 import org.radix.hyperscale.Constants;
@@ -183,38 +182,29 @@ public class AtomHandler implements Service, LedgerInterface
 					return Collections.emptyList();
 				}
 				
-				if (AtomHandler.this.context.getNode().isSynced() == false)
-					return Collections.emptyList();
-
-				final List<Hash> required = new ArrayList<Hash>(items);
+				final List<Hash> required = new ArrayList<Hash>(items.size());
 				required.removeAll(AtomHandler.this.atomsToProvisionQueue.contains(required));
 
-				final Iterator<Hash> requiredIterator = required.iterator();
-				while(requiredIterator.hasNext())
+				final Iterator<Hash> itemsIterator = items.iterator();
+				while(itemsIterator.hasNext())
 				{
-					final Hash item = requiredIterator.next();
+					final Hash item = itemsIterator.next();
 					if (AtomHandler.this.atomsToPrepareQueue.contains(item))
-					{
-						requiredIterator.remove();
 						continue;
-					}
 					
 					final PendingAtom pendingAtom = AtomHandler.this.pendingAtoms.get(item);
 					if (pendingAtom != null && pendingAtom.getAtom() != null)
-					{
-						requiredIterator.remove();
 						continue;
-					}
 					
-					final State pendingAtomStatus = AtomHandler.this.status(item);
-					if (pendingAtomStatus.equals(State.NONE) == false)
-					{
-						requiredIterator.remove();
+					if (AtomHandler.this.context.getLedger().getLedgerStore().has(item, type))
 						continue;
-					}
+
+					if (AtomHandler.this.status(item).equals(State.NONE) == false)
+						continue;
+					
+					required.add(item);
 				}
 				
-				required.removeAll(AtomHandler.this.context.getLedger().getLedgerStore().has(required, type));
 				return required;
 			}
 		});
@@ -224,8 +214,8 @@ public class AtomHandler implements Service, LedgerInterface
 			@Override
 			public void receive(final Collection<Atom> atoms, final AbstractConnection connection) throws InterruptedException
 			{
-				if (AtomHandler.this.context.getNode().isSynced() == false)
-					return;
+				if (atomsLog.hasLevel(Logging.INFO))
+					atoms.forEach(a -> atomsLog.log(AtomHandler.this.context.getName()+": Received atom "+a.getHash()));
 
 				Collection<Atom> submitted = AtomHandler.this.submit(atoms, true);
 				if (submitted.size() != atoms.size())
@@ -238,9 +228,6 @@ public class AtomHandler implements Service, LedgerInterface
 			@Override
 			public Collection<Atom> fetch(final Collection<Hash> items, final AbstractConnection connection) throws IOException
 			{
-				if (AtomHandler.this.context.getNode().isSynced() == false)
-					return Collections.emptyList();
-
 				List<Hash> toFetch = new ArrayList<Hash>(items);
 				List<Atom> fetched = new ArrayList<Atom>();
 
@@ -340,12 +327,14 @@ public class AtomHandler implements Service, LedgerInterface
 					if (AtomHandler.this.context.getNode().isSynced() == false)
 						return;
 					
-					final Collection<Hash> inventory = submitAtomsMessage.getAtoms().stream().map(a -> a.getHash()).collect(Collectors.toSet());
-					final Collection<Hash> required = AtomHandler.this.context.getNetwork().getGossipHandler().required(inventory, Atom.class, connection);
-					if (required.isEmpty())
-						return;
+					submit(submitAtomsMessage.getAtoms(), false);
 					
-					submit(submitAtomsMessage.getAtoms().stream().filter(a -> required.contains(a.getHash())).collect(Collectors.toList()), false);
+//					final Collection<Hash> inventory = submitAtomsMessage.getAtoms().stream().map(a -> a.getHash()).collect(Collectors.toSet());
+//					final Collection<Hash> required = AtomHandler.this.context.getNetwork().getGossipHandler().required(inventory, Atom.class, connection);
+//					if (required.isEmpty())
+//						return;
+					
+//					submit(submitAtomsMessage.getAtoms().stream().filter(a -> required.contains(a.getHash())).collect(Collectors.toList()), false);
 				}
 				catch (Exception ex)
 				{
@@ -414,7 +403,7 @@ public class AtomHandler implements Service, LedgerInterface
 					if (atom.verify() == false)
 						throw new ValidationException("Atom failed signature verification");
 
-					if (this.context.getLedger().getLedgerStore().store(pendingAtom.getAtom()).equals(OperationStatus.SUCCESS))
+					if (this.context.getLedger().getLedgerStore().store(atom).equals(OperationStatus.SUCCESS))
 						this.atomsToPrepareQueue.put(pendingAtom.getHash(), pendingAtom);
 					else
 						atomsLog.warn(this.context.getName()+": Failed to store atom "+pendingAtom.getHash());

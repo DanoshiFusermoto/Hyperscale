@@ -49,6 +49,7 @@ import org.radix.hyperscale.ledger.messages.SyncAcquiredMessage;
 import org.radix.hyperscale.ledger.messages.SyncAcquiredMessageProcessor;
 import org.radix.hyperscale.ledger.primitives.StateCertificate;
 import org.radix.hyperscale.ledger.timeouts.AtomTimeout;
+import org.radix.hyperscale.ledger.timeouts.ExecutionTimeout;
 import org.radix.hyperscale.logging.Logger;
 import org.radix.hyperscale.logging.Logging;
 import org.radix.hyperscale.network.AbstractConnection;
@@ -143,9 +144,6 @@ public final class StatePool implements Service
 			@Override
 			public Collection<Hash> required(final Class<? extends Primitive> type, final Collection<Hash> items, final AbstractConnection connection) throws IOException
 			{
-				if (StatePool.this.context.getNode().isSynced() == false)
-					return Collections.emptyList();
-				
 				if (type.equals(StateVoteBlock.class) == false)
 				{
 					gossipLog.error(StatePool.this.context.getName()+": State vote block type expected but got "+type);
@@ -170,14 +168,11 @@ public final class StatePool implements Service
 			@Override
 			public void receive(final Collection<StateVoteBlock> stateVoteBlocks, final AbstractConnection connection) throws IOException, CryptoException
 			{
-				if (StatePool.this.context.getNode().isSynced() == false)
-					return;
-				
 				final int numShardGroups = StatePool.this.context.getLedger().numShardGroups();
 				final ShardGroupID localShardGroupID = ShardMapper.toShardGroup(StatePool.this.context.getNode().getIdentity(), numShardGroups); 
 				for (final StateVoteBlock stateVoteBlock : stateVoteBlocks)
 				{
-					if (statePoolLog.hasLevel(Logging.DEBUG))
+					if (statePoolLog.hasLevel(Logging.INFO))
 					{
 						if (stateVoteBlock.isHeader() == false)
 							statePoolLog.info(StatePool.this.context.getName()+": Received state vote block "+stateVoteBlock);
@@ -693,8 +688,8 @@ public final class StatePool implements Service
 			{
 				if (statePoolLog.hasLevel(Logging.DEBUG))
 					statePoolLog.debug(this.context.getName()+": Creating StateVoteCollector for proposal "+pendingBlock.toString()+" with state keys "+pendingStateBucket.stream().map(sk -> sk.getAddress()).collect(Collectors.toList()));
-				else 
-					statePoolLog.log(this.context.getName()+": Creating StateVoteCollector for proposal "+pendingBlock.toString()+" with "+pendingStateBucket.size()+" state keys");
+				else if (statePoolLog.hasLevel(Logging.INFO))
+					statePoolLog.info(this.context.getName()+": Creating StateVoteCollector for proposal "+pendingBlock.toString()+" with "+pendingStateBucket.size()+" state keys");
 
 				final StateVoteCollector stateVoteCollector = new StateVoteCollector(this.context, pendingBlock.getHash(), pendingStateBucket, votePower, voteThreshold);
 				for (final PendingState pendingState : pendingStateBucket)
@@ -951,7 +946,7 @@ public final class StatePool implements Service
 		@Subscribe
 		public void on(final AtomExecutionTimeoutEvent event) throws IOException, CryptoException
 		{
-			processTimeout(event.getPendingAtom(), event.getPendingAtom().getTimeout());
+			processTimeout(event.getPendingAtom(), event.getPendingAtom().getTimeout(ExecutionTimeout.class));
 		}
 
 		@Subscribe

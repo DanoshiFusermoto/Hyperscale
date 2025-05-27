@@ -27,6 +27,7 @@ import org.radix.hyperscale.collections.MappedBlockingQueue;
 import org.radix.hyperscale.common.Primitive;
 import org.radix.hyperscale.crypto.CryptoException;
 import org.radix.hyperscale.crypto.Hash;
+import org.radix.hyperscale.crypto.Identity;
 import org.radix.hyperscale.crypto.bls12381.BLS12381;
 import org.radix.hyperscale.crypto.bls12381.BLSPublicKey;
 import org.radix.hyperscale.events.EventListener;
@@ -47,7 +48,6 @@ import org.radix.hyperscale.ledger.events.AtomExceptionEvent;
 import org.radix.hyperscale.ledger.events.AtomExecutableEvent;
 import org.radix.hyperscale.ledger.events.AtomExecutedEvent;
 import org.radix.hyperscale.ledger.events.AtomExecutionTimeoutEvent;
-import org.radix.hyperscale.ledger.events.AtomPreparedEvent;
 import org.radix.hyperscale.ledger.events.AtomProvisionedEvent;
 import org.radix.hyperscale.ledger.events.BlockCommittedEvent;
 import org.radix.hyperscale.ledger.events.ProgressPhaseEvent;
@@ -197,7 +197,7 @@ public final class StateHandler implements Service
 		this.context.getNetwork().getGossipHandler().register(StateCertificate.class, new GossipFilter<StateCertificate>(this.context) 
 		{
 			@Override
-			public Set<ShardGroupID> filter(StateCertificate stateCertificate)
+			public Set<ShardGroupID> filter(final StateCertificate stateCertificate)
 			{
 				return Collections.singleton(ShardMapper.toShardGroup(StateHandler.this.context.getNode().getIdentity(), StateHandler.this.context.getLedger().numShardGroups()));
 			}
@@ -214,9 +214,6 @@ public final class StateHandler implements Service
 					return Collections.emptyList();
 				}
 				
-				if (StateHandler.this.context.getNode().isSynced() == false)
-					return Collections.emptyList();
-				
 				final List<Hash> required = new ArrayList<Hash>(items);
 				required.removeAll(StateHandler.this.stateCertificatesToProcessQueue.contains(required));
 				required.removeAll(StateHandler.this.context.getLedger().getLedgerStore().has(required, type));
@@ -228,14 +225,13 @@ public final class StateHandler implements Service
 		this.context.getNetwork().getGossipHandler().register(StateCertificate.class, new GossipReceiver<StateCertificate>() 
 		{
 			@Override
-			public void receive(Collection<StateCertificate> stateCertificates, AbstractConnection connection) throws IOException, CryptoException
+			public void receive(final Collection<StateCertificate> stateCertificates, final AbstractConnection connection) throws IOException, CryptoException
 			{
-				if (StateHandler.this.context.getNode().isSynced() == false)
-					return;
-				
+				final int numShardGroups = StateHandler.this.context.getLedger().numShardGroups();
+				final Identity localIdentity = StateHandler.this.context.getNode().getIdentity();
 				for (StateCertificate stateCertificate : stateCertificates)
 				{
-					if (ShardMapper.equal(StateHandler.this.context.getLedger().numShardGroups(), stateCertificate.getAddress(), StateHandler.this.context.getNode().getIdentity()) == true)
+					if (ShardMapper.equal(numShardGroups, stateCertificate.getAddress(), localIdentity) == true)
 					{
 						stateLog.warn(StateHandler.this.context.getName()+": Received state certificate "+stateCertificate+" for local shard (has sync just happened?)");
 						// 	Disconnected and ban
@@ -258,7 +254,7 @@ public final class StateHandler implements Service
 		this.context.getNetwork().getGossipHandler().register(StateCertificate.class, new GossipFetcher<StateCertificate>() 
 		{
 			@Override
-			public Collection<StateCertificate> fetch(Collection<Hash> items, AbstractConnection connection) throws IOException
+			public Collection<StateCertificate> fetch(final Collection<Hash> items, AbstractConnection connection) throws IOException
 			{
 				final Set<Hash> toFetch = Sets.mutable.ofAll(items);
 				final List<StateCertificate> fetched = new ArrayList<StateCertificate>(items.size());
@@ -277,7 +273,7 @@ public final class StateHandler implements Service
 		this.context.getNetwork().getGossipHandler().register(StateInput.class, new GossipFilter<StateInput>(this.context) 
 		{
 			@Override
-			public Set<ShardGroupID> filter(StateInput stateInput)
+			public Set<ShardGroupID> filter(final StateInput stateInput)
 			{
 				return Collections.singleton(ShardMapper.toShardGroup(StateHandler.this.context.getNode().getIdentity(), StateHandler.this.context.getLedger().numShardGroups()));
 			}
@@ -294,9 +290,6 @@ public final class StateHandler implements Service
 					return Collections.emptyList();
 				}
 					
-				if (StateHandler.this.context.getNode().isSynced() == false)
-					return Collections.emptyList();
-				
 				final List<Hash> required = new ArrayList<Hash>(items);
 				required.removeAll(StateHandler.this.stateInputsToProcessQueue.contains(required));
 				required.removeAll(StateHandler.this.context.getLedger().getLedgerStore().has(required, type));
@@ -307,14 +300,13 @@ public final class StateHandler implements Service
 		this.context.getNetwork().getGossipHandler().register(StateInput.class, new GossipReceiver<StateInput>() 
 		{
 			@Override
-			public void receive(Collection<StateInput> stateInputs, AbstractConnection connection) throws IOException, CryptoException
+			public void receive(final Collection<StateInput> stateInputs, final AbstractConnection connection) throws IOException, CryptoException
 			{
-				if (StateHandler.this.context.getNode().isSynced() == false)
-					return;
-
+				final int numShardGroups = StateHandler.this.context.getLedger().numShardGroups();
+				final Identity localIdentity = StateHandler.this.context.getNode().getIdentity();
 				for (final StateInput stateInput : stateInputs)
 				{
-					if (ShardMapper.equal(StateHandler.this.context.getLedger().numShardGroups(), stateInput.getSubstate().getAddress(), StateHandler.this.context.getNode().getIdentity()) == true)
+					if (ShardMapper.equal(numShardGroups, stateInput.getSubstate().getAddress(), localIdentity) == true)
 					{
 						if (stateLog.hasLevel(Logging.DEBUG))
 							stateLog.debug(StateHandler.this.context.getName()+": Received state input "+stateInput+" for local shard (possible consequence of gossip");
@@ -520,13 +512,16 @@ public final class StateHandler implements Service
 						final Substate substate = entry.getKey().get();
        					final PendingAtom pendingAtom = entry.getValue();
 
-       					// Provisioning completed via a different route, or failure occurred 
-       					if (pendingAtom.getStatus().after(AtomStatus.State.PROVISIONING))
-       						continue;
-       						
                  		// Create a state input for this substate request
      					final StateInput stateInput = new StateInput(pendingAtom.getHash(), substate);
-     					
+
+     					// Provisioning completed via a different route, or failure occurred 
+       					if (pendingAtom.getStatus().after(AtomStatus.State.PROVISIONING))
+       					{
+    						stateLog.warn(this.context.getName()+": Pending atom is "+pendingAtom.getStatus()+" for state input provisioning "+stateInput);
+       						continue;
+       					}
+       						
      					if (stateLog.hasLevel(Logging.INFO))
      						stateLog.info(this.context.getName()+": Read remote state "+stateInput+" is completed for atom "+pendingAtom.getHash());
 
@@ -640,7 +635,12 @@ public final class StateHandler implements Service
 	        						stateLog.warn(this.context.getName()+": Failed to store state input "+stateInput);
 	        				}
 	        				else
+	        				{
 	        					this.pendingSubstateRequests.put(substateRequest, pendingAtom);
+	        					
+	        					if (stateLog.hasLevel(Logging.DEBUG))
+	        						stateLog.debug(this.context.getName()+": Requested read remote state "+pendingState+" for atom "+pendingAtom.getHash());
+	        				}
 	                	}
 					}
 				}
@@ -992,9 +992,15 @@ public final class StateHandler implements Service
 	private EventListener asyncAtomListener = new EventListener()
 	{
 		@Subscribe
-		public void on(final AtomPreparedEvent event)
+		public void on(final AtomAcceptedEvent event)
 		{
-			final Epoch epoch = StateHandler.this.context.getLedger().getEpoch();
+			// Provision accepted atom
+			PendingAtom pendingAtom = event.getPendingAtom();
+			if (pendingAtom.getStatus().before(AtomStatus.State.ACCEPTED))
+				throw new IllegalStateException(StateHandler.this.context.getName()+": Pending atom "+pendingAtom.getHash()+" accepted in block "+pendingAtom.getBlockHeader().getHash()+" is before ACCEPTED state");
+
+			// The epoch the atom was accepted in
+			final Epoch epoch = Epoch.from(event.getPendingAtom().getBlockHeader());
 			
 			// Broadcast any StateCertificate / StateInputs received early
 			event.getPendingAtom().forStates(StateLockMode.WRITE, ps -> {
@@ -1006,15 +1012,7 @@ public final class StateHandler implements Service
 				if (stateOutput instanceof StateCertificate stateCertificate)
 					StateHandler.this.broadcast(event.getPendingAtom(), stateCertificate, epoch);
 			});
-		}
-		
-		@Subscribe
-		public void on(final AtomAcceptedEvent event)
-		{
-			// Provision accepted atom
-			PendingAtom pendingAtom = event.getPendingAtom();
-			if (pendingAtom.getStatus().before(AtomStatus.State.ACCEPTED))
-				throw new IllegalStateException(StateHandler.this.context.getName()+": Pending atom "+pendingAtom.getHash()+" accepted in block "+pendingAtom.getBlockHeader().getHash()+" is before ACCEPTED state");
+
 				
 			if (stateLog.hasLevel(Logging.DEBUG))
 				stateLog.debug(StateHandler.this.context.getName()+": Queuing pending atom "+pendingAtom.getHash()+" for provisioning");
@@ -1044,6 +1042,7 @@ public final class StateHandler implements Service
 		public void on(final AtomProvisionedEvent event) 
 		{
 			// Atoms may be signalled executable BEFORE they are provisioned in certain edge cases such as the desync / sync sequence
+			// TODO why? Suspect these additional conditionals may cause executions to be missed
 			if (event.getPendingAtom().isExecuteSignalled() && event.getPendingAtom().isExecuted() == false)
 				queueForExecution(event.getPendingAtom());
 		}
@@ -1051,6 +1050,7 @@ public final class StateHandler implements Service
 		@Subscribe
 		public void on(final AtomExecutableEvent event)
 		{
+			// TODO why? Suspect these additional conditionals may cause executions to be missed
 			if (event.getPendingAtom().isProvisioned() && event.getPendingAtom().isExecuted() == false)
 				queueForExecution(event.getPendingAtom());
 		}

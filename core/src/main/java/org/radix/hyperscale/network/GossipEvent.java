@@ -4,9 +4,8 @@ import java.util.Objects;
 
 import org.radix.hyperscale.network.messages.Message;
 
-final class GossipEvent
+final class GossipEvent implements Comparable<GossipEvent>
 {
-	private final boolean urgent;
 	private final Message message;
 	private final AbstractConnection connection;
 	
@@ -14,14 +13,8 @@ final class GossipEvent
 	{
 		this.connection = Objects.requireNonNull(connection, "Primitive is null");
 		this.message = Objects.requireNonNull(message, "Message is null");
-		this.urgent = message.isUrgent();
 	}
 	
-	public boolean isUrgent()
-	{
-		return this.urgent;
-	}
-
 	@SuppressWarnings("unchecked")
 	public <T extends Message> T getMessage()
 	{
@@ -31,5 +24,31 @@ final class GossipEvent
 	public AbstractConnection getConnection()
 	{
 		return this.connection;
+	}
+
+	@Override
+	public int compareTo(final GossipEvent other)
+	{
+    	// Inspect urgency
+    	boolean m1Urgent = this.getMessage().isUrgent();
+    	boolean m2Urgent = other.getMessage().isUrgent();
+
+        if (m1Urgent == true && m2Urgent == false)
+            return -1;
+        if (m1Urgent == false && m2Urgent == true)
+            return 1;
+        
+        // Now inspect message priority
+    	int m1Priority = this.getMessage().getPriority();
+    	int m2Priority = other.getMessage().getPriority();
+    	
+    	if (m1Priority > m2Priority)
+    		return -1;
+    	
+    	if (m1Priority < m2Priority)
+    		return 1;
+        
+        // For same urgency and priority, older messages get higher priority
+    	return Long.compare(this.getMessage().getTimestamp(), other.getMessage().getTimestamp());
 	}
 }
