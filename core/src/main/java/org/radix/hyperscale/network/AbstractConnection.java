@@ -178,7 +178,7 @@ public abstract class AbstractConnection extends Serializable implements Compara
 					}
 					
 					// Get the batch of messages to send in priority order
-					final List<Message> prioritized = getPrioritizedForDispatch(Constants.BROADCAST_POLL_TIMEOUT, TimeUnit.MILLISECONDS);
+					final List<Message> prioritized = getPrioritizedForDispatch(Constants.QUEUE_POLL_TIMEOUT, TimeUnit.MILLISECONDS);
 					
 					// Check if a flush is required before processing
 					flush();
@@ -220,7 +220,7 @@ public abstract class AbstractConnection extends Serializable implements Compara
 		
 		private void flush() throws IOException
 		{
-			if (this.requiresFlush == true && System.currentTimeMillis() > this.lastFlush + Constants.BROADCAST_POLL_TIMEOUT)
+			if (this.requiresFlush == true && System.currentTimeMillis() > this.lastFlush + Constants.QUEUE_POLL_TIMEOUT)
 			{
 				this.dataOutputStream.flush();
 				this.requiresFlush = false;

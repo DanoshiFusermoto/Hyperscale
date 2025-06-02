@@ -610,7 +610,7 @@ public class GossipHandler implements Service
 	{
 		boolean hasUrgentTransport = false;
 		long pollLatchTimer = System.currentTimeMillis();
-		long nextPollTimer = (long) (Constants.BROADCAST_POLL_TIMEOUT + Math.sqrt(this.broadcastQueue.size()));
+		long nextPollTimer = (long) (Constants.QUEUE_POLL_TIMEOUT + Math.sqrt(this.broadcastQueue.size()));
 
 		final MutableMultimap<ShardGroupID, GossipBroadcast> toBroadcast = Multimaps.mutable.set.empty();
 		try
@@ -659,7 +659,7 @@ public class GossipHandler implements Service
 					break;
 
 				// Adjust the poll timer based on elapsed time so we have a consistent Constants.BROADCAST_POLL_TIMEOUT interval
-				nextPollTimer = Constants.BROADCAST_POLL_TIMEOUT - (System.currentTimeMillis() - pollLatchTimer);
+				nextPollTimer = Constants.QUEUE_POLL_TIMEOUT - (System.currentTimeMillis() - pollLatchTimer);
 				if (nextPollTimer <= 0)
 					break;
 			}
@@ -757,7 +757,7 @@ public class GossipHandler implements Service
 		int processedInventory = 0 ;
 		int processedReceive = 0 ;
 		int processedFetch = 0 ;
-		long pollLatchTimer = (long) (System.currentTimeMillis() + (Constants.BROADCAST_POLL_TIMEOUT + Math.sqrt(this.eventQueue.size())));
+		long pollLatchTimer = (long) (System.currentTimeMillis() + (Constants.QUEUE_POLL_TIMEOUT + Math.sqrt(this.eventQueue.size())));
 		
 		try
 		{
@@ -915,21 +915,16 @@ public class GossipHandler implements Service
 				requestEnd = Math.min(requestStart + Constants.MAX_REQUEST_INVENTORY_ITEMS, entry.getValue().size());
 					
 				final List<InventoryItem> requestItems = entry.getValue().subList(requestStart, requestEnd);
-				
-				this.lock.lock();
 				try
 				{
+					// Request MUST handle gossip handler lock!
 					request(entry.getKey(), requestItems);
 				}
 				catch (IOException ex)
 				{
 					gossipLog.error(this.context.getName()+": Unable to send request of "+requestItems+" items in shard group to "+entry.getKey().toString(), ex);
 				}
-				finally
-				{
-					this.lock.unlock();
-				}
-					
+
 				requestStart = requestEnd;
 			}
 		}
