@@ -21,9 +21,13 @@ public final class Constants
 	public static final int 	DEFAULT_CONNECTION_STICKY_DURATION_SECONDS = (int) TimeUnit.MINUTES.toSeconds(30); 
 	public static final int 	DEFAULT_CONNECTION_ROTATION_INTERVAL_SECONDS = (int) TimeUnit.MINUTES.toSeconds(10); 
 	public static final int 	DEFAULT_TCP_BUFFER = 1<<20;
-	public static final int 	COMPRESS_PAYLOADS_THRESHOLD = 256;
 	public static final int 	MIN_CONNECTION_LATENCY_FOR_TASKS = 100;
 	public static final int 	MAX_STRIKES_FOR_DISCONNECT = 3;
+	
+	// MESSAGING
+	public static final int 	COMPRESS_PAYLOADS_THRESHOLD = 256;
+	public static final int 	DEFAULT_MESSAGE_TTL_SECONDS = 10;
+	public static final int 	DEFAULT_MESSAGE_TTW_SECONDS = 1;
 	
 	// GOSSIP
 	public static final int 	QUEUE_TIMESTAMP_INTERVAL = 250;

@@ -104,6 +104,7 @@ public abstract class Message extends Serializable implements Hashable, Comparab
 			throw new BanException("Wrong magic for this deployment");
 
 		message.setDirection(Direction.INBOUND);
+		message.setWitnessedAt(Time.getSystemTime());
 		message.setSize(Message.HEADER_SIZE+signatureLength+payloadLength);
 
 		if (connection.isHandshaked())
@@ -135,6 +136,7 @@ public abstract class Message extends Serializable implements Hashable, Comparab
 		synchronized(message)
 		{
 			message.setDirection(Direction.OUTBOUND);
+			message.setWitnessedAt(Time.getSystemTime());
 
 			payloadBytes = message.getCachedPayload();
 			if (payloadBytes == null)
@@ -243,6 +245,7 @@ public abstract class Message extends Serializable implements Hashable, Comparab
 	// Transients //
 	private transient 	int			size = 0;
 	private transient 	Direction 	direction;
+	private transient   long 		witnessedAt = 0;
 	
 	// Caches for multiple transmissions //
 	private transient byte[] cachedPayload;
@@ -282,6 +285,16 @@ public abstract class Message extends Serializable implements Hashable, Comparab
 	private final void setSize(int size)
 	{
 		this.size = size;
+	}
+	
+	public final long witnessedAt()
+	{
+		return this.witnessedAt;
+	}
+
+	public final void setWitnessedAt(final long timestamp)
+	{
+		this.witnessedAt = timestamp;
 	}
 
 	public final long getMagic() 

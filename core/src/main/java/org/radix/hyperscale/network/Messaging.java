@@ -13,6 +13,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
+import org.radix.hyperscale.Constants;
 import org.radix.hyperscale.Context;
 import org.radix.hyperscale.common.Direction;
 import org.radix.hyperscale.crypto.bls12381.BLSPublicKey;
@@ -128,12 +129,15 @@ public class Messaging
 		if (messagingLog.hasLevel(Logging.DEBUG))
 			messagingLog.debug(Messaging.this.context.getName()+": Received "+message+" from "+connection);
 
-		if (Time.getSystemTime() - message.getTimestamp() > (this.context.getConfiguration().get("messaging.time_to_live", 30)*1000l))
+		if (Time.getSystemTime() - message.getTimestamp() > TimeUnit.SECONDS.toMillis(this.context.getConfiguration().get("messaging.time_to_live", Constants.DEFAULT_MESSAGE_TTL_SECONDS)))
 		{
 			messagingLog.warn(this.context.getName()+": Inbound "+message+" with expired TTL of "+(Time.getSystemTime()-message.getTimestamp())+" from "+connection);
 			return;
 		}
 		
+		if (Time.getSystemTime() - message.witnessedAt() > TimeUnit.SECONDS.toMillis(this.context.getConfiguration().get("messaging.time_to_warn", Constants.DEFAULT_MESSAGE_TTW_SECONDS)))
+			messagingLog.warn(this.context.getName()+": Inbound "+message+" with elapsed TTW of "+(Time.getSystemTime()-message.witnessedAt())+" from "+connection);
+
 		// MUST send a HandshakeMessage first to establish handshake //
 		// TODO what if its an OUTBOUND connection and the end point is not who we expect?
 		if (connection.isHandshaked() == false)
