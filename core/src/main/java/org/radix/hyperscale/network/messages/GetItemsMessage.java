@@ -78,6 +78,7 @@ public final class GetItemsMessage extends Message
 						this.inventoryItems.add(new InventoryItem(items.getKey(), item));
 				}
 				
+				Collections.sort(this.inventoryItems);
 				this.inventoryItems = Collections.unmodifiableList(this.inventoryItems);
 			}
 			

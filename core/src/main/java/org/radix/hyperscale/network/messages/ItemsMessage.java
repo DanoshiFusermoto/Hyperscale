@@ -70,6 +70,7 @@ public final class ItemsMessage extends Message
 				for (Primitive item : this.inventory)
 					this.inventoryItems.add(new InventoryItem(item));
 				
+				Collections.sort(this.inventoryItems);
 				this.inventoryItems = Collections.unmodifiableList(this.inventoryItems);
 			}
 			
