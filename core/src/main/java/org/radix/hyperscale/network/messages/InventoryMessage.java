@@ -107,7 +107,7 @@ public final class InventoryMessage extends Message
 						inventoryItems.add(new InventoryItem(items.getKey(), item));
 				}
 				
-				Collections.sort(this.inventoryItems);
+				Collections.sort(inventoryItems);
 				this.inventoryItems = Collections.unmodifiableList(inventoryItems);
 			}
 			

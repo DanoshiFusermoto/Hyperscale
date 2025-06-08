@@ -71,15 +71,15 @@ public final class GetItemsMessage extends Message
 		{
 			if (this.inventory != null)
 			{
-				this.inventoryItems = new ArrayList<InventoryItem>(this.inventory.size());
+				final List<InventoryItem> inventoryItems = new ArrayList<InventoryItem>(this.inventory.size());
 				for (final Entry<String, LinkedHashSet<Hash>> items : this.inventory.entrySet())
 				{
 					for (final Hash item : items.getValue())
-						this.inventoryItems.add(new InventoryItem(items.getKey(), item));
+						inventoryItems.add(new InventoryItem(items.getKey(), item));
 				}
 				
-				Collections.sort(this.inventoryItems);
-				this.inventoryItems = Collections.unmodifiableList(this.inventoryItems);
+				Collections.sort(inventoryItems);
+				this.inventoryItems = Collections.unmodifiableList(inventoryItems);
 			}
 			
 			return this.inventoryItems;
