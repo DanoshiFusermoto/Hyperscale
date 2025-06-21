@@ -57,12 +57,24 @@ import org.radix.hyperscale.utils.URIs;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 @SerializerId2("network.connection")
+/**
+ * Provides common functionality for all connection types.
+ * 
+ * TODO Currently implements specific functionality for TCP connections and isn't "abstract" anymore, needs a refactor!
+ */
 public abstract class AbstractConnection extends Serializable implements Comparable<AbstractConnection>
 {	
 	private static final Logger messagingLog = Logging.getLogger("messaging");
 	private static final Logger networkLog = Logging.getLogger("network");
 
 	private static final int DEFAULT_BANTIME_SECONDS = 60 * 60;
+	private static final int DEFAULT_OUTBOUND_BUFFER_SIZE = 1<<14;
+	
+	/** The total size of the outbound queue for all message classes **/
+	private static final int DEFAULT_OUTBOUND_QUEUE_SIZE = 1<<10;
+	
+	/** Queue slots available for non-priority messages such as gossip **/
+	private static final int DEFAULT_OUTBOUND_QUEUE_QUOTA = 1<<4;
 	
 	private static boolean bufferWarning = false;
 	
@@ -153,9 +165,9 @@ public abstract class AbstractConnection extends Serializable implements Compara
 		
 		TCPOutboundProcessor()
 		{
-			BufferedOutputStream bufferedOutputStream = new BufferedOutputStream(AbstractConnection.this.outputStream, 1<<14);
+			BufferedOutputStream bufferedOutputStream = new BufferedOutputStream(AbstractConnection.this.outputStream, AbstractConnection.DEFAULT_OUTBOUND_BUFFER_SIZE);
 			this.dataOutputStream = new DataOutputStream(bufferedOutputStream);
-			this.outboundQueue = new ArrayBlockingQueue<Message>(AbstractConnection.this.context.getConfiguration().get("messaging.outbound.queue_max", 1<<12));
+			this.outboundQueue = new ArrayBlockingQueue<Message>(AbstractConnection.this.context.getConfiguration().get("messaging.outbound.queue_max", AbstractConnection.DEFAULT_OUTBOUND_QUEUE_SIZE));
 		}
 		
 		@Override
@@ -245,12 +257,15 @@ public abstract class AbstractConnection extends Serializable implements Compara
 			if (message == null)
 				return Collections.emptyList();
 			
-			final int numDispatchItems = Math.max(this.outboundQueue.size()+1, Constants.MAX_REQUEST_INVENTORY_ITEMS_TOTAL);
+			final int numDispatchItems = Math.min(this.outboundQueue.size()+1, Constants.MAX_REQUEST_INVENTORY_ITEMS_TOTAL);
 			final List<Message> messages = new ArrayList<>(numDispatchItems);
 			messages.add(message);
-			this.outboundQueue.drainTo(messages, numDispatchItems-1);
 			
-			Collections.sort(messages);
+			if (numDispatchItems > 1)
+			{
+				this.outboundQueue.drainTo(messages, numDispatchItems-1);
+				Collections.sort(messages);
+			}
 			
 			return messages;
 		}
@@ -557,7 +572,7 @@ public abstract class AbstractConnection extends Serializable implements Compara
 			disconnect(reason);
 		else
 		{
-			networkLog.error(this.context.getName()+": "+toString()+" - Received a strike "+this.strikes+"/"+Constants.MAX_STRIKES_FOR_DISCONNECT+" - "+reason);
+			networkLog.warn(this.context.getName()+": "+toString()+" - Received a strike "+this.strikes+"/"+Constants.MAX_STRIKES_FOR_DISCONNECT+" - "+reason);
 			this.strikeResetAt = System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(1);
 		}
 	}
@@ -843,6 +858,11 @@ public abstract class AbstractConnection extends Serializable implements Compara
 	public int allocatedRequestQuota()
 	{
 		return pendingRequests() + pendingWeight();
+	}
+	
+	public int availableQueueQuota()
+	{
+		return Math.max(0, AbstractConnection.DEFAULT_OUTBOUND_QUEUE_QUOTA - this.outboundProcessor.outboundQueue.size());
 	}
 
 	public long getNextTimeout(int requestWeight, TimeUnit timeUnit)
