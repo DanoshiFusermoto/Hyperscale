@@ -9,7 +9,6 @@ import java.net.SocketAddress;
 import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -21,7 +20,6 @@ import java.util.Set;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
-import java.util.stream.Collectors;
 
 import org.radix.hyperscale.Constants;
 import org.radix.hyperscale.Context;
@@ -53,6 +51,7 @@ import org.radix.hyperscale.network.peers.PeerHandler;
 import org.radix.hyperscale.node.Node;
 import org.radix.hyperscale.time.Time;
 import org.radix.hyperscale.utils.MathUtils;
+import org.radix.hyperscale.utils.Numbers;
 import org.radix.hyperscale.utils.UInt128;
 import org.radix.hyperscale.utils.URIs;
 
@@ -322,8 +321,8 @@ public final class Network implements Service
 								{
 									// Perform this check within the lock for thread safety so that we catch any new INBOUND connections 
 									// which match any of our preferred OUTBOUND connections
-									if (Network.this.get(preferredPeer.getIdentity(), Protocol.TCP, ConnectionState.CONNECTING, ConnectionState.CONNECTED) != null ||
-										Network.this.get(preferredPeer.getHostOnly(), Protocol.TCP, ConnectionState.CONNECTING) != null)
+									if (Network.this.get(preferredPeer.getIdentity(), Protocol.TCP, ConnectionState.SELECT_CONNECTING_CONNECTED) != null ||
+										Network.this.get(preferredPeer.getHostOnly(), Protocol.TCP, ConnectionState.SELECT_CONNECTING) != null)
 											continue;
 
 									Network.this.connect(preferredPeer.getURI(), Direction.OUTBOUND, Protocol.TCP);
@@ -413,7 +412,7 @@ public final class Network implements Service
 				            for (final Peer candidate : candidatePeers)
 				        	{
 			        	    	// Have an existing inbound connection?
-			        			final AbstractConnection candidateConnection = Network.this.get(candidate.getIdentity(), Protocol.TCP, ConnectionState.CONNECTING, ConnectionState.CONNECTED);
+			        			final AbstractConnection candidateConnection = Network.this.get(candidate.getIdentity(), Protocol.TCP, ConnectionState.SELECT_CONNECTING_CONNECTED);
 			        			if (candidateConnection != null && candidateConnection.getDirection() == Direction.INBOUND)
 			        				continue;
 
@@ -503,7 +502,7 @@ public final class Network implements Service
 			            	final ShardGroupID preferredPeerShardGroupID = ShardMapper.toShardGroup(slot.identity, numShardGroups);
 
 				        	// Was the connection to the new peer successful?
-				        	final AbstractConnection preferredConnection = Network.this.get(slot.identity, Protocol.TCP, ConnectionState.CONNECTED);
+				        	final AbstractConnection preferredConnection = Network.this.get(slot.identity, Protocol.TCP, ConnectionState.SELECT_CONNECTED);
 				        	if (preferredConnection == null)
 				        	{
 				        		// Connection being replaced has gone too ... meh
@@ -678,7 +677,7 @@ public final class Network implements Service
 		}
 		
 		// Check for multiple or simultaneous inbound / outboung
-		final List<AbstractConnection> duplicates = this.context.getNetwork().get(StandardConnectionFilter.build(this.context).setStates(ConnectionState.CONNECTING, ConnectionState.CONNECTED).
+		final List<AbstractConnection> duplicates = this.context.getNetwork().get(StandardConnectionFilter.build(this.context).setStates(ConnectionState.SELECT_CONNECTING_CONNECTED).
 																														  			 setIdentity(node.getIdentity()).
 																														  			 setProtocol(connection.getProtocol()));
 		boolean keepThis = true;
@@ -760,129 +759,186 @@ public final class Network implements Service
 		}
 	}
 
-	public int count(ConnectionState ... states)
+	public int count(final Set<ConnectionState> states)
 	{
 		synchronized(this.connections)
 		{
 			int count = 0;
-
 			for (int i = 0 ; i < this.connections.size() ; i++)
 			{
 				final AbstractConnection connection = this.connections.get(i);
-				if (states == null || states.length == 0 || Arrays.stream(states).collect(Collectors.toSet()).contains(connection.getState()))
-					count++;
+				if (states != null && states.isEmpty() == false && states.contains(connection.getState()) == false)
+					continue;
+
+				count++;
+			}
+			
+			return count;
+		}
+	}
+	
+	public int count(Protocol protocol, Set<ConnectionState> states)
+	{
+		synchronized(this.connections)
+		{
+			int count = 0;
+			for (int i = 0 ; i < this.connections.size() ; i++)
+			{
+				final AbstractConnection connection = this.connections.get(i);
+				if (connection.getProtocol().equals(protocol) == false)
+					continue;
+
+				if (states != null && states.isEmpty() == false && states.contains(connection.getState()) == false)
+					continue;
+
+				count++;
 			}
 			
 			return count;
 		}
 	}
 
-	public int count(Protocol protocol, ConnectionState ... states)
-	{
-		synchronized(this.connections)
-		{
-			int count = 0;
 
-			for (int i = 0 ; i < this.connections.size() ; i++)
-			{
-				final AbstractConnection connection = this.connections.get(i);
-				if (connection.getProtocol().equals(protocol) &&
-					(states == null || states.length == 0 || Arrays.stream(states).collect(Collectors.toSet()).contains(connection.getState())))
-					count++;
-			}
-			
-			return count;
-		}
+	@SuppressWarnings("unchecked")
+	public <T extends AbstractConnection> T get(URI host, Protocol protocol)
+	{
+		Objects.requireNonNull(host, "Host URI is null");
+		Objects.requireNonNull(protocol, "Protocol is null");
+
+		if (host.getPort() == -1)
+			return getHostOnly(host, protocol, null);
+		else
+			return getHostWithPort(host, protocol, null);
 	}
 
 	@SuppressWarnings("unchecked")
-	public <T extends AbstractConnection> T get(URI host, Protocol protocol, ConnectionState ... states)
+	public <T extends AbstractConnection> T get(URI host, Protocol protocol, Set<ConnectionState> states)
 	{
+		Objects.requireNonNull(host, "Host URI is null");
+		Objects.requireNonNull(protocol, "Protocol is null");
+		Objects.requireNonNull(states, "Connection states set is null");
+		Numbers.isZero(states.size(), "Connection states set is empty");
+
 		if (host.getPort() == -1)
 			return getHostOnly(host, protocol, states);
 		else
 			return getHostWithPort(host, protocol, states);
 	}
 
-	private <T extends AbstractConnection> T getHostWithPort(URI host, Protocol protocol, ConnectionState ... states)
+	private <T extends AbstractConnection> T getHostWithPort(URI host, Protocol protocol, Set<ConnectionState> states)
 	{
 		synchronized(this.connections)
 		{
 			for (int i = 0 ; i < this.connections.size() ; i++)
 			{
 				final AbstractConnection connection = this.connections.get(i);
-				if (connection.getProtocol().equals(protocol) &&
-					connection.getHost().equals(URIs.toHostAndPort(host)) &&
-					(states == null || states.length == 0 || Arrays.stream(states).collect(Collectors.toSet()).contains(connection.getState())))
-					return (T) connection;
+				if (connection.getProtocol().equals(protocol) == false)
+					continue;
+				
+				if (connection.getHost().equals(URIs.toHostAndPort(host)) == false)
+					continue;
+				
+				if (states != null && states.isEmpty() == false && states.contains(connection.getState()) == false)
+					continue;
+
+				return (T) connection;
 			}
 
 			return null;
 		}
 	}
 
-	private <T extends AbstractConnection> T getHostOnly(URI host, Protocol protocol, ConnectionState ... states)
+	private <T extends AbstractConnection> T getHostOnly(URI host, Protocol protocol, Set<ConnectionState> states)
 	{
 		synchronized(this.connections)
 		{
 			for (int i = 0 ; i < this.connections.size() ; i++)
 			{
 				final AbstractConnection connection = this.connections.get(i);
-				if (connection.getProtocol().equals(protocol) &&
-					connection.getHost().getHost().equals(host.getHost()) &&
-					(states == null || states.length == 0 || Arrays.stream(states).collect(Collectors.toSet()).contains(connection.getState())))
-					return (T) connection;
+				if (connection.getProtocol().equals(protocol) == false)
+					continue;
+				
+				if (connection.getHost().getHost().equals(host.getHost()) == false)
+					continue;
+				
+				if (states != null && states.isEmpty() == false && states.contains(connection.getState()) == false)
+					continue;
+
+				return (T) connection;
 			}
 
 			return null;
 		}
+	}
+	
+	@SuppressWarnings("unchecked")
+	public <T extends AbstractConnection> T get(Identity identity, Protocol protocol)
+	{
+		return get(identity, protocol, null);
 	}
 
 	@SuppressWarnings("unchecked")
-	public <T extends AbstractConnection> T get(Identity identity, Protocol protocol, ConnectionState ... states)
+	public <T extends AbstractConnection> T get(Identity identity, Protocol protocol, Set<ConnectionState> states)
 	{
 		synchronized(this.connections)
 		{
 			for (int i = 0 ; i < this.connections.size() ; i++)
 			{
 				final AbstractConnection connection = this.connections.get(i);
-				if (connection.getProtocol().equals(protocol) &&
-					connection.getNode() != null && connection.getNode().getIdentity().getIdentity().equals(identity) &&
-					(states == null || states.length == 0 || Arrays.stream(states).collect(Collectors.toSet()).contains(connection.getState())))
-					return (T) connection;
+				if (connection.getProtocol().equals(protocol) == false)
+					continue;
+				
+				if (connection.getNode() == null || connection.getNode().getIdentity().getIdentity().equals(identity) == false)
+					continue;
+
+				if (states != null && states.isEmpty() == false && states.contains(connection.getState()) == false)
+					continue;
+				
+				return (T) connection;
 			}
 		}
 
 		return null;
 	}
 
-	public boolean has(Identity identity, ConnectionState ... states)
+	public boolean has(Identity identity, Set<ConnectionState> states)
 	{
 		synchronized(this.connections)
 		{
 			for (int i = 0 ; i < this.connections.size() ; i++)
 			{
 				final AbstractConnection connection = this.connections.get(i);
-				if (connection.getNode() != null && connection.getNode().getIdentity().getIdentity().equals(identity) &&
-					(states == null || states.length == 0 || Arrays.stream(states).collect(Collectors.toSet()).contains(connection.getState())))
-					return true;
+				
+				if (connection.getNode() == null || connection.getNode().getIdentity().getIdentity().equals(identity) == false)
+					continue;
+
+				if (states != null && states.isEmpty() == false && states.contains(connection.getState()) == false)
+					continue;
+
+				return true;
 			}
 
 			return false;
 		}
 	}
 
-	public boolean has(Identity identity, Protocol protocol, ConnectionState ... states)
+	public boolean has(Identity identity, Protocol protocol, Set<ConnectionState> states)
 	{
 		synchronized(this.connections)
 		{
 			for (int i = 0 ; i < this.connections.size() ; i++)
 			{
 				final AbstractConnection connection = this.connections.get(i);
-				if (connection.getProtocol().equals(protocol) &&
-					connection.getNode() != null && connection.getNode().getIdentity().getIdentity().equals(identity) &&
-					(states == null || states.length == 0 || Arrays.stream(states).collect(Collectors.toSet()).contains(connection.getState())))
-					return true;
+				if (connection.getProtocol().equals(protocol) == false)
+					continue;
+				
+				if (connection.getNode() == null || connection.getNode().getIdentity().getIdentity().equals(identity) == false)
+					continue;
+
+				if (states != null && states.isEmpty() == false && states.contains(connection.getState()) == false)
+					continue;
+
+				return true;
 			}
 
 			return false;

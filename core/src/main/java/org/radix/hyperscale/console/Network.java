@@ -61,13 +61,13 @@ public class Network extends Function
 			{
 				final URI URI = Agent.getURI(query);
 				knownPeer = context.getNetwork().getPeerHandler().get(URI);
-				connection = context.getNetwork().get(URI, Protocol.TCP, ConnectionState.CONNECTING, ConnectionState.CONNECTED);
+				connection = context.getNetwork().get(URI, Protocol.TCP, ConnectionState.SELECT_CONNECTING_CONNECTED);
 			}
 			else
 			{
 				final Identity identity = Identity.from(query);
 				knownPeer = context.getNetwork().getPeerHandler().get(identity);
-				connection = context.getNetwork().get(identity, Protocol.TCP, ConnectionState.CONNECTING, ConnectionState.CONNECTED);
+				connection = context.getNetwork().get(identity, Protocol.TCP, ConnectionState.SELECT_CONNECTING_CONNECTED);
 			}
 
 			if (knownPeer != null)
@@ -89,7 +89,7 @@ public class Network extends Function
 		{
 			if (commandLine.getOptionValue("disconnect") == null)
 			{
-				for (AbstractConnection connectedPeer : context.getNetwork().get(StandardConnectionFilter.build(context).setStates(ConnectionState.CONNECTED, ConnectionState.CONNECTING), false))
+				for (AbstractConnection connectedPeer : context.getNetwork().get(StandardConnectionFilter.build(context).setStates(ConnectionState.SELECT_CONNECTING_CONNECTED), false))
 				{
 					connectedPeer.disconnect("Forced disconnect");
 					printStream.println("Disconnecting "+connectedPeer+" @ "+connectedPeer.getNode().getHead());
@@ -253,7 +253,7 @@ public class Network extends Function
 		else
 		{
 			final ShardGroupID shardGroupID = ShardMapper.toShardGroup(context.getNode().getIdentity(), context.getLedger().numShardGroups());
-			final List<AbstractConnection> connections = context.getNetwork().get(StandardConnectionFilter.build(context).setStates(ConnectionState.CONNECTED));
+			final List<AbstractConnection> connections = context.getNetwork().get(StandardConnectionFilter.build(context).setStates(ConnectionState.SELECT_CONNECTED));
 			connections.sort((o1, o2) -> {
 				ShardGroupID sg1 = ShardMapper.toShardGroup(o1.getNode().getIdentity(), context.getLedger().numShardGroups());
 				ShardGroupID sg2 = ShardMapper.toShardGroup(o2.getNode().getIdentity(), context.getLedger().numShardGroups());
