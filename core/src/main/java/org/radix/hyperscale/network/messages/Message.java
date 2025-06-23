@@ -31,7 +31,7 @@ public abstract class Message extends Serializable implements Hashable, Comparab
 {
 	public static final int HEADER_SIZE = Integer.BYTES+Byte.BYTES+Short.BYTES;
 	public static final int PAYLOAD_BUFFER_SIZE = 1<<20;
-	public static final int COMPRESSION_BUFFER_SIZE = 1<<20;
+	public static final int COMPRESSION_BUFFER_SIZE = 1<<20;  // 1MB compression buffer
 	public static final int MAX_MESSAGE_SIZE = 1<<24;  // 16MB max payload size
 	public static final int MAX_SIGNATURE_SIZE = 1<<14;  // 16KB max signature size
 
@@ -158,14 +158,19 @@ public abstract class Message extends Serializable implements Hashable, Comparab
 					final ByteBuffer compressionBuffer = maxCompressedLength > COMPRESSION_BUFFER_SIZE ? ByteBuffer.allocate(maxCompressedLength) : Message.compressionBuffer.get().clear();
 					
 					final int compressedLength = Snappy.compress(payloadBuffer.array(), 0, payloadBuffer.position(), compressionBuffer.array(), 0);
-					payloadBytes = new byte[compressedLength];
-					payloadLength = payloadBytes.length;
-					System.arraycopy(compressionBuffer.array(), 0, payloadBytes, 0, compressedLength);
-					
 					if (transportParameters != null && transportParameters.cache())
 					{
+						payloadBytes = new byte[compressedLength];
+						payloadLength = compressedLength;
+						System.arraycopy(compressionBuffer.array(), 0, payloadBytes, 0, compressedLength);
+						
 						message.setCachedPayload(payloadBytes);
 						message.setCachedPayloadCompressed(payloadCompressed);
+					}
+					else
+					{
+						payloadBytes = compressionBuffer.array();
+						payloadLength = compressedLength;
 					}
 				}
 				else
@@ -244,8 +249,8 @@ public abstract class Message extends Serializable implements Hashable, Comparab
 
 	// Transients //
 	private transient 	int			size = 0;
-	private transient 	Direction 	direction;
 	private transient   long 		witnessedAt = 0;
+	private transient 	Direction 	direction = Direction.UNDEFINED;
 	
 	// Caches for multiple transmissions //
 	private transient byte[] cachedPayload;
@@ -359,12 +364,12 @@ public abstract class Message extends Serializable implements Hashable, Comparab
 	@Override
 	public String toString()
 	{
-		return getCommand()+":"+getDirection()+":"+getHash()+" @ "+getTimestamp();
+		return getCommand()+":"+getDirection()+":"+getHash()+" @ "+getTimestamp()+" ["+(this.size == 0 ? "unserialized":this.size)+"]";
 	}
 	
 	private synchronized byte[] getCachedPayload()
 	{
-		if (this.direction == null)
+		if (this.direction == Direction.UNDEFINED)
 			throw new IllegalStateException("Direction has not been set");
 
 		if (this.direction == Direction.INBOUND)
@@ -375,7 +380,7 @@ public abstract class Message extends Serializable implements Hashable, Comparab
 
 	private synchronized void setCachedPayload(byte[] payload)
 	{
-		if (this.direction == null)
+		if (this.direction == Direction.UNDEFINED)
 			throw new IllegalStateException("Direction has not been set");
 
 		if (this.direction == Direction.INBOUND)
@@ -386,7 +391,7 @@ public abstract class Message extends Serializable implements Hashable, Comparab
 	
 	private synchronized boolean isCachedPayloadCompressed()
 	{
-		if (this.direction == null)
+		if (this.direction == Direction.UNDEFINED)
 			throw new IllegalStateException("Direction has not been set");
 
 		if (this.direction == Direction.INBOUND)
@@ -397,7 +402,7 @@ public abstract class Message extends Serializable implements Hashable, Comparab
 
 	private synchronized void setCachedPayloadCompressed(boolean compressed)
 	{
-		if (this.direction == null)
+		if (this.direction == Direction.UNDEFINED)
 			throw new IllegalStateException("Direction has not been set");
 
 		if (this.direction == Direction.INBOUND)
@@ -413,7 +418,7 @@ public abstract class Message extends Serializable implements Hashable, Comparab
 	
 	private synchronized byte[] getCachedSignature()
 	{
-		if (this.direction == null)
+		if (this.direction == Direction.UNDEFINED)
 			throw new IllegalStateException("Direction has not been set");
 
 		if (this.direction == Direction.INBOUND)
@@ -424,7 +429,7 @@ public abstract class Message extends Serializable implements Hashable, Comparab
 	
 	private synchronized void setCachedSignature(byte[] signature)
 	{
-		if (this.direction == null)
+		if (this.direction == Direction.UNDEFINED)
 			throw new IllegalStateException("Direction has not been set");
 
 		if (this.direction == Direction.INBOUND)

@@ -23,7 +23,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 
 @SerializerId2("gossip.items")
-@TransportParameters(cache = true, priority = 50)
+@TransportParameters(priority = 50)
 public final class ItemsMessage extends Message
 {
 	@JsonProperty("inventory")
