@@ -217,9 +217,6 @@ public class GossipHandler implements Service
 						final List<InventoryItem> staleRetrySources = new ArrayList<InventoryItem>(undelivered.size());
 						for (final InventoryItem item : undelivered)
 						{
-							if (GossipHandler.this.receivedCache.get(item.getHash()) != null)
-								gossipLog.error(GossipHandler.this.context.getName()+": Requested item "+item+" appears delivered but not represented in Gossip Task "+hashCode());
-							
 							if (GossipHandler.this.itemsRequested.remove(item, this) == false)
 							{
 								if (GossipHandler.this.itemsRequested.containsKey(item) == false)
@@ -350,8 +347,6 @@ public class GossipHandler implements Service
 	private final MutableMap<Class<? extends Primitive>, GossipReceiver> receiverProcessors = Maps.mutable.<Class<? extends Primitive>, GossipReceiver>empty().asSynchronized();
 	private final MutableMap<Class<? extends Primitive>, GossipInventory> inventoryProcessors = Maps.mutable.<Class<? extends Primitive>, GossipInventory>empty().asSynchronized();
 	
-	private final LRUCacheMap<Hash, InventoryItem> receivedCache = new LRUCacheMap<>(1<<16);
-
 	private final MonitoredReentrantLock lock;
 	private final ScheduledExecutorService maintenanceProcessor;
 	
@@ -1573,7 +1568,6 @@ public class GossipHandler implements Service
 					
 					itemsToTasks.put(item, itemRequestTask);
 					this.itemSources.removeAll(item);
-					this.receivedCache.put(item.getHash(), item);
 				}
 			}
 			finally
