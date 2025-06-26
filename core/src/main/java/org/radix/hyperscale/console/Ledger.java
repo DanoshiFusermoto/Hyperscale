@@ -1,14 +1,8 @@
 package org.radix.hyperscale.console;
 
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.IOException;
 import java.io.PrintStream;
-import java.io.RandomAccessFile;
-import java.util.Calendar;
 import java.util.Collection;
 import java.util.Date;
-import java.util.TimeZone;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -21,25 +15,18 @@ import org.radix.hyperscale.crypto.Hash;
 import org.radix.hyperscale.crypto.Hashable;
 import org.radix.hyperscale.ledger.AtomStatus;
 import org.radix.hyperscale.ledger.Block;
-import org.radix.hyperscale.ledger.BlockHeader;
 import org.radix.hyperscale.ledger.PendingAtom;
 import org.radix.hyperscale.ledger.PendingState;
 import org.radix.hyperscale.ledger.ShardMapper;
 import org.radix.hyperscale.ledger.StateAddress;
 import org.radix.hyperscale.ledger.StateLockMode;
-import org.radix.hyperscale.ledger.BlockHeader.InventoryType;
-import org.radix.hyperscale.ledger.primitives.Atom;
 import org.radix.hyperscale.ledger.primitives.StateCertificate;
-import org.radix.hyperscale.serialization.Serialization;
-import org.radix.hyperscale.serialization.DsonOutput.Output;
 
 public class Ledger extends Function
 {
 	private static final Options options = new Options().addOption("pending", false, "Return pending ledger information")
 														.addOption("states", false, "Return hash list of all pending states")
 														.addOption("stored", false, "List quantities of primitives stored")
-														.addOption("export", false, "Exports ledger as migration data")
-														.addOption("import", false, "Imports ledger from migration data")
 														.addOption(Option.builder("snapshot").desc("Outputs current state info of ledger").optionalArg(true).numberOfArgs(1).build())
 														.addOption("block", true, "Return block at specified height")
 														.addOption(Option.builder("desync").desc("Forces a desync for a period of time").hasArg(true).numberOfArgs(1).build())
@@ -111,14 +98,6 @@ public class Ledger extends Function
 
 			printStream.println("Current head: "+context.getLedger().getHead());
 		}
-		else if (commandLine.hasOption("export"))
-		{
-			exportAtoms(context, printStream);
-		}
-		else if (commandLine.hasOption("import"))
-		{
-			importAtoms(context, printStream);
-		}
 		else
 		{
 			printStream.println();
@@ -149,79 +128,4 @@ public class Ledger extends Function
 			printStream.println("Shard (G/A): "+context.getLedger().numShardGroups()+"/"+context.getMetaData().get("ledger.throughput.shards.touched", 1.0));
 		}
 	}
-	
-	private void exportAtoms(Context context, PrintStream printStream) throws Exception
-	{
-		File exportFile = new File("export.dat");
-		if (exportFile.exists())
-			throw new IOException("Export file "+exportFile+" exists");
-		
-		RandomAccessFile exportRAF = new RandomAccessFile(exportFile, "rw");
-		try
-		{
-			long height = 1;
-			long analysedAtoms = 0;
-			long exportedAtoms = 0;
-			BlockHeader blockHeader = context.getLedger().getBlockHeader(height);
-			while(blockHeader != null)
-			{
-				if (height % 100 == 0)
-					printStream.println("Analysed "+analysedAtoms+" Exported "+exportedAtoms+" atoms ... Currently exporting block "+height);
-				
-				for (Hash hash : blockHeader.getInventory(InventoryType.ACCEPTED))
-				{
-					Calendar exportTimeBound = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
-					exportTimeBound.set(2022, 0, 1);
-
-					Atom atom = context.getLedger().get(hash, Atom.class);
-					byte[] atomBytes = Serialization.getInstance().toDson(atom, Output.WIRE);
-					exportRAF.writeInt(atomBytes.length);
-					exportRAF.write(atomBytes);
-					exportedAtoms++;
-				}
-				
-				height++;
-				blockHeader = context.getLedger().getBlockHeader(height);
-			}
-		}
-		finally
-		{
-			exportRAF.close();
-		}
-	}
-	
-	private void importAtoms(Context context, PrintStream printStream) throws Exception
-	{
-		File importFile = new File("export.dat");
-		if (importFile.exists() == false)
-			throw new FileNotFoundException("Import file "+importFile+" not found");
-		
-		RandomAccessFile importRAF = new RandomAccessFile(importFile, "rw");
-		try
-		{
-			long position = 0;
-			long importRAFLength = importRAF.length();
-			long importedAtoms = 0;
-			while(position < importRAFLength)
-			{
-				byte[] atomBytes = new byte[importRAF.readInt()];
-				importRAF.readFully(atomBytes);
-				position += Integer.BYTES + atomBytes.length;
-				
-				Atom importAtom = Serialization.getInstance().fromDson(atomBytes, Atom.class);
-				if (context.getLedger().submit(importAtom) == true)
-					importedAtoms++;
-				
-				if (importedAtoms % 1000 == 0)
-					printStream.println("Imported "+importedAtoms+" atoms ... ");
-				
-				Thread.sleep(1000);
-			}
-		}
-		finally
-		{
-			importRAF.close();
-		}
-	}
-
 }
