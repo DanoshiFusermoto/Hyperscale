@@ -19,6 +19,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 import org.eclipse.collections.api.factory.Sets;
 import org.radix.hyperscale.Constants;
@@ -33,6 +34,7 @@ import org.radix.hyperscale.crypto.Identity;
 import org.radix.hyperscale.events.EventListener;
 import org.radix.hyperscale.events.SyncLostEvent;
 import org.radix.hyperscale.events.SynchronousEventListener;
+import org.radix.hyperscale.exceptions.QueueFullException;
 import org.radix.hyperscale.exceptions.StartupException;
 import org.radix.hyperscale.exceptions.TerminationException;
 import org.radix.hyperscale.exceptions.ValidationException;
@@ -49,7 +51,6 @@ import org.radix.hyperscale.ledger.events.AtomCommitTimeoutEvent;
 import org.radix.hyperscale.ledger.events.AtomExceptionEvent;
 import org.radix.hyperscale.ledger.events.AtomExecutableEvent;
 import org.radix.hyperscale.ledger.events.AtomExecuteLatentEvent;
-import org.radix.hyperscale.ledger.events.AtomExecutedEvent;
 import org.radix.hyperscale.ledger.events.AtomExecutionTimeoutEvent;
 import org.radix.hyperscale.ledger.events.AtomPrepareTimeoutEvent;
 import org.radix.hyperscale.ledger.events.AtomPreparedEvent;
@@ -80,6 +81,7 @@ import org.radix.hyperscale.network.GossipInventory;
 import org.radix.hyperscale.network.GossipReceiver;
 import org.radix.hyperscale.network.MessageProcessor;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.eventbus.Subscribe;
 import com.sleepycat.je.OperationStatus;
 
@@ -88,21 +90,24 @@ public class AtomHandler implements Service, LedgerInterface
 	private static final Logger syncLog = Logging.getLogger("sync");
 	private static final Logger atomsLog = Logging.getLogger("atoms");
 	
-	private static final int ATOMS_PROCESS_BATCH_SIZE = 64;
+	private static final int ATOMS_PROCESS_BATCH_SIZE = 128;
 	
 	private final Context context;
 	
 	private final Map<Hash, PendingAtom> pendingAtoms = new ConcurrentHashMap<Hash, PendingAtom>(1<<10);
 
-	private final Map<Hash, Long> latent = Collections.synchronizedMap(new LinkedHashMap<>(1024));
-	private final Map<Hash, Long> unaccepted = Collections.synchronizedMap(new LinkedHashMap<>(1024));
+	private final Map<Hash, PendingAtom> latent = Collections.synchronizedMap(new LinkedHashMap<>(1024));
+	private final Map<Hash, PendingAtom> unaccepted = Collections.synchronizedMap(new LinkedHashMap<>(1024));
 	private final Map<Hash, PendingAtom> acceptable = Collections.synchronizedMap(new LinkedHashMap<>(1024));
 	private final Map<Hash, PendingAtom> certificates = Collections.synchronizedMap(new LinkedHashMap<>(1024));
 	private final Map<Hash, PendingAtom> executable = Collections.synchronizedMap(new LinkedHashMap<>(1024));
 	private final Map<Hash, PendingAtom> unexecuted = Collections.synchronizedMap(new LinkedHashMap<>(1024));
 	private final Map<Hash, PendingAtom> uncommitted = Collections.synchronizedMap(new LinkedHashMap<>(1024));
 
+	private final List<Atom> atomsToProvision;
 	private final MappedBlockingQueue<Hash, Atom> atomsToProvisionQueue;
+
+	private final List<PendingAtom> atomsToPrepare;
 	private final MappedBlockingQueue<Hash, PendingAtom> atomsToPrepareQueue;
 	
 	private final Lock[] loadlocks;
@@ -147,7 +152,9 @@ public class AtomHandler implements Service, LedgerInterface
 	AtomHandler(final Context context)
 	{
 		this.context = Objects.requireNonNull(context);
+		this.atomsToPrepare = new ArrayList<PendingAtom>(AtomHandler.ATOMS_PROCESS_BATCH_SIZE);
 		this.atomsToPrepareQueue = new MappedBlockingQueue<Hash, PendingAtom>(this.context.getConfiguration().get("ledger.atom.queue", 1<<14));
+		this.atomsToProvision = new ArrayList<Atom>(AtomHandler.ATOMS_PROCESS_BATCH_SIZE);
 		this.atomsToProvisionQueue = new MappedBlockingQueue<Hash, Atom>(this.context.getConfiguration().get("ledger.atom.queue", 1<<14));
 		this.loadlocks = new Lock[this.context.getConfiguration().get("ledger.atom.handler.loadlocks", 1<<10)];
 		for(int i = 0 ; i < loadlocks.length ; i++)
@@ -171,10 +178,10 @@ public class AtomHandler implements Service, LedgerInterface
 			}
 		});
 		
-		this.context.getNetwork().getGossipHandler().register(Atom.class, new GossipInventory() 
+		this.context.getNetwork().getGossipHandler().register(Atom.class, new GossipInventory(this.context) 
 		{
 			@Override
-			public Collection<Hash> required(final Class<? extends Primitive> type, final Collection<Hash> items, final AbstractConnection connection) throws IOException
+			public Collection<Hash> process(final Class<? extends Primitive> type, final Collection<Hash> items, final AbstractConnection connection) throws IOException
 			{
 				if (type.equals(Atom.class) == false)
 				{
@@ -182,40 +189,36 @@ public class AtomHandler implements Service, LedgerInterface
 					return Collections.emptyList();
 				}
 				
-				final List<Hash> required = new ArrayList<Hash>(items.size());
+				final List<Hash> required = new ArrayList<Hash>(items);
 				required.removeAll(AtomHandler.this.atomsToProvisionQueue.contains(required));
+				required.removeAll(AtomHandler.this.atomsToPrepareQueue.contains(required));
 
-				final Iterator<Hash> itemsIterator = items.iterator();
-				while(itemsIterator.hasNext())
+				final Iterator<Hash> requiredIterator = required.iterator();
+				while(requiredIterator.hasNext())
 				{
-					final Hash item = itemsIterator.next();
-					if (AtomHandler.this.atomsToPrepareQueue.contains(item))
-						continue;
-					
+					final Hash item = requiredIterator.next();
+
 					final PendingAtom pendingAtom = AtomHandler.this.pendingAtoms.get(item);
 					if (pendingAtom != null && pendingAtom.getAtom() != null)
+					{
+						requiredIterator.remove();
 						continue;
-					
-					if (AtomHandler.this.context.getLedger().getLedgerStore().has(item, type))
-						continue;
-
-					if (AtomHandler.this.status(item).equals(State.NONE) == false)
-						continue;
-					
-					required.add(item);
+					}
 				}
+				
+				required.removeAll(AtomHandler.this.context.getLedger().getLedgerStore().has(required, type));
 				
 				return required;
 			}
 		});
 
-		this.context.getNetwork().getGossipHandler().register(Atom.class, new GossipReceiver<Atom>() 
+		this.context.getNetwork().getGossipHandler().register(Atom.class, new GossipReceiver<Atom>(this.context) 
 		{
 			@Override
-			public void receive(final Collection<Atom> atoms, final AbstractConnection connection) throws InterruptedException
+			public void process(final Class<? extends Primitive> type, final Collection<Atom> atoms, final AbstractConnection connection) throws InterruptedException
 			{
 				if (atomsLog.hasLevel(Logging.INFO))
-					atoms.forEach(a -> atomsLog.log(AtomHandler.this.context.getName()+": Received atom "+a.getHash()));
+					atoms.forEach(a -> atomsLog.info(AtomHandler.this.context.getName()+": Received atom "+a.getHash()));
 
 				Collection<Atom> submitted = AtomHandler.this.submit(atoms, true);
 				if (submitted.size() != atoms.size())
@@ -223,34 +226,31 @@ public class AtomHandler implements Service, LedgerInterface
 			}
 		});
 
-		this.context.getNetwork().getGossipHandler().register(Atom.class, new GossipFetcher<Atom>() 
+		this.context.getNetwork().getGossipHandler().register(Atom.class, new GossipFetcher<Atom>(this.context) 
 		{
 			@Override
-			public Collection<Atom> fetch(final Collection<Hash> items, final AbstractConnection connection) throws IOException
+			public Collection<Atom> process(final Class<? extends Primitive> type, final Collection<Hash> items, final AbstractConnection connection) throws IOException
 			{
-				List<Hash> toFetch = new ArrayList<Hash>(items);
-				List<Atom> fetched = new ArrayList<Atom>();
-
+				final List<Hash> toFetch = new ArrayList<Hash>(items);
+				final List<Atom> fetched = new ArrayList<Atom>(items.size());
+	
 				AtomHandler.this.atomsToProvisionQueue.getAll(toFetch, (h, p) -> { fetched.add(p); toFetch.remove(h); });
-
-				Iterator<Hash> toFetchIterator = toFetch.iterator();
+				AtomHandler.this.atomsToPrepareQueue.getAll(toFetch, (h, p) -> { fetched.add(p.getAtom()); toFetch.remove(h); });
+	
+				final Iterator<Hash> toFetchIterator = toFetch.iterator();
 				while(toFetchIterator.hasNext())
 				{
 					Hash item = toFetchIterator.next();
-					PendingAtom pendingAtom = AtomHandler.this.atomsToPrepareQueue.get(item);
+					PendingAtom pendingAtom = AtomHandler.this.pendingAtoms.get(item);
 					if (pendingAtom == null || pendingAtom.getAtom() == null)
-					{
-						pendingAtom = AtomHandler.this.pendingAtoms.get(item);
-						if (pendingAtom == null || pendingAtom.getAtom() == null)
-							continue;
-					}
+						continue;
 					
 					fetched.add(pendingAtom.getAtom());
 					toFetchIterator.remove();
 				}
 				
 				AtomHandler.this.context.getLedger().getLedgerStore().get(toFetch, Atom.class, (h, p) -> { fetched.add(p); toFetch.remove(h); });
-
+	
 				if (toFetch.isEmpty() == false)
 					toFetch.forEach(h -> atomsLog.error(AtomHandler.this.context.getName()+": Requested atom "+h+" not found"));
 				
@@ -305,7 +305,7 @@ public class AtomHandler implements Service, LedgerInterface
 					broadcastedPendingAtomCount += broadcastSyncInventory(pendingAtomInventory, Atom.class, 0, connection);
 					broadcastedPendingAtomCount += broadcastSyncInventory(deferredPendingAtomInventory, Atom.class, 0, connection);
 
-					syncLog.log(AtomHandler.this.context.getName()+": Broadcasted "+broadcastedPendingAtomCount+" atom to "+connection);
+					syncLog.log(AtomHandler.this.context.getName()+": Broadcasted "+broadcastedPendingAtomCount+" atoms to "+connection);
 				}
 				catch (Exception ex)
 				{
@@ -327,14 +327,12 @@ public class AtomHandler implements Service, LedgerInterface
 					if (AtomHandler.this.context.getNode().isSynced() == false)
 						return;
 					
-					submit(submitAtomsMessage.getAtoms(), false);
+					final Collection<Hash> inventory = submitAtomsMessage.getAtoms().stream().map(a -> a.getHash()).collect(Collectors.toSet());
+					final Collection<Hash> required = AtomHandler.this.context.getNetwork().getGossipHandler().required(inventory, Atom.class, connection);
+					if (required.isEmpty())
+						return;
 					
-//					final Collection<Hash> inventory = submitAtomsMessage.getAtoms().stream().map(a -> a.getHash()).collect(Collectors.toSet());
-//					final Collection<Hash> required = AtomHandler.this.context.getNetwork().getGossipHandler().required(inventory, Atom.class, connection);
-//					if (required.isEmpty())
-//						return;
-					
-//					submit(submitAtomsMessage.getAtoms().stream().filter(a -> required.contains(a.getHash())).collect(Collectors.toList()), false);
+					submit(submitAtomsMessage.getAtoms().stream().filter(a -> required.contains(a.getHash())).collect(Collectors.toList()), false);
 				}
 				catch (Exception ex)
 				{
@@ -371,10 +369,12 @@ public class AtomHandler implements Service, LedgerInterface
 	{
 		if (this.atomsToProvisionQueue.isEmpty() == false)
 		{
-			final List<Atom> atomsToProvision = this.atomsToProvisionQueue.getMany(AtomHandler.ATOMS_PROCESS_BATCH_SIZE);
-			for (int i = 0 ; i < atomsToProvision.size() ; i++)
+			this.atomsToProvision.clear();
+			this.atomsToProvisionQueue.getMany(this.atomsToProvision, AtomHandler.ATOMS_PROCESS_BATCH_SIZE);
+			
+			for (int i = 0 ; i < this.atomsToProvision.size() ; i++)
 			{
-				final Atom atom = atomsToProvision.get(i);
+				final Atom atom = this.atomsToProvision.get(i);
 				
 				if (atomsLog.hasLevel(Logging.DEBUG))
 					atomsLog.debug(this.context.getName()+": Provisioning atom "+atom.getHash());
@@ -432,10 +432,12 @@ public class AtomHandler implements Service, LedgerInterface
 		if (this.atomsToPrepareQueue.isEmpty() == false)
 		{
 			final ShardGroupID localShardGroupID = ShardMapper.toShardGroup(this.context.getNode().getIdentity(), numShardGroups);
-			final List<PendingAtom> atomsToPrepare = this.atomsToPrepareQueue.getMany(AtomHandler.ATOMS_PROCESS_BATCH_SIZE);
-			for (int i = 0 ; i < atomsToPrepare.size() ; i++)
+			
+			this.atomsToPrepare.clear();
+			this.atomsToPrepareQueue.getMany(this.atomsToPrepare, AtomHandler.ATOMS_PROCESS_BATCH_SIZE);
+			for (int i = 0 ; i < this.atomsToPrepare.size() ; i++)
 			{
-				final PendingAtom pendingAtom = atomsToPrepare.get(i);
+				final PendingAtom pendingAtom = this.atomsToPrepare.get(i);
 				try
 				{
 					if (atomsLog.hasLevel(Logging.DEBUG))
@@ -503,9 +505,9 @@ public class AtomHandler implements Service, LedgerInterface
 				final AtomTimeout timeout = pendingAtom.tryTimeout(timestamp);
 				if (timeout != null)
 				{
-//					if(atomsLog.hasLevel(Logging.DEBUG))
-						atomsLog.info(this.context.getName()+": Timeout "+timeout.getHash()+" "+timeout.getClass().getSimpleName()+" is triggered at "+timestamp+" for "+pendingAtom.getHash()+" with status "+pendingAtom.getStatus().current());
-	
+					if (timeout.isActive())
+						atomsLog.warn(this.context.getName()+": Timeout "+timeout.getHash()+" "+timeout.getClass().getSimpleName()+" is triggered at "+timestamp+" for "+pendingAtom.getHash()+" with status "+pendingAtom.getStatus().current());
+					
 					AtomHandler.this.context.getEvents().post(new AtomTimeoutEvent(pendingAtom, timeout));
 				}
 			}
@@ -524,38 +526,18 @@ public class AtomHandler implements Service, LedgerInterface
 
 	public Collection<PendingAtom> unaccepted()
 	{
-		final List<PendingAtom> unaccepted = new ArrayList<PendingAtom>(this.unaccepted.size());
-		
 		synchronized(this.unaccepted)
 		{
-			this.unaccepted.keySet().forEach(h -> {
-				final PendingAtom pendingAtom = this.pendingAtoms.get(h);
-				if (pendingAtom == null)
-					return;
-				
-				unaccepted.add(pendingAtom);
-			});
+			return Sets.immutable.<PendingAtom>ofAll(this.unaccepted.values()).castToSet();
 		}
-		
-		return unaccepted;
 	}
 
 	public Collection<PendingAtom> latent()
 	{
-		final List<PendingAtom> latent = new ArrayList<PendingAtom>(this.latent.size());
-
 		synchronized(this.latent)
 		{
-			this.latent.keySet().forEach(h -> {
-				final PendingAtom pendingAtom = this.pendingAtoms.get(h);
-				if (pendingAtom == null)
-					return;
-				
-				latent.add(pendingAtom);
-			});
+			return Sets.immutable.<PendingAtom>ofAll(this.latent.values()).castToSet();
 		}
-		
-		return latent;
 	}
 
 	public Collection<PendingAtom> executable()
@@ -641,12 +623,8 @@ public class AtomHandler implements Service, LedgerInterface
 		{
 			unaccepted = new ArrayList<PendingAtom>(this.unaccepted.size() < limit ? this.unaccepted.size() : limit);
 
-			for (final Hash atom : this.unaccepted.keySet())
+			for (final PendingAtom pendingAtom : this.unaccepted.values())
 			{
-				final PendingAtom pendingAtom = this.pendingAtoms.get(atom);
-				if (pendingAtom == null)
-					continue;
-				
 				final AtomTimeout timeout = pendingAtom.getTimeout(AcceptTimeout.class);
 				if (timeout == null)
 					// TODO Warn or throw?
@@ -658,7 +636,7 @@ public class AtomHandler implements Service, LedgerInterface
 				if (pendingAtom.isAccepted())
 					continue;
 
-				if (excluder.test(pendingAtom))
+				if (excluder.test(timeout) || excluder.test(pendingAtom))
 					continue;
 				
 				unaccepted.add(pendingAtom);
@@ -722,11 +700,14 @@ public class AtomHandler implements Service, LedgerInterface
 		{
 			latent = new ArrayList<PendingAtom>(this.latent.size() < limit ? this.latent.size() : limit);
 
-			for (final Hash atom : this.latent.keySet())
+			for (final PendingAtom pendingAtom : this.latent.values())
 			{
-				final PendingAtom pendingAtom = this.pendingAtoms.get(atom);
-				if (pendingAtom == null)
-					// TODO need to clean up on this or throw?
+				final AtomTimeout timeout = pendingAtom.getTimeout(ExecutionLatentTimeout.class);
+				if (timeout == null)
+					// TODO Warn or throw?
+					continue;
+
+				if (timeout.isActive() == false)
 					continue;
 
 				if (pendingAtom.isExecuteLatentSignalled())
@@ -737,8 +718,8 @@ public class AtomHandler implements Service, LedgerInterface
 
 				if (pendingAtom.isExecuted())
 					continue;
-
-				if (excluder.test(pendingAtom))
+				
+				if (excluder.test(timeout) || excluder.test(pendingAtom))
 					continue;
 				
 				latent.add(pendingAtom);
@@ -1089,7 +1070,8 @@ public class AtomHandler implements Service, LedgerInterface
 	 * @throws  
 	 */
 	
-	AtomStatus.State status(final Hash atom) throws IOException
+	@VisibleForTesting
+	public AtomStatus.State status(final Hash atom) throws IOException
 	{
 		Objects.requireNonNull(atom, "Atom hash is null");
 		Hash.notZero(atom, "Atom hash is zero");
@@ -1104,14 +1086,14 @@ public class AtomHandler implements Service, LedgerInterface
 			final PendingAtom pendingAtom = this.pendingAtoms.get(atom);
 			if (pendingAtom != null)
 				return pendingAtom.getStatus().current();
-
-			final SubstateCommit substateCommit = this.context.getLedger().getLedgerStore().search(StateAddress.from(Atom.class, atom));
-			if (substateCommit != null)
+			
+			final Substate substate = this.context.getLedger().getLedgerStore().get(StateAddress.from(Atom.class, atom));
+			if (substate != null)
 			{
-				if (Universe.get().getGenesis().getHash().equals(substateCommit.getSubstate().get(NativeField.BLOCK)))
+				if (Universe.get().getGenesis().getHash().equals(substate.get(NativeField.BLOCK)))
 					throw new IllegalStateException("Called AtomHandler::get with genesis atom hash "+atom);
 
-				if (substateCommit.getSubstate().get(NativeField.CERTIFICATE) != null || substateCommit.getSubstate().get(NativeField.TIMEOUT) != null)
+				if (substate.get(NativeField.CERTIFICATE) != null || substate.get(NativeField.TIMEOUT) != null)
 					return AtomStatus.State.COMPLETED;
 			}
 
@@ -1156,9 +1138,7 @@ public class AtomHandler implements Service, LedgerInterface
 		pendingAtom.completed();
 
 		this.pendingAtoms.remove(pendingAtom.getHash());
-		this.latent.remove(pendingAtom.getHash());
 		this.executable.remove(pendingAtom.getHash());
-		this.unaccepted.remove(pendingAtom.getHash());
 		this.acceptable.remove(pendingAtom.getHash());
 
 		this.atomsToPrepareQueue.remove(pendingAtom.getHash());
@@ -1178,51 +1158,61 @@ public class AtomHandler implements Service, LedgerInterface
 			this.context.getMetaData().increment("ledger.atomcertificate.processed");
 			this.context.getMetaData().increment("ledger.atomcertificate.latency", pendingAtom.getCertificate().getAge(TimeUnit.MILLISECONDS));
 		}
-			
+		
+		// A current timeout is set?
 		if (pendingAtom.getTimeout() != null)
 		{
 			this.context.getMetaData().increment("ledger.atomtimeout.processed");
 			this.context.getMetaData().increment("ledger.atomtimeout.latency", pendingAtom.getTimeout().getAge(TimeUnit.MILLISECONDS));
+		}
+		
+		// Clean up timeouts
+		if (pendingAtom.getTimeout(AcceptTimeout.class) != null)
+		{
+			if (this.unaccepted.remove(pendingAtom.getTimeout(AcceptTimeout.class).getHash(), pendingAtom) == false)
+				atomsLog.error(AtomHandler.this.context.getName()+": Accept timeout "+pendingAtom.getTimeout(AcceptTimeout.class).getHash()+" for pending atom "+pendingAtom.getHash()+" was not removed");
+		}
 
-			if (pendingAtom.getTimeout(ExecutionTimeout.class) != null)
-			{
-				if (this.unexecuted.remove(pendingAtom.getTimeout(ExecutionTimeout.class).getHash(), pendingAtom) == false)
-					atomsLog.error(AtomHandler.this.context.getName()+": Execution timeout "+pendingAtom.getTimeout(ExecutionTimeout.class).getHash()+" for pending atom "+pendingAtom.getHash()+" was not removed");
-			}
+		if (pendingAtom.getTimeout(ExecutionLatentTimeout.class) != null)
+		{
+			if (this.latent.remove(pendingAtom.getTimeout(ExecutionLatentTimeout.class).getHash(), pendingAtom) == false)
+				atomsLog.error(AtomHandler.this.context.getName()+": Execution latent timeout "+pendingAtom.getTimeout(ExecutionLatentTimeout.class).getHash()+" for pending atom "+pendingAtom.getHash()+" was not removed");
+		}
+
+		if (pendingAtom.getTimeout(ExecutionTimeout.class) != null)
+		{
+			if (this.unexecuted.remove(pendingAtom.getTimeout(ExecutionTimeout.class).getHash(), pendingAtom) == false)
+				atomsLog.error(AtomHandler.this.context.getName()+": Execution timeout "+pendingAtom.getTimeout(ExecutionTimeout.class).getHash()+" for pending atom "+pendingAtom.getHash()+" was not removed");
+		}
 	
-			if (pendingAtom.getTimeout(CommitTimeout.class) != null)
-			{
-				if (this.uncommitted.remove(pendingAtom.getTimeout(CommitTimeout.class).getHash(), pendingAtom) == false)
-					atomsLog.error(AtomHandler.this.context.getName()+": Commit timeout "+pendingAtom.getTimeout(CommitTimeout.class).getHash()+" for pending atom "+pendingAtom.getHash()+" was not removed");
-			}
+		if (pendingAtom.getTimeout(CommitTimeout.class) != null)
+		{
+			if (this.uncommitted.remove(pendingAtom.getTimeout(CommitTimeout.class).getHash(), pendingAtom) == false)
+				atomsLog.error(AtomHandler.this.context.getName()+": Commit timeout "+pendingAtom.getTimeout(CommitTimeout.class).getHash()+" for pending atom "+pendingAtom.getHash()+" was not removed");
 		}
 
 		if (atomsLog.hasLevel(Logging.DEBUG))
 			atomsLog.debug(AtomHandler.this.context.getName()+": Removed pending atom "+pendingAtom);
 	}
 	
-	boolean submit(final Atom atom, final boolean force)
+	void submit(final Atom atom, final boolean force)
 	{
 		Objects.requireNonNull(atom, "Atom is null");
 		
 		if (this.context.getNode().isSynced() == false)
-			throw new UnsupportedOperationException("Node is not in sync with network");
+			throw new SyncStatusException();
 		
 		// TODO need a deterministic way to do this
 		if (force == false && this.pendingAtoms.size() > Constants.ATOM_DISCARD_AT_PENDING_LIMIT)
-			return false;
+			throw new QueueFullException("Pending atoms exceeds limit of "+Constants.ATOM_DISCARD_AT_PENDING_LIMIT);
 		
 		if (this.atomsToProvisionQueue.putIfAbsent(atom.getHash(), atom) != null)
-		{
-			atomsLog.warn(AtomHandler.this.context.getName()+": Atom "+atom.getHash()+" is already pending");
-			return false;
-		}
+			throw new IllegalStateException("Atom "+atom.getHash()+" is already pending");
 		
 		if (atomsLog.hasLevel(Logging.DEBUG))
 			atomsLog.debug(this.context.getName()+": Atom "+atom.getHash()+" is submitted");
 		
 		this.atomProcessor.signal();
-		return true;
 	}
 
 	Collection<Atom> submit(final Collection<Atom> atoms, final boolean force)
@@ -1230,7 +1220,7 @@ public class AtomHandler implements Service, LedgerInterface
 		Objects.requireNonNull(atoms, "Atoms is null");
 		
 		if (this.context.getNode().isSynced() == false)
-			throw new SyncStatusException("Node is not in sync with network");
+			throw new SyncStatusException();
 		
 		// Ensure all the atom hashes are computed BEFORE we lock the queue for insertion.
 		// Otherwise any missing hashes which havent been computed will be done so inside the lambda and keep the queue locked!
@@ -1238,7 +1228,7 @@ public class AtomHandler implements Service, LedgerInterface
 		
 		// TODO need a deterministic way to do this
 		if (force == false && this.pendingAtoms.size() > Constants.ATOM_DISCARD_AT_PENDING_LIMIT)
-			return Collections.emptyList();
+			throw new QueueFullException("Pending atoms exceeds limit of "+Constants.ATOM_DISCARD_AT_PENDING_LIMIT);
 		
 		final Collection<Atom> submitted = this.atomsToProvisionQueue.putAll(atoms, a -> {
 			if (atomsLog.hasLevel(Logging.DEBUG))
@@ -1278,7 +1268,7 @@ public class AtomHandler implements Service, LedgerInterface
 			remove(event.getPendingAtom());
 			
 			if (atomsLog.hasLevel(Logging.DEBUG))
-				atomsLog.debug(AtomHandler.this.context.getName()+": Pending atom "+event.getPendingAtom().getHash()+" committed on block "+event.getProposalHeader().getHeight()+":"+event.getProposalHeader().getHash());
+				atomsLog.debug(AtomHandler.this.context.getName()+": Atom "+event.getPendingAtom().getHash()+" committed on block "+event.getProposalHeader().getHeight()+":"+event.getProposalHeader().getHash());
 		}
 
 		@Subscribe
@@ -1310,24 +1300,14 @@ public class AtomHandler implements Service, LedgerInterface
 
 			event.getPendingAtom().setExecuteSignalledAtBlock(event.getProposalHeader());
 
-			AtomHandler.this.executable.remove(event.getPendingAtom().getHash());
-			AtomHandler.this.latent.remove(event.getPendingAtom().getHash());
-			
 			if (atomsLog.hasLevel(Logging.DEBUG))
 				atomsLog.debug(AtomHandler.this.context.getName()+": Atom "+event.getPendingAtom().getHash()+" executable at block "+event.getProposalHeader().getHeight()+":"+event.getProposalHeader().getHash());
 		}
 		
 		@Subscribe
-		public void on(final AtomExecutedEvent event)
-		{
-			AtomHandler.this.unexecuted.remove(event.getPendingAtom().getHash());
-		}
-
-		@Subscribe
 		public void on(final AtomExecuteLatentEvent event)
 		{
 			event.getPendingAtom().setExecuteLatentSignalledBlock(event.getProposalHeader());
-			AtomHandler.this.latent.remove(event.getPendingAtom().getHash());
 			
 			if (atomsLog.hasLevel(Logging.DEBUG))
 				atomsLog.debug(AtomHandler.this.context.getName()+": Atom "+event.getPendingAtom().getHash()+" execute latent at block "+event.getProposalHeader().getHeight()+":"+event.getProposalHeader().getHash());
@@ -1341,7 +1321,7 @@ public class AtomHandler implements Service, LedgerInterface
 			if (atomsLog.hasLevel(Logging.INFO))
 			{
 				atomsLog.info(AtomHandler.this.context.getName()+": Atom "+event.getPendingAtom().getHash()+" execution timeout at block "+event.getProposalHeader().getHeight()+":"+event.getProposalHeader().getHash());
-				atomsLog.info(AtomHandler.this.context.getName()+":   "+event.getPendingAtom().numStateAddresses(null)+" substates "+event.getPendingAtom().getStateAddresses(null));
+				atomsLog.info(AtomHandler.this.context.getName()+":   "+event.getPendingAtom().numStateLocks(null)+" substates "+event.getPendingAtom().getStateAddresses(null));
 				atomsLog.info(AtomHandler.this.context.getName()+":   "+event.getPendingAtom().getOutputs(StateOutput.class));
 			}
 		}
@@ -1354,68 +1334,15 @@ public class AtomHandler implements Service, LedgerInterface
 			if (atomsLog.hasLevel(Logging.INFO))
 			{
 				atomsLog.info(AtomHandler.this.context.getName()+": Atom "+event.getPendingAtom().getHash()+" commit timeout at block "+event.getProposalHeader().getHeight()+":"+event.getProposalHeader().getHash());
-				atomsLog.info(AtomHandler.this.context.getName()+":   "+event.getPendingAtom().numStateAddresses(null)+" substates "+event.getPendingAtom().getStateAddresses(null));
+				atomsLog.info(AtomHandler.this.context.getName()+":   "+event.getPendingAtom().numStateLocks(null)+" substates "+event.getPendingAtom().getStateAddresses(null));
 				atomsLog.info(AtomHandler.this.context.getName()+":   "+event.getPendingAtom().getOutputs(StateOutput.class));
 			}
 		}
 		
 		@Subscribe
-		public void on(final AtomTimeoutEvent event)
-		{
-			if (event.getTimeout() instanceof PrepareTimeout)
-				AtomHandler.this.context.getEvents().post(new AtomPrepareTimeoutEvent(event.getPendingAtom()));
-			
-			if (event.getTimeout() instanceof AcceptTimeout)
-				AtomHandler.this.unaccepted.putIfAbsent(event.getPendingAtom().getHash(), AtomHandler.this.context.getLedger().getHead().getHeight());
-			
-			if (event.getTimeout() instanceof ExecutionLatentTimeout)
-				AtomHandler.this.latent.putIfAbsent(event.getPendingAtom().getHash(), AtomHandler.this.context.getLedger().getHead().getHeight());
-			
-			if (event.getTimeout() instanceof ExecutionTimeout)
-				AtomHandler.this.unexecuted.putIfAbsent(event.getTimeout().getHash(), event.getPendingAtom());
-			
-			if (event.getTimeout() instanceof CommitTimeout)
-				AtomHandler.this.uncommitted.putIfAbsent(event.getTimeout().getHash(), event.getPendingAtom());
-		}
-		
-		@Subscribe
-		public void on(final AtomPreparedEvent event)
-		{
-			event.getPendingAtom().setAcceptable();
-			AtomHandler.this.context.getEvents().post(new AtomAcceptableEvent(event.getPendingAtom()));
-		}
-
-		@Subscribe
-		public void on(final AtomAcceptableEvent event) 
-		{
-			if (event.getPendingAtom().isAcceptable() == false)
-			{
-				atomsLog.error(AtomHandler.this.context.getName()+": Pending atom "+event.getPendingAtom().getHash()+" is not acceptable");
-				return;
-			}
-			
-			if (atomsLog.hasLevel(Logging.DEBUG))
-				atomsLog.info(AtomHandler.this.context.getName()+": Pending atom "+event.getPendingAtom().getHash()+" is acceptable");
-
-			if (event.getPendingAtom().isForceAcceptTimeout() == true)
-				return;
-			
-			AtomHandler.this.acceptable.put(event.getPendingAtom().getHash(), event.getPendingAtom());
-		}
-
-		@Subscribe
 		public void on(final AtomAcceptedEvent event) throws IOException 
 		{
 			event.getPendingAtom().accepted(event.getProposalHeader());
-			
-			if (AtomHandler.this.acceptable.remove(event.getPendingAtom().getHash(), event.getPendingAtom()) == false)
-				atomsLog.warn(AtomHandler.this.context.getName()+": Accepted pending atom "+event.getPendingAtom().getHash()+" not found in acceptable registry for block "+event.getProposalHeader().getHeight()+":"+event.getProposalHeader().getHash());
-
-			// Need to update timeouts in the case that an ACCEPT timeout was produced which will need to be discarded.
-			// Timeouts are weakly-subjective.  Local replica may have considered an atom timeout valid but remote replicas may not.
-			// TODO is there a better way to manage this?
-			if (AtomHandler.this.unaccepted.remove(event.getPendingAtom().getHash(), event.getPendingAtom()) == true && atomsLog.hasLevel(Logging.DEBUG))
-				atomsLog.debug(AtomHandler.this.context.getName()+": Removed pending atom "+event.getPendingAtom().getHash()+" from UNACCEPTED that is now ACCEPTED");
 		}
 
 		@Subscribe
@@ -1438,6 +1365,25 @@ public class AtomHandler implements Service, LedgerInterface
 	private EventListener asyncAtomListener = new EventListener()
 	{
 		@Subscribe
+		public void on(final AtomPreparedEvent event)
+		{
+			event.getPendingAtom().setAcceptable();
+			AtomHandler.this.context.getEvents().post(new AtomAcceptableEvent(event.getPendingAtom()));
+		}
+
+		@Subscribe
+		public void on(final AtomAcceptableEvent event) 
+		{
+			if (atomsLog.hasLevel(Logging.DEBUG))
+				atomsLog.info(AtomHandler.this.context.getName()+": Atom "+event.getPendingAtom().getHash()+" is acceptable");
+
+			if (event.getPendingAtom().isForceAcceptTimeout() == true)
+				return;
+			
+			AtomHandler.this.acceptable.put(event.getPendingAtom().getHash(), event.getPendingAtom());
+		}
+
+		@Subscribe
 		public void on(final AtomProvisionedEvent event) 
 		{
 			if (atomsLog.hasLevel(Logging.DEBUG))
@@ -1454,6 +1400,25 @@ public class AtomHandler implements Service, LedgerInterface
 			else if (AtomHandler.this.executable.putIfAbsent(event.getPendingAtom().getHash(), event.getPendingAtom()) != null)
 				atomsLog.error(AtomHandler.this.context.getName()+" Atom "+event.getPendingAtom().getHash()+" is already scheduled for execution signal");
 		}
+		
+		@Subscribe
+		public void on(final AtomTimeoutEvent event)
+		{
+			if (event.getTimeout() instanceof PrepareTimeout)
+				AtomHandler.this.context.getEvents().post(new AtomPrepareTimeoutEvent(event.getPendingAtom()));
+			
+			if (event.getTimeout() instanceof AcceptTimeout)
+				AtomHandler.this.unaccepted.putIfAbsent(event.getTimeout().getHash(), event.getPendingAtom());
+			
+			if (event.getTimeout() instanceof ExecutionLatentTimeout)
+				AtomHandler.this.latent.putIfAbsent(event.getTimeout().getHash(), event.getPendingAtom());
+			
+			if (event.getTimeout() instanceof ExecutionTimeout)
+				AtomHandler.this.unexecuted.putIfAbsent(event.getTimeout().getHash(), event.getPendingAtom());
+			
+			if (event.getTimeout() instanceof CommitTimeout)
+				AtomHandler.this.uncommitted.putIfAbsent(event.getTimeout().getHash(), event.getPendingAtom());
+		}
 
 		@Subscribe
 		public void on(final AtomCertificateEvent event) throws IOException 
@@ -1461,7 +1426,7 @@ public class AtomHandler implements Service, LedgerInterface
 			PendingAtom pendingAtom = get(event.getCertificate().getAtom());
 			if (pendingAtom == null)
 			{
-				atomsLog.error(AtomHandler.this.context.getName()+": Pending atom "+event.getCertificate().getAtom()+" for certificate "+event.getCertificate().getHash()+" not found");
+				atomsLog.error(AtomHandler.this.context.getName()+": Atom "+event.getCertificate().getAtom()+" for certificate "+event.getCertificate().getHash()+" not found");
 				return;
 			}
 			
@@ -1476,7 +1441,9 @@ public class AtomHandler implements Service, LedgerInterface
 		public void on(final SyncAcquiredEvent event)
 		{
 			atomsLog.log(AtomHandler.this.context.getName()+": Sync status acquired, preparing atom handler");
+			AtomHandler.this.atomsToPrepare.clear();
 			AtomHandler.this.atomsToPrepareQueue.clear();
+			AtomHandler.this.atomsToProvision.clear();
 			AtomHandler.this.atomsToProvisionQueue.clear();
 			AtomHandler.this.pendingAtoms.clear();
 			AtomHandler.this.acceptable.clear();

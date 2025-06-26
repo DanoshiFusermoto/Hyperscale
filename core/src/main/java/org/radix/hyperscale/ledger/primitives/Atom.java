@@ -12,7 +12,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 
-import org.radix.hyperscale.Constants;
 import org.radix.hyperscale.common.ExtendedObject;
 import org.radix.hyperscale.common.Primitive;
 import org.radix.hyperscale.crypto.CryptoException;
@@ -157,12 +156,12 @@ public final class Atom extends ExtendedObject implements Primitive
 			return this;
 		}
 		
-		public Atom build(final int difficulty) throws CryptoException
+		public Atom build(final int difficulty) throws CryptoException, ValidationException
 		{
 			return build(difficulty, null);
 		}
 		
-		public Atom build(final int difficulty, Collection<KeyPair<?,?,?>> signers) throws CryptoException
+		public Atom build(final int difficulty, Collection<KeyPair<?,?,?>> signers) throws CryptoException, ValidationException
 		{
 			throwIfBuilt();
 
@@ -182,6 +181,8 @@ public final class Atom extends ExtendedObject implements Primitive
 				for (final KeyPair<?,?,?> signer : signers)
 					this.atom.sign(signer);
 			}
+			
+			this.atom.validate();
 			
 			this.built = true;
 			

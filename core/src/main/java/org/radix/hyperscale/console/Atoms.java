@@ -1,5 +1,6 @@
 package org.radix.hyperscale.console;
 
+import java.io.IOException;
 import java.io.PrintStream;
 
 import org.apache.commons.cli.CommandLine;
@@ -11,6 +12,7 @@ import org.radix.hyperscale.crypto.Hash;
 import org.radix.hyperscale.ledger.PendingAtom;
 import org.radix.hyperscale.ledger.primitives.Atom;
 import org.radix.hyperscale.serialization.Serialization;
+import org.radix.hyperscale.time.Time;
 import org.radix.hyperscale.serialization.DsonOutput.Output;
 
 public class Atoms extends Function
@@ -18,6 +20,7 @@ public class Atoms extends Function
 	private static final Options options = new Options().addOption("submit", true, "Submit atom/atoms")
 														.addOption("pending", false, "Returns info of all atoms pending")
 														.addOption("pool", false, "Returns info of all atoms in the pool")
+														.addOption("benchmark", false, "Benchmarks various aspects of Atom management")
 														.addOption("get", true, "Get an atom by hash");
 
 	public Atoms()
@@ -64,5 +67,25 @@ public class Atoms extends Function
 			
 			printStream.println(Serialization.getInstance().toJsonObject(atom, Output.API).toString(4));
 		}
+		else if (commandLine.hasOption("benchmark"))
+			benchmark(context, printStream);
+	}
+	
+	private void benchmark(final Context context, final PrintStream printStream) throws IOException
+	{
+		final long start = Time.getSystemTime();
+		final int iterations = 1_000_000;
+		
+		printStream.println("Benchmarking "+iterations+" Atom queries");
+		for (int i=0 ; i < iterations ; i++)
+		{
+			final Hash hash = Hash.random();
+			context.getLedger().getAtomHandler().status(hash);
+			
+			if (i % 10000 == 0)
+				printStream.println(" "+i+" Atom queries completed");
+		}
+		
+		printStream.println("Completed "+iterations+" Atom queries in "+(Time.getSystemTime()-start)+"ms");	
 	}
 }
