@@ -11,12 +11,12 @@ import java.util.function.Function;
 
 import org.radix.hyperscale.crypto.Hash;
 import org.radix.hyperscale.crypto.Identity;
-import org.radix.hyperscale.crypto.MerkleProof;
 import org.radix.hyperscale.crypto.Signature;
 import org.radix.hyperscale.crypto.bls12381.BLSSignature;
 import org.radix.hyperscale.crypto.ed25519.EDKeyPair;
 import org.radix.hyperscale.crypto.ed25519.EDPublicKey;
 import org.radix.hyperscale.crypto.ed25519.EDSignature;
+import org.radix.hyperscale.crypto.merkle.MerkleProof;
 import org.radix.hyperscale.ledger.ShardGroupID;
 import org.radix.hyperscale.ledger.ShardID;
 import org.radix.hyperscale.ledger.StateAddress;
@@ -335,9 +335,9 @@ public class JacksonCborMapper extends ObjectMapper
 					throw new InvalidFormatException(p, "Expecting signature bytes but null or empty", bytes, handledType());
 				
 				if (bytes[0] == JacksonCodecConstants.EC_SIGNATURE_VALUE)
-					return EDSignature.from(Arrays.copyOfRange(bytes, 1, bytes.length));
+					return EDSignature.from(bytes, 1);
 				else if (bytes[0] == JacksonCodecConstants.BLS_SIGNATURE_VALUE)
-					return BLSSignature.from(Arrays.copyOfRange(bytes, 1, bytes.length));
+					return BLSSignature.from(bytes, 1);
 				else
 					throw new InvalidFormatException(p, "Unexpected prefix "+bytes[0], bytes, handledType());
 			}

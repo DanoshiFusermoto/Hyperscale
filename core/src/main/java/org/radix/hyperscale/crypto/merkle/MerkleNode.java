@@ -1,6 +1,9 @@
-package org.radix.hyperscale.crypto;
+package org.radix.hyperscale.crypto.merkle;
 
 import java.security.InvalidParameterException;
+
+import org.radix.hyperscale.crypto.Hash;
+import org.radix.hyperscale.crypto.Hashable;
 
 public class MerkleNode implements Hashable
 {

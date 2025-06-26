@@ -374,8 +374,8 @@ public class Bloom extends Serializable
 
     	synchronized(this)
     	{
-			for (int hash : hashes)
-				bitset.set(Math.abs(hash % bitSetSize), true);
+			for (int i = 0 ; i < hashes.length ; i++)
+				bitset.set(Math.abs(hashes[i] % bitSetSize), true);
        
 			numberOfAddedElements ++;
         }
@@ -395,9 +395,9 @@ public class Bloom extends Serializable
         
     	synchronized(this)
     	{
-	        for (int hash : hashes) 
+			for (int i = 0 ; i < hashes.length ; i++)
 	        {
-	            if (!bitset.get(Math.abs(hash % bitSetSize)))
+	            if (bitset.get(Math.abs(hashes[i] % bitSetSize)) == false)
 	                return false;
 	        }
         }

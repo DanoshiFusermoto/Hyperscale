@@ -51,7 +51,7 @@ public final class BLS12381
 		 * The signature is hash point in G1 multiplied by the private key.
 		 */
 		G1Point sig = privateKey.sign(hashInGroup1);
-		return new BLSSignature(sig);
+		return BLSSignature.from(sig);
 	}
 
 	/**

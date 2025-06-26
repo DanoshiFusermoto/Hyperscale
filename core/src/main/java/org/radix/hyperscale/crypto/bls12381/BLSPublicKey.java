@@ -45,7 +45,7 @@ public final class BLSPublicKey extends PublicKey<BLSSignature>
 	}
 	
 	private byte[] bytes;
-	private G2Point point;
+	private volatile G2Point point;
 	
 	private transient Identity identity;
 
@@ -61,7 +61,6 @@ public final class BLSPublicKey extends PublicKey<BLSSignature>
 		Numbers.isZero(bytes.length, "Bytes length is zero");
 		
 		this.bytes = Arrays.copyOfRange(bytes, offset, bytes.length);
-		this.point = G2Point.fromBytes(this.bytes);
 	}
 
 	BLSPublicKey(final G2Point point) 
@@ -97,9 +96,12 @@ public final class BLSPublicKey extends PublicKey<BLSSignature>
 		return new BLSPublicKey(g2Point().add(publicKey.g2Point()));
 	}
 
-  	G2Point g2Point() 
+	synchronized G2Point g2Point() 
   	{
-  		return this.point;
+		if (this.point == null)
+			this.point = G2Point.fromBytes(this.bytes);
+
+		return this.point;
   	}
   	
 	public synchronized Identity getIdentity()

@@ -1,4 +1,4 @@
-package org.radix.hyperscale.crypto;
+package org.radix.hyperscale.crypto.merkle;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -8,6 +8,7 @@ import org.eclipse.collections.api.factory.Maps;
 import org.eclipse.collections.api.map.MutableMap;
 import org.eclipse.collections.api.map.primitive.MutableLongObjectMap;
 import org.eclipse.collections.impl.factory.primitive.LongObjectMaps;
+import org.radix.hyperscale.crypto.Hash;
 
 public class MerkleTree
 {
@@ -96,30 +97,30 @@ public class MerkleTree
         return this.root.getHash();
     }
 
-    public void buildTree(List<MerkleNode> nodes) 
+    private void buildTree(List<MerkleNode> nodes) 
     {
-        if (nodes.isEmpty()) 
-        	throw new IllegalStateException("Node list not expected to be empty!");
-
-        if (nodes.size() == 1) 
+        if (nodes.isEmpty())
+            throw new IllegalStateException("Node list not expected to be empty!");
+        
+        int currentSize = nodes.size();
+        while (currentSize > 1) 
         {
-            this.root = nodes.get(0);
-        } 
-        else 
-        {
-            final List<MerkleNode> parents = new ArrayList<>(nodes.size() / 2);
-            for (int i = 0; i < nodes.size(); i += 2) 
+            int nextSize = 0;
+            for (int i = 0; i < currentSize; i += 2) 
             {
-                MerkleNode right = (i + 1 < nodes.size()) ? nodes.get(i + 1) : null;
-                MerkleNode parent = new MerkleNode(nodes.get(i), right);
-                parents.add(parent);
+                MerkleNode left = nodes.get(i);
+                MerkleNode right = (i + 1 < currentSize) ? nodes.get(i + 1) : null;
+                MerkleNode parent = new MerkleNode(left, right);
+                nodes.set(nextSize++, parent);
             }
             
-            buildTree(parents);
+            currentSize = nextSize;
         }
+        
+        this.root = nodes.get(0);
     }
-
-    public List<MerkleProof> auditProof(Hash leafHash) 
+    
+    public MerkleAudit auditProof(Hash leafHash) 
     {
     	synchronized(this)
     	{
@@ -127,22 +128,21 @@ public class MerkleTree
     			this.proofs = LongObjectMaps.mutable.<MerkleProof>ofInitialCapacity(this.leaves.size()*2).asSynchronized();
     	}
     	
-        List<MerkleProof> auditTrail = new ArrayList<>();
-
-        MerkleNode leafNode = findLeaf(leafHash);
+        final List<MerkleProof> auditTrail = new ArrayList<>();
+        final MerkleNode leafNode = findLeaf(leafHash);
         if (leafNode != null) 
         {
             if (leafNode.getParent() == null) 
             	throw new IllegalStateException("Expected leaf to have a parent!");
             
-            MerkleNode parent = leafNode.getParent();
+            final MerkleNode parent = leafNode.getParent();
             buildAuditTrail(auditTrail, parent, leafNode);
         }
 
-        return auditTrail;
+        return new MerkleAudit(auditTrail);
     }
 
-    public static boolean verifyAudit(Hash rootHash, Hash leafHash, List<MerkleProof> auditTrail) 
+    public static boolean verifyAudit(Hash rootHash, Hash leafHash, MerkleAudit auditTrail) 
     {
         if (auditTrail.isEmpty()) 
         	throw new IllegalStateException("Audit trail cannot be empty!");

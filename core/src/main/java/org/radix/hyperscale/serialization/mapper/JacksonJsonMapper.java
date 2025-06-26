@@ -5,11 +5,11 @@ import java.util.ArrayList;
 
 import org.radix.hyperscale.crypto.Hash;
 import org.radix.hyperscale.crypto.Identity;
-import org.radix.hyperscale.crypto.MerkleProof;
 import org.radix.hyperscale.crypto.bls12381.BLSSignature;
 import org.radix.hyperscale.crypto.ed25519.EDKeyPair;
 import org.radix.hyperscale.crypto.ed25519.EDPublicKey;
 import org.radix.hyperscale.crypto.ed25519.EDSignature;
+import org.radix.hyperscale.crypto.merkle.MerkleProof;
 import org.radix.hyperscale.ledger.ShardGroupID;
 import org.radix.hyperscale.ledger.ShardID;
 import org.radix.hyperscale.ledger.StateAddress;

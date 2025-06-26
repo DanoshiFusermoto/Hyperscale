@@ -1,28 +1,31 @@
 package org.radix.hyperscale.crypto.ed25519;
 
+import java.util.Arrays;
 import java.util.Objects;
 
-import org.apache.commons.lang3.ArrayUtils;
 import org.radix.hyperscale.crypto.Signature;
 import org.radix.hyperscale.utils.Bytes;
-import org.radix.hyperscale.utils.Numbers;
 
 public final class EDSignature extends Signature
 {
-	public final static EDSignature NULL = new EDSignature(new byte[ED25519.SIGNATURE_SIZE]);
+	public final static EDSignature NULL = new EDSignature(new byte[ED25519.SIGNATURE_SIZE], 0);
 	
 	public static EDSignature from(byte[] bytes)
 	{
-		Objects.requireNonNull(bytes, "Bytes is null for EC point");
-		Numbers.isZero(bytes.length, "Bytes length is zero");
-		return new EDSignature(bytes);
+		return from(bytes, 0);
 	}
 	
+	public static EDSignature from(byte[] bytes, int offset)
+	{
+		return new EDSignature(bytes, offset);
+	}
+
 	private final byte[] bytes;
 
-	private EDSignature(byte[] bytes)
+	private EDSignature(byte[] bytes, int offset)
 	{
-		this.bytes = ArrayUtils.clone(bytes);
+		Objects.requireNonNull(bytes, "Signature bytes is null");
+		this.bytes = Arrays.copyOfRange(bytes, offset, bytes.length);
 	}
 
 	@Override
