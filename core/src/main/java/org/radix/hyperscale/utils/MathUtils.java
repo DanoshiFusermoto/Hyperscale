@@ -11,6 +11,11 @@ public class MathUtils
 		throw new IllegalStateException("Can't construct");
 	}
 	
+	public static final int EWMA(int value, int increment, double ratio)
+	{
+		return (int) (((1.0 - ratio) * value) + (ratio * increment));
+	}
+
 	public static final long EWMA(long value, long increment, double ratio)
 	{
 		return (long) (((1.0 - ratio) * value) + (ratio * increment));
@@ -18,11 +23,17 @@ public class MathUtils
 
 	public static final int log2(int value)
 	{
+		if (value <= 0) 
+			throw new IllegalArgumentException("Value must be positive");
+		
 		return (Integer.SIZE - 1) - Integer.numberOfLeadingZeros(value);
 	}
 
 	public static final int log2(long value)
 	{
+		if (value <= 0) 
+			throw new IllegalArgumentException("Value must be positive");
+
 		return (Long.SIZE - 1) - Long.numberOfLeadingZeros(value);
 	}
 
