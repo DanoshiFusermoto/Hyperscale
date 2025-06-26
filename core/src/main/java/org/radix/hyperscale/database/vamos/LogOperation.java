@@ -10,6 +10,9 @@ import org.xerial.snappy.Snappy;
 
 class LogOperation 
 {
+	public static final int COMPRESSION_BUFFER_SIZE = 1<<20;  // 1MB compression buffer
+	private static final ThreadLocal<ByteBuffer> compressionBuffer = ThreadLocal.withInitial(() -> ByteBuffer.allocate(COMPRESSION_BUFFER_SIZE));
+	
 	static final byte[] extractData(final ByteBuffer input) throws IOException
 	{
 		Objects.requireNonNull(input, "Input buffer is null");
@@ -41,8 +44,8 @@ class LogOperation
 			if (operation.equals(Operation.PUT) == true || operation.equals(Operation.PUT_NO_OVERWRITE) == true)
 			{
 				final boolean compressed = input.get() != 0 ? true : false;
-				final int numDataBytes = input.getInt();
-				final byte[] data = new byte[numDataBytes];
+				final int dataLength = input.getInt();
+				final byte[] data = new byte[dataLength];
 				input.get(data);
 				if (compressed)
 					return Snappy.uncompress(data);
@@ -66,6 +69,7 @@ class LogOperation
 	private final InternalKey key;
 	private final long 		ancestor;
 	private final byte[] 	data;
+	private final int		dataLength;
 	private final boolean 	compressed;
 	private final Operation operation;
 
@@ -88,6 +92,7 @@ class LogOperation
 		this.compressed = false;
 		this.key = null;
 		this.data = null;
+		this.dataLength = -1;
 		this.ancestor = -1;
 		this.operation = operation;
 	}
@@ -111,6 +116,7 @@ class LogOperation
 		this.key = key;
 		this.compressed = false;
 		this.data = null;
+		this.dataLength = -1;
 		this.ancestor = -1;
 		this.operation = operation;
 	}
@@ -135,16 +141,26 @@ class LogOperation
 		this.logPosition = logPosition;
 		this.extPosition = extPosition;
 
-		if (txOperation.getData().length > environment.getConfig().getLogCompressionThreshold())
+		byte[] data = txOperation.getData();
+		int dataLength = txOperation.getDataLength();
+		boolean compressed = false;
+		if (dataLength >= environment.getConfig().getLogCompressionThreshold())
 		{
-			this.data = Snappy.compress(txOperation.getData());
-			this.compressed = true;
+			final int maxCompressedLength = Snappy.maxCompressedLength(dataLength);
+			if (maxCompressedLength >= dataLength)
+			{
+				final ByteBuffer compressionBuffer = maxCompressedLength > COMPRESSION_BUFFER_SIZE ? ByteBuffer.allocate(maxCompressedLength) : LogOperation.compressionBuffer.get().clear();
+				final int compressedLength = Snappy.compress(data, 0, dataLength, compressionBuffer.array(), 0);
+				
+				System.arraycopy(compressionBuffer.array(), 0, data, 0, compressedLength);
+				dataLength = compressedLength;
+				compressed = true;
+			}
 		}
-		else
-		{
-			this.data = txOperation.getData();
-			this.compressed = false;
-		}
+
+		this.data = data;
+		this.dataLength = dataLength;
+		this.compressed = compressed;
 		
 		this.operation = txOperation.getOperation();
 		this.ancestor = ancestor;
@@ -187,13 +203,14 @@ class LogOperation
 			if (this.operation.equals(Operation.PUT) == true || this.operation.equals(Operation.PUT_NO_OVERWRITE) == true)
 			{
 				this.compressed = input.get() != 0 ? true : false;
-				int numDataBytes = input.getInt();
-				this.data = new byte[numDataBytes];
+				this.dataLength = input.getInt();
+				this.data = new byte[this.dataLength];
 				input.get(this.data);
 			}
 			else
 			{
 				this.data = null;
+				this.dataLength = -1;
 				this.compressed = false;
 			}
 			
@@ -285,6 +302,11 @@ class LogOperation
 		return this.uncompressed;
 	}
 	
+	int getDataLength()
+	{
+		return this.dataLength;
+	}
+	
 	void write(final ByteBuffer output) throws IOException
 	{
 		output.putLong(this.ID);
@@ -311,8 +333,8 @@ class LogOperation
 		if (this.operation.equals(Operation.PUT) == true || this.operation.equals(Operation.PUT_NO_OVERWRITE) == true)
 		{
 			output.put(this.compressed ? (byte) 1 : (byte) 0);
-			output.putInt(this.data.length);
-			output.put(this.data);
+			output.putInt(this.dataLength);
+			output.put(this.data, 0, this.dataLength);
 		}
 	}
 }
