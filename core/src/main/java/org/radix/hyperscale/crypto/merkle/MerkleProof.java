@@ -1,6 +1,8 @@
-package org.radix.hyperscale.crypto;
+package org.radix.hyperscale.crypto.merkle;
 
 import org.apache.commons.lang3.ArrayUtils;
+import org.radix.hyperscale.crypto.Hash;
+import org.radix.hyperscale.crypto.Hashable;
 
 public class MerkleProof implements Hashable
 {
