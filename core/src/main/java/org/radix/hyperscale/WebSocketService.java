@@ -2,7 +2,6 @@ package org.radix.hyperscale;
 
 import java.net.InetSocketAddress;
 import java.util.Objects;
-import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.java_websocket.WebSocket;
@@ -118,8 +117,7 @@ public final class WebSocketService extends WebSocketServer
 			
 			try
 			{
-				if (this.context.getLedger().submit(atom) == false)
-					new RejectedExecutionException("Submission of atom "+atom.getHash()+" failed");
+				this.context.getLedger().submit(atom);
 			}
 			catch (Exception ex)
 			{

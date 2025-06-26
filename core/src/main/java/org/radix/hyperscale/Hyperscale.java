@@ -16,10 +16,16 @@ import java.util.List;
 import java.util.Set;
 import java.util.StringTokenizer;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.imageio.ImageIO;
 import javax.management.MBeanServer;
+import javax.management.NotificationEmitter;
+import javax.management.NotificationListener;
 import javax.management.ObjectName;
+import javax.management.openmbean.CompositeData;
+import java.lang.management.GarbageCollectorMXBean;
+import java.lang.management.ManagementFactory;
 
 import org.radix.hyperscale.console.Console;
 import org.radix.hyperscale.crypto.Hash;
@@ -385,17 +391,26 @@ public class Hyperscale
 	        detectorThread.start();
 	        log.log("Deadlock detector started with interval: " + deadlockDetectionInterval + "ms");
 		}
+		
+		if (Configuration.getDefault().get("system.monitor.gc", Boolean.TRUE))
+			GCMonitor.getInstance();
 	}
 	
+	private final static AtomicBoolean threadDumpLock = new AtomicBoolean();
 	public static final void dumpThreadInfo()
 	{
-        ThreadMXBean threadBean = ManagementFactory.getThreadMXBean();
-        ThreadInfo[] threadInfos = threadBean.dumpAllThreads(true, true);
-        log.log("THREAD DUMP");
-        for (ThreadInfo threadInfo : threadInfos)
-            log.fatal(threadInfo.toString());
-        
-        // Alert user
-        System.err.println("Thread dump triggered");
+		if (threadDumpLock.compareAndSet(false, true) == true)
+		{
+	        ThreadMXBean threadBean = ManagementFactory.getThreadMXBean();
+	        ThreadInfo[] threadInfos = threadBean.dumpAllThreads(true, true);
+	        log.log("THREAD DUMP");
+	        for (ThreadInfo threadInfo : threadInfos)
+	            log.fatal(threadInfo.toString());
+	        
+	        // Alert in console
+	        System.err.println("Thread dump triggered");
+	        
+	        threadDumpLock.set(false);
+		}
 	}
 }
