@@ -59,4 +59,9 @@ class TransactionOperation
 	{
 		return this.data;
 	}
+	
+	int getDataLength() 
+	{
+		return this.data.length;
+	}
 }

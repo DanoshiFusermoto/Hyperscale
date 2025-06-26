@@ -66,7 +66,7 @@ public class Database
     	if (transaction == null)
     	{
     		OperationStatus status;
-    		transaction = new Transaction(this.environment);
+    		transaction = new Transaction(this.environment, 2);
     		
     		try
     		{
@@ -123,7 +123,7 @@ public class Database
     	if (transaction == null)
     	{
     		OperationStatus status;
-    		transaction = new Transaction(this.environment);
+    		transaction = new Transaction(this.environment, 2);
     		
     		try
     		{
@@ -173,7 +173,7 @@ public class Database
 		if (transaction == null)
 		{
 			OperationStatus status;
-			transaction = new Transaction(this.environment);
+			transaction = new Transaction(this.environment, 2);
 			
 			try
 			{
