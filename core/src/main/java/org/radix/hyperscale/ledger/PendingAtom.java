@@ -4,7 +4,10 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -12,9 +15,6 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
-import org.eclipse.collections.api.factory.Maps;
-import org.eclipse.collections.api.factory.Sets;
-import org.eclipse.collections.api.map.MutableMap;
 import org.radix.hyperscale.Constants;
 import org.radix.hyperscale.Context;
 import org.radix.hyperscale.Universe;
@@ -82,14 +82,14 @@ public final class PendingAtom implements Hashable, StateAddressable
 	
 	// TODO NEED UNPREPARED TIME OUT
 	
-	private final MutableMap<Hash, StateVoteBlock> stateVoteBlocks;
-	private final MutableMap<StateAddress, PendingState> pendingStates;
+	private final Map<Hash, StateVoteBlock> stateVoteBlocks;
+	private final Map<StateAddress, PendingState> pendingStates;
 	
 	/** Wall clock timestamps when the various timeouts become eligible **/
-	private final MutableMap<Class<? extends AtomTimeout>, Long> timeoutAt;
+	private final Map<Class<? extends AtomTimeout>, Long> timeoutAt;
 
 	/** Timeout types which have been triggered **/
-	private final MutableMap<Class<? extends AtomTimeout>, AtomTimeout> timeouts;
+	private final Map<Class<? extends AtomTimeout>, AtomTimeout> timeouts;
 	
 	/** The current triggered timeout **/
 	private volatile AtomTimeout timeout;
@@ -138,12 +138,14 @@ public final class PendingAtom implements Hashable, StateAddressable
 		this.executeSignalledBlock = Hash.ZERO;
 		this.executeLatentSignalledBlock = Hash.ZERO;
 		
-		this.timeouts = Maps.mutable.<Class<? extends AtomTimeout>, AtomTimeout>ofInitialCapacity(4).asSynchronized();
-		this.timeoutAt = Maps.mutable.<Class<? extends AtomTimeout>, Long>ofInitialCapacity(4).asSynchronized();
+		this.timeouts = Collections.synchronizedMap(new HashMap<Class<? extends AtomTimeout>, AtomTimeout>(4));
+		this.timeoutAt = Collections.synchronizedMap(new HashMap<Class<? extends AtomTimeout>, Long>(4));
+		
+		// TODO prepare timeouts are VERY hacky and need more work, can kill local liveness in edge-cases
 		this.timeoutAt.put(PrepareTimeout.class, (this.witnessedAt == -1 ? Time.getSystemTime() : this.witnessedAt) + TimeUnit.SECONDS.toMillis(Constants.ATOM_PREPARE_TIMEOUT_SECONDS));
 		
-		this.pendingStates = Maps.mutable.<StateAddress, PendingState>ofInitialCapacity(4).asSynchronized();
-		this.stateVoteBlocks = Maps.mutable.<Hash, StateVoteBlock>ofInitialCapacity(4).asSynchronized();
+		this.pendingStates = Collections.synchronizedMap(new HashMap<>(4));
+		this.stateVoteBlocks = Collections.synchronizedMap(new HashMap<Hash, StateVoteBlock>(4));
 		
 		this.status = new AtomStatus(context, hash);
 
@@ -257,12 +259,13 @@ public final class PendingAtom implements Hashable, StateAddressable
 			if (this.pendingStates.isEmpty())
 				throw new IllegalStateException("Pending states for atom "+getHash()+" is empty"); 
 			
-			this.pendingStates.forEachWith((ps, p) -> {
-				if (p != null && ps.getStateLockMode().equals(p) == false)
-					return;
+			for(final PendingState pendingState : this.pendingStates.values())
+			{
+				if (lockMode != null && pendingState.getStateLockMode().equals(lockMode) == false)
+					continue;
 						
-				consumer.accept(ps.getAddress(), ps.getAddress().getShardID());
-			}, lockMode);
+				consumer.accept(pendingState.getAddress(), pendingState.getAddress().getShardID());
+			}
 		}
 	}
 	
@@ -273,14 +276,14 @@ public final class PendingAtom implements Hashable, StateAddressable
 
 		synchronized(this.pendingStates)
 		{
-			final Set<ShardID> shardIDs = Sets.mutable.<ShardID>ofInitialCapacity(this.pendingStates.size());
-			this.pendingStates.collectIf(ps -> {
-				if (lockMode != null && ps.getStateLockMode().equals(lockMode) == false)
-					return false;
+			final Set<ShardID> shardIDs = new HashSet<ShardID>(this.pendingStates.size());
+			for(final PendingState pendingState : this.pendingStates.values())
+			{
+				if (lockMode != null && pendingState.getStateLockMode().equals(lockMode) == false)
+					continue;
 				
-				return true;
-			}, ps -> ps.getAddress().getShardID(), shardIDs);
-
+				shardIDs.add(pendingState.getAddress().getShardID());
+			}
 			return Collections.unmodifiableSet(shardIDs);
 		}
 	}
@@ -300,14 +303,14 @@ public final class PendingAtom implements Hashable, StateAddressable
 			if (this.pendingStates.isEmpty())
 				throw new IllegalStateException("Pending states for "+getHash()+" is empty");
 				
-			final Set<PendingState> pendingStates = Sets.mutable.<PendingState>ofInitialCapacity(this.pendingStates.size());
-			this.pendingStates.selectWith((ps, p) -> {
-				if (p!= null && ps.getStateLockMode().equals(p) == false)
-					return false;
-				
-				return true;
-			}, lockMode, pendingStates);
+			final Set<PendingState> pendingStates = new HashSet<PendingState>(this.pendingStates.size());
+			for(final PendingState pendingState : this.pendingStates.values())
+			{
+				if (lockMode != null && pendingState.getStateLockMode().equals(lockMode) == false)
+					continue;
 
+				pendingStates.add(pendingState);
+			}
 			return Collections.unmodifiableSet(pendingStates);
 		}
 	}
@@ -322,12 +325,13 @@ public final class PendingAtom implements Hashable, StateAddressable
 			if (this.pendingStates.isEmpty())
 				throw new IllegalStateException("Pending states for "+getHash()+" is empty"); 
 				
-			this.pendingStates.forEachWith((ps, p) -> {
-				if (p != null && ps.getStateLockMode().equals(p) == false)
-					return;
-					
-				consumer.accept(ps);
-			}, lockMode);
+			for(final PendingState pendingState : this.pendingStates.values())
+			{
+				if (lockMode != null && pendingState.getStateLockMode().equals(lockMode) == false)
+					continue;
+
+				consumer.accept(pendingState);
+			}
 		}
 	}
 
@@ -349,12 +353,13 @@ public final class PendingAtom implements Hashable, StateAddressable
 			if (this.pendingStates.isEmpty())
 				throw new IllegalStateException("Pending states for "+getHash()+" is empty"); 
 				
-			this.pendingStates.forEach(ps -> {
-				if (lockMode != null && ps.getStateLockMode().equals(lockMode) == false)
-					return;
-				
-				consumer.accept(ps.getAddress());
-			});
+			for(final PendingState pendingState : this.pendingStates.values())
+			{
+				if (lockMode != null && pendingState.getStateLockMode().equals(lockMode) == false)
+					continue;
+
+				consumer.accept(pendingState.getAddress());
+			}
 		}
 	}
 
@@ -369,34 +374,34 @@ public final class PendingAtom implements Hashable, StateAddressable
 				throw new IllegalStateException("Pending states for "+getHash()+" is empty"); 
 			
 			final List<StateAddress> stateAddresses = new ArrayList<StateAddress>(this.pendingStates.size());
-			this.pendingStates.collectIf(ps -> {
-				if (lockMode != null && ps.getStateLockMode().equals(lockMode) == false)
-					return false;
+			for(PendingState pendingState : this.pendingStates.values())
+			{
+				if (lockMode != null && pendingState.getStateLockMode().equals(lockMode) == false)
+					continue;
 				
-				return true;
-			}, ps -> ps.getAddress(), stateAddresses);
+				stateAddresses.add(pendingState.getAddress());
+			}
 
 			return Collections.unmodifiableList(stateAddresses);
 		}
 	}
 	
-	public int numStateAddresses(final StateLockMode lockMode)
+	public int numStateLocks()
+	{
+		if (this.status.before(AtomStatus.State.PREPARED))
+			throw new IllegalStateException("Pending atom "+getHash()+" is not PREPARED but "+this.status);
+		
+		return this.stateMachine.numStateLocks(null);
+	}
+
+	public int numStateLocks(final StateLockMode lockMode)
 	{
 		if (this.status.before(AtomStatus.State.PREPARED))
 			throw new IllegalStateException("Pending atom "+getHash()+" is not PREPARED but "+this.status);
 
-		synchronized(this.pendingStates)
-		{
-			if (this.pendingStates.isEmpty())
-				throw new IllegalStateException("Pending states for "+getHash()+" is empty");
-			
-			if (lockMode == null)
-				return this.pendingStates.size();
-			
-			return this.pendingStates.countWith((ps,p) -> ps.getStateLockMode().equals(p), lockMode);
-		}
+		return this.stateMachine.numStateLocks(lockMode);
 	}
-
+	
 	public List<Object> getInstructions()
 	{
 		return this.stateMachine.getInstructions();
@@ -657,14 +662,20 @@ public final class PendingAtom implements Hashable, StateAddressable
 					throw new IllegalStateException("Pending atom "+this.getHash()+" is not PROVISIONED but "+this.status);
 		
 				this.status.set(AtomStatus.State.EXECUTING);
-				this.stateMachine.execute();
 				
-				clearTimeout(ExecutionTimeout.class);
-				this.status.set(AtomStatus.State.FINALIZING);
-				
-				if (atomsLog.hasLevel(Logging.INFO))
-					atomsLog.info(this.context.getName()+": Atom "+getHash()+" is executed");
+				try
+				{
+					this.stateMachine.execute();
+				}
+				finally
+				{
+					if (atomsLog.hasLevel(Logging.INFO))
+						atomsLog.info(this.context.getName()+": Atom "+getHash()+" is executed on "+Block.toHeight(this.executeSignalledBlock)+":"+this.executeSignalledBlock);
 
+					clearTimeout(ExecutionTimeout.class);
+					this.status.set(AtomStatus.State.FINALIZING);
+				}
+				
 				// Finalize the state references of read only substates
 				synchronized(this.pendingStates)
 				{
@@ -1133,8 +1144,8 @@ public final class PendingAtom implements Hashable, StateAddressable
 	
 						if (this.certificate == null)
 							falsePositive = false;
-						else
-							atomStatusLog.error(this.context.getName()+": "+timeout.getClass().getSimpleName()+" for "+getHash()+" but has atom certificate "+this.certificate.getHash());
+						else if (atomStatusLog.hasLevel(Logging.DEBUG))
+							atomStatusLog.debug(this.context.getName()+": "+timeout.getClass().getSimpleName()+" for "+getHash()+" but has atom certificate "+this.certificate.getHash());
 	
 					}
 					else if (timeout instanceof ExecutionLatentTimeout)
@@ -1154,22 +1165,38 @@ public final class PendingAtom implements Hashable, StateAddressable
 		
 					if (checkedInputs)
 					{
-						if (missingInput == null)
-							atomStatusLog.error(this.context.getName()+": "+timeout.getClass().getSimpleName()+" for "+getHash()+" but has all state inputs");
-						else
-							atomStatusLog.error(this.context.getName()+": "+timeout.getClass().getSimpleName()+" for "+getHash()+" is missing state input "+missingInput);
+						if (missingInput != null)
+						{
+							atomStatusLog.error(this.context.getName()+": "+timeout.getClass().getSimpleName()+" for "+getHash()+" is missing shard "+ShardMapper.toShardGroup(missingInput.getAddress(), this.context.getLedger().numShardGroups())+" state input "+missingInput);
+							try
+							{
+								if (this.context.getLedger().getLedgerStore().get(missingInput.getHash(), StateInput.class) != null)
+									atomStatusLog.error(this.context.getName()+": "+timeout.getClass().getSimpleName()+" for "+getHash()+" missing state input was delivered "+missingInput);
+							}
+							catch(IOException ioex)
+							{
+								atomStatusLog.error(this.context.getName()+": "+timeout.getClass().getSimpleName()+" for "+getHash()+" failed to check delivery of state input "+missingInput);
+							}
+						}
+						else if (atomStatusLog.hasLevel(Logging.DEBUG))
+							atomStatusLog.debug(this.context.getName()+": "+timeout.getClass().getSimpleName()+" for "+getHash()+" but has all state inputs");
 					}
 					
 					if (checkedOutputs)
 					{
-						if (missingOutput == null)
-							atomStatusLog.error(this.context.getName()+": "+timeout.getClass().getSimpleName()+" for "+getHash()+" but has all state outputs");
-						else
-							atomStatusLog.error(this.context.getName()+": "+timeout.getClass().getSimpleName()+" for "+getHash()+" is missing state output "+missingOutput);
+						if (missingOutput != null)
+						{
+							if (isExecuted() == false)
+								atomStatusLog.error(this.context.getName()+": "+timeout.getClass().getSimpleName()+" for "+getHash()+" is not executed");
+
+							atomStatusLog.error(this.context.getName()+": "+timeout.getClass().getSimpleName()+" for "+getHash()+" is missing shard "+ShardMapper.toShardGroup(missingOutput.getAddress(), this.context.getLedger().numShardGroups())+" state output "+missingOutput);
+						}
+						else if (atomStatusLog.hasLevel(Logging.DEBUG))
+							atomStatusLog.debug(this.context.getName()+": "+timeout.getClass().getSimpleName()+" for "+getHash()+" but has all state outputs");
 					}
 	
-					if (falsePositive)
-						atomStatusLog.error(this.context.getName()+": "+timeout.getClass().getSimpleName()+" for "+getHash()+" is false positive");
+					if (falsePositive && atomStatusLog.hasLevel(Logging.DEBUG))
+						atomStatusLog.debug(this.context.getName()+": "+timeout.getClass().getSimpleName()+" for "+getHash()+" is false positive");
 				}
 				
 				setTimeout(timeout);
@@ -1186,11 +1213,11 @@ public final class PendingAtom implements Hashable, StateAddressable
 		// Creating an active timeout?
 		if (type.isAssignableFrom(CommitTimeout.class) && this.status.after(AtomStatus.State.EXECUTING) && this.status.before(AtomStatus.State.COMPLETED))
 			isActive = true;
-		else if (type.isAssignableFrom(ExecutionTimeout.class) && this.status.after(AtomStatus.State.PREPARED) && this.status.before(AtomStatus.State.EXECUTING) && isExecuteLatentSignalled() == true)
+		else if (type.isAssignableFrom(ExecutionTimeout.class) && this.status.after(AtomStatus.State.PREPARED) && this.status.before(AtomStatus.State.FINALIZING) && (isExecuteLatentSignalled() == true || isExecuteSignalled() == true))
 			isActive = true;
-		else if (type.isAssignableFrom(ExecutionLatentTimeout.class) && this.status.after(AtomStatus.State.PREPARED) && this.status.before(AtomStatus.State.EXECUTING) && isExecuteLatentSignalled() == false)
+		else if (type.isAssignableFrom(ExecutionLatentTimeout.class) && this.status.after(AtomStatus.State.PREPARED) && this.status.before(AtomStatus.State.EXECUTING) && isExecuteSignalled() == false)
 			isActive = true;
-		else if (type.isAssignableFrom(AcceptTimeout.class) && this.status.current(AtomStatus.State.PREPARED) && this.pendingStates.allSatisfy(ps -> ps.getStateOutput() == null))
+		else if (type.isAssignableFrom(AcceptTimeout.class) && this.status.current(AtomStatus.State.PREPARED) && this.pendingStates.values().stream().allMatch(ps -> ps.getStateOutput() == null))
 			isActive = true;
 		else if (type.isAssignableFrom(PrepareTimeout.class) && this.status.before(AtomStatus.State.PREPARED))
 			isActive = true;
@@ -1345,7 +1372,7 @@ public final class PendingAtom implements Hashable, StateAddressable
 			CommitDecision decision = CommitDecision.ACCEPT;
 			synchronized(this.pendingStates)
 			{
-				if (this.pendingStates.allSatisfy(PendingState::isFinalized) == false)
+				if (this.pendingStates.values().stream().allMatch(PendingState::isFinalized) == false)
 					return null;
 
 				stateOutputs = new ArrayList<StateOutput>(this.pendingStates.size());
