@@ -1,9 +1,9 @@
 package org.radix.hyperscale.crypto.bls12381;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 
-import org.apache.commons.lang3.ArrayUtils;
 import org.radix.hyperscale.crypto.Signature;
 import org.radix.hyperscale.crypto.bls12381.group.G1Point;
 import org.radix.hyperscale.utils.Numbers;
@@ -19,15 +19,23 @@ public final class BLSSignature extends Signature
 {
 	public final static BLSSignature NULL = new BLSSignature(G1Point.NULL);
 	
+	public static BLSSignature from(final G1Point point) 
+	{
+		return new BLSSignature(point);
+	}
+
 	public static BLSSignature from(final byte[] bytes) 
 	{
-		Objects.requireNonNull(bytes, "Bytes is null for BLS point");
-		Numbers.isZero(bytes.length, "Bytes length is zero");
-		return new BLSSignature(bytes);
+		return from(bytes, 0);
+	}
+
+	public static BLSSignature from(final byte[] bytes, int offset) 
+	{
+		return new BLSSignature(bytes, 0);
 	}
 
 	private byte[] bytes;
-	private G1Point point;
+	private volatile G1Point point;
 
 	@SuppressWarnings("unused")
 	private BLSSignature()
@@ -35,16 +43,15 @@ public final class BLSSignature extends Signature
 		// FOR SERIALIZER
 	}
 	
-	BLSSignature(final byte[] bytes) 
+	private BLSSignature(final byte[] bytes, int offset) 
 	{
 		Objects.requireNonNull(bytes, "Bytes for signature is null");
 		Numbers.isZero(bytes.length, "Bytes length is zero");
 		
-		this.bytes = ArrayUtils.clone(bytes);
-		this.point = G1Point.fromBytes(this.bytes);
+		this.bytes = Arrays.copyOfRange(bytes, offset, bytes.length);
 	}
 
-	BLSSignature(final G1Point point) 
+	private BLSSignature(final G1Point point) 
 	{
 		Objects.requireNonNull(point, "Point for signature is null");
 		this.point = point;
@@ -88,9 +95,12 @@ public final class BLSSignature extends Signature
 		return new BLSSignature(g1Point().sub(signature.g1Point()));
 	}
 
-  	G1Point g1Point() 
+	synchronized G1Point g1Point() 
   	{
-  		return this.point;
+		if (this.point == null)
+			this.point = G1Point.fromBytes(this.bytes);
+
+		return point;
   	}
   
 	public byte[] toByteArray() 
