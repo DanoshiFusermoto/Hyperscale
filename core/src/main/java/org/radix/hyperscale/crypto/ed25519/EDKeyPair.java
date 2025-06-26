@@ -17,6 +17,8 @@ import org.radix.hyperscale.crypto.Signature.VerificationResult;
 
 import com.google.common.collect.ImmutableSet;
 
+import io.netty.util.internal.ThreadLocalRandom;
+
 /**
  * Asymmetric EC key pair provider fixed to curve 'secp256k1'.
  */
@@ -95,6 +97,18 @@ public final class EDKeyPair extends KeyPair<EDPrivateKey, EDPublicKey, EDSignat
 			}
 		}
 	}
+	
+	public static final EDKeyPair random() throws CryptoException
+	{
+		if (SKIP_SIGNING == false || SKIP_VERIFICATION == false)
+			throw new CryptoException("ED25519 signing and/or verification is not disabled, use a generated keypair!");
+		
+		final byte privkey[] = new byte[ED25519.PRIVATE_KEY_SIZE];
+		final byte pubkey[] = new byte[ED25519.PUBLIC_KEY_SIZE];
+		ThreadLocalRandom.current().nextBytes(privkey);
+		ThreadLocalRandom.current().nextBytes(pubkey);
+		return new EDKeyPair(privkey, pubkey);
+	}
 
 	private final EDPrivateKey privateKey;
 	private final EDPublicKey publicKey;
@@ -119,6 +133,19 @@ public final class EDKeyPair extends KeyPair<EDPrivateKey, EDPublicKey, EDSignat
 		}
 	}
 	
+	private EDKeyPair(byte[] privkey, byte[] pubkey) throws CryptoException 
+	{
+		try 
+		{
+			this.privateKey = EDPrivateKey.from(privkey);
+			this.publicKey = EDPublicKey.from(pubkey);
+		} 
+		catch (Exception ex) 
+		{
+			throw new CryptoException(ex);
+		}
+	}
+
 	public EDPrivateKey getPrivateKey() 
 	{
 		return this.privateKey;
