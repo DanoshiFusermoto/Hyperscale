@@ -1,5 +1,6 @@
 package org.radix.hyperscale.concurrency;
 
+import java.text.DecimalFormat;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
@@ -11,6 +12,7 @@ public class MonitoredReadWriteLock extends ReentrantReadWriteLock implements Mo
 {
     private static final Logger locksLog = Logging.getLogger("locks");
     private static final long DEFAULT_LOCK_WARN_THRESHOLD_MS = 10;
+    private static final DecimalFormat LOCK_TIME_FORMAT = new DecimalFormat("0.00000000");
 
     // Tracking metrics
     private final AtomicLong readLocksCount = new AtomicLong(0);
@@ -89,14 +91,22 @@ public class MonitoredReadWriteLock extends ReentrantReadWriteLock implements Mo
 
     public double getAverageReadLockWaitTime() 
     {
-        long count = this.readLocksCount.get();
-        return count > 0 ? (double) (this.totalReadLockTime.get() / 1_000_000) / count : 0;
+    	double count = this.readLocksCount.get();
+        if (count == 0)
+        	return 0;
+        
+        double averageNanos = this.totalReadLockTime.get() / count;
+        return averageNanos / 1_000_000.0d;
     }
 
     public double getAverageWriteLockWaitTime() 
     {
-        long count = this.writeLocksCount.get();
-        return count > 0 ? (double) (this.totalWriteLockTime.get() / 1_000_000) / count : 0;
+    	double count = this.writeLocksCount.get();
+        if (count == 0)
+        	return 0;
+        
+        double averageNanos = this.totalWriteLockTime.get() / count;
+        return averageNanos / 1_000_000.0d;
     }
 
     private class MonitoredReadLock extends ReadLock 
@@ -139,7 +149,7 @@ public class MonitoredReadWriteLock extends ReentrantReadWriteLock implements Mo
                 // Log warning if lock acquisition took too long
                 long lockTimeMS = lockTime / 1_000_000; 
                 if (lockTimeMS > MonitoredReadWriteLock.this.warningThresholdMS) 
-                    locksLog.warn("Read lock acquisition took "+lockTimeMS+"ms ( "+getReadLocksCount()+" / "+getAverageReadLockWaitTime()+"ms / "+getTotalReadLockWaitTime()+"ms )", new Exception("Read lock acquisition stack trace"));
+                    locksLog.warn("Read lock acquisition took "+lockTimeMS+"ms ( "+getReadLocksCount()+" / "+LOCK_TIME_FORMAT.format(getAverageReadLockWaitTime())+"ms / "+getTotalReadLockWaitTime()+"ms )", new Exception("Read lock acquisition stack trace"));
             }
         }
     }
@@ -187,7 +197,7 @@ public class MonitoredReadWriteLock extends ReentrantReadWriteLock implements Mo
                 // Log warning if lock acquisition took too long
                 long lockTimeMS = lockTime / 1_000_000; 
                 if (lockTimeMS > MonitoredReadWriteLock.this.warningThresholdMS) 
-                    locksLog.warn("Write lock acquisition took "+lockTimeMS+"ms ( "+getWriteLocksCount()+" / "+getAverageWriteLockWaitTime()+"ms / "+getTotalWriteLockWaitTime()+"ms )", new Exception("Write lock acquisition stack trace"));
+                    locksLog.warn("Write lock acquisition took "+lockTimeMS+"ms ( "+getWriteLocksCount()+" / "+LOCK_TIME_FORMAT.format(getAverageWriteLockWaitTime())+"ms / "+getTotalWriteLockWaitTime()+"ms )", new Exception("Write lock acquisition stack trace"));
             }
         }
     }
@@ -195,6 +205,6 @@ public class MonitoredReadWriteLock extends ReentrantReadWriteLock implements Mo
     @Override
     public String toString()
     {
-    	return this.label+" "+getClass().getSimpleName()+" [READS] "+getReadLocksCount()+" / "+getAverageReadLockWaitTime()+"ms | "+getTotalReadLockWaitTime()+"ms [WRITES] "+getWriteLocksCount()+" / "+getAverageWriteLockWaitTime()+"ms | "+getTotalWriteLockWaitTime()+"ms";
+    	return this.label+" "+getClass().getSimpleName()+" [READS] "+getReadLocksCount()+" / "+LOCK_TIME_FORMAT.format(getAverageReadLockWaitTime())+"ms | "+getTotalReadLockWaitTime()+"ms [WRITES] "+getWriteLocksCount()+" / "+LOCK_TIME_FORMAT.format(getAverageWriteLockWaitTime())+"ms | "+getTotalWriteLockWaitTime()+"ms";
     }
 }

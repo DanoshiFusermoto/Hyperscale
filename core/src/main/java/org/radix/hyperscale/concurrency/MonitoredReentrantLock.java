@@ -1,5 +1,6 @@
 package org.radix.hyperscale.concurrency;
 
+import java.text.DecimalFormat;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantLock;
@@ -12,6 +13,7 @@ public final class MonitoredReentrantLock extends ReentrantLock implements Monit
 {
     private static final Logger locksLog = Logging.getLogger("locks");
     private static final long DEFAULT_LOCK_WARN_THRESHOLD_MS = 10;
+    private static final DecimalFormat LOCK_TIME_FORMAT = new DecimalFormat("0.00000000");
     
     // Tracking metrics
     private final AtomicLong locksCount = new AtomicLong(0);
@@ -54,8 +56,12 @@ public final class MonitoredReentrantLock extends ReentrantLock implements Monit
 
     public double getAverageLockWaitTime() 
     {
-        long count = this.locksCount.get();
-        return count > 0 ? (double) (this.totalLockTime.get() / 1_000_000) / count : 0;
+        double count = this.locksCount.get();
+        if (count == 0)
+        	return 0;
+        
+        double averageNanos = this.totalLockTime.get() / count;
+        return averageNanos / 1_000_000.0d;
     }
 
     @Override
@@ -94,7 +100,7 @@ public final class MonitoredReentrantLock extends ReentrantLock implements Monit
             // Log warning if lock acquisition took too long
             long lockTimeMS = lockTime / 1_000_000; 
             if (lockTimeMS > this.warningThresholdMS) 
-                locksLog.warn("Lock acquisition took "+lockTime+"ms ( "+getLocksCount()+" / "+getAverageLockWaitTime()+"ms / "+getTotalLockWaitTime()+"ms )", new Exception("Lock acquisition stack trace"));
+                locksLog.warn("Lock acquisition took "+lockTime+"ms ( "+getLocksCount()+" / "+LOCK_TIME_FORMAT.format(getAverageLockWaitTime())+"ms / "+getTotalLockWaitTime()+"ms )", new Exception("Lock acquisition stack trace"));
         }
     }
 
@@ -133,7 +139,7 @@ public final class MonitoredReentrantLock extends ReentrantLock implements Monit
             
             // Log warning if lock acquisition took too long
             if ((lockTime / 1_000_000) > this.warningThresholdMS) 
-                locksLog.warn("Lock acquisition took "+lockTime+"ms ("+getLocksCount()+" / "+getAverageLockWaitTime()+"ms / "+getTotalLockWaitTime()+")", new Exception("Lock acquisition stack trace"));
+                locksLog.warn("Lock acquisition took "+lockTime+"ms ("+getLocksCount()+" / "+LOCK_TIME_FORMAT.format(getAverageLockWaitTime())+"ms / "+getTotalLockWaitTime()+")", new Exception("Lock acquisition stack trace"));
         }
     }
 
@@ -146,6 +152,6 @@ public final class MonitoredReentrantLock extends ReentrantLock implements Monit
     @Override
     public String toString()
     {
-    	return this.label+" "+getClass().getSimpleName()+" "+getLocksCount()+" / "+getAverageLockWaitTime()+"ms | "+getTotalLockWaitTime()+"ms";
+    	return this.label+" "+getClass().getSimpleName()+" "+getLocksCount()+" / "+LOCK_TIME_FORMAT.format(getAverageLockWaitTime())+"ms | "+getTotalLockWaitTime()+"ms";
     }
 }
