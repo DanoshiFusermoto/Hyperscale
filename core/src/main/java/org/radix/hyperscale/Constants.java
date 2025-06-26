@@ -21,13 +21,17 @@ public final class Constants
 	public static final int 	DEFAULT_CONNECTION_STICKY_DURATION_SECONDS = (int) TimeUnit.MINUTES.toSeconds(30); 
 	public static final int 	DEFAULT_CONNECTION_ROTATION_INTERVAL_SECONDS = (int) TimeUnit.MINUTES.toSeconds(10); 
 	public static final int 	DEFAULT_TCP_BUFFER = 1<<20;
-	public static final int 	COMPRESS_PAYLOADS_THRESHOLD = 256;
 	public static final int 	MIN_CONNECTION_LATENCY_FOR_TASKS = 100;
 	public static final int 	MAX_STRIKES_FOR_DISCONNECT = 3;
 	
+	// MESSAGING
+	public static final int 	COMPRESS_PAYLOADS_THRESHOLD = 256;
+	public static final int 	DEFAULT_MESSAGE_TTL_SECONDS = 10;
+	public static final int 	DEFAULT_MESSAGE_TTW_SECONDS = 1;
+	
 	// GOSSIP
+	public static final int 	QUEUE_POLL_TIMEOUT = 50;
 	public static final int 	QUEUE_TIMESTAMP_INTERVAL = 250;
-	public static final int 	BROADCAST_POLL_TIMEOUT = 50;
 	public static final int 	MAX_BROADCAST_INVENTORY_ITEMS = 128;
 	public static final int 	MAX_REQUEST_INVENTORY_ITEMS = 32;
 	public static final int 	MAX_REQUEST_INVENTORY_ITEMS_TOTAL = 1024;
@@ -70,7 +74,7 @@ public final class Constants
 	public static final int		MAX_PROPOSAL_TYPE_PRIMITIVES = 4096;
 
 	// ATOMS
-	public static final int 	ATOM_DISCARD_AT_PENDING_LIMIT = 50000;
+	public static final int 	ATOM_DISCARD_AT_PENDING_LIMIT = 100000;
 	public static final int 	ATOM_PREPARE_TIMEOUT_SECONDS = 15;
 	public static final int 	ATOM_ACCEPT_TIMEOUT_SECONDS = 15;
 	public static final int 	ATOM_EXECUTE_LATENT_SECONDS = 15;			

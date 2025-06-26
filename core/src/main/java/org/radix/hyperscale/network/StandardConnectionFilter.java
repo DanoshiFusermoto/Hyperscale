@@ -1,8 +1,8 @@
 package org.radix.hyperscale.network;
 
 import java.net.URI;
-
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Function;
 
 import org.radix.hyperscale.Context;
@@ -22,7 +22,7 @@ public class StandardConnectionFilter implements ConnectionFilter<AbstractConnec
 	private URI				  uri;
 	private Boolean			  synced;
 	private Boolean 		  stale;
-	private ConnectionState[] states;
+	private Set<ConnectionState> states;
 	private Function<AbstractConnection, Boolean> with;
 
 	// TODO cached for now but should be integrated with Node object
@@ -87,15 +87,15 @@ public class StandardConnectionFilter implements ConnectionFilter<AbstractConnec
 		return this;
 	}
 
-	public StandardConnectionFilter setStates(final ConnectionState ... states)
+	public StandardConnectionFilter setStates(final Set<ConnectionState> states)
 	{
-		Objects.requireNonNull(states, "States is null");
-		Numbers.isZero(states.length, "Peer states is empty");
+		Objects.requireNonNull(states, "Connection states set is null");
+		Numbers.isZero(states.size(), "Connection states set is empty");
 		
 		this.states = states;
 		return this;
 	}
-	
+
 	@Override
 	public boolean filter(final AbstractConnection connection)
 	{
@@ -130,18 +130,7 @@ public class StandardConnectionFilter implements ConnectionFilter<AbstractConnec
 
 		if (this.states != null)
 		{
-			boolean match = false;
-			for (int i = 0 ; i < this.states.length ; i++)
-			{
-				final ConnectionState state = this.states[i];
-				if (state == connection.getState())
-				{
-					match = true;
-					break;
-				}
-			}
-
-			if (match == false)
+			if (this.states.contains(connection.getState()) == false)
 				return false;
 		}
 		

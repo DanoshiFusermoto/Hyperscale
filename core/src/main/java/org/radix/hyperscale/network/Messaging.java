@@ -9,10 +9,14 @@ import java.util.Map;
 import java.util.AbstractMap;
 import java.util.Map.Entry;
 import java.util.Objects;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
+import org.radix.hyperscale.Constants;
 import org.radix.hyperscale.Context;
 import org.radix.hyperscale.common.Direction;
 import org.radix.hyperscale.crypto.bls12381.BLSPublicKey;
@@ -20,7 +24,6 @@ import org.radix.hyperscale.crypto.bls12381.BLSSignature;
 import org.radix.hyperscale.crypto.ed25519.EDPublicKey;
 import org.radix.hyperscale.exceptions.StartupException;
 import org.radix.hyperscale.exceptions.TerminationException;
-import org.radix.hyperscale.executors.Executor;
 import org.radix.hyperscale.ledger.messages.SyncAcquiredMessage;
 import org.radix.hyperscale.logging.Logger;
 import org.radix.hyperscale.logging.Logging;
@@ -30,6 +33,7 @@ import org.radix.hyperscale.network.messages.Message;
 import org.radix.hyperscale.network.messages.NodeMessage;
 import org.radix.hyperscale.node.Node;
 import org.radix.hyperscale.time.Time;
+import org.radix.hyperscale.utils.MathUtils;
 
 import io.netty.util.internal.ThreadLocalRandom;
 
@@ -45,6 +49,8 @@ public class Messaging
 	private AtomicLong receivedTotal = new AtomicLong(0l);
 	private final Map<Class<?>, AtomicLong> received;
 	private final Map<Class<?>, AtomicLong> sent;
+	
+	private final ScheduledExecutorService messageProcessor;
 
 	public Messaging(final Context context)
 	{ 
@@ -52,6 +58,20 @@ public class Messaging
 		
 		this.received = Collections.synchronizedMap(new HashMap<Class<?>, AtomicLong>());
 		this.sent = Collections.synchronizedMap(new HashMap<Class<?>, AtomicLong>());
+
+		// Using a dedicated message executor with a fixed thread pool in the range 2 - 2 + log2(cores)
+		this.messageProcessor = Executors.newScheduledThreadPool(Math.max(2, 2 + MathUtils.log2(Runtime.getRuntime().availableProcessors())), new ThreadFactory() {
+	        private final AtomicLong counter = new AtomicLong();
+	        
+	        @Override
+	        public Thread newThread(final Runnable r) 
+	        {
+	            final Thread t = new Thread(r, Messaging.this.context.getName()+" Message Processor-"+this.counter.incrementAndGet());
+	            t.setDaemon(false);
+	            t.setPriority(Thread.NORM_PRIORITY + 1);
+	            return t;
+	        }
+	    });
 	}
 
 	public void start() throws StartupException
@@ -128,12 +148,18 @@ public class Messaging
 		if (messagingLog.hasLevel(Logging.DEBUG))
 			messagingLog.debug(Messaging.this.context.getName()+": Received "+message+" from "+connection);
 
-		if (Time.getSystemTime() - message.getTimestamp() > (this.context.getConfiguration().get("messaging.time_to_live", 30)*1000l))
+		if (Time.getSystemTime() - message.getTimestamp() > TimeUnit.SECONDS.toMillis(this.context.getConfiguration().get("messaging.time_to_live", Constants.DEFAULT_MESSAGE_TTL_SECONDS)))
 		{
 			messagingLog.warn(this.context.getName()+": Inbound "+message+" with expired TTL of "+(Time.getSystemTime()-message.getTimestamp())+" from "+connection);
 			return;
 		}
 		
+		if (Time.getSystemTime() - message.getTimestamp() > TimeUnit.SECONDS.toMillis(this.context.getConfiguration().get("messaging.transmit_latency_warn", Constants.DEFAULT_MESSAGE_TLW_SECONDS)))
+			messagingLog.warn(this.context.getName()+": Inbound "+message+" with TLW of "+(Time.getSystemTime()-message.getTimestamp())+" from "+connection);
+
+		if (Time.getSystemTime() - message.witnessedAt() > TimeUnit.SECONDS.toMillis(this.context.getConfiguration().get("messaging.processing_latency_warn", Constants.DEFAULT_MESSAGE_PLW_SECONDS)))
+			messagingLog.warn(this.context.getName()+": Inbound "+message+" with PLW of "+(Time.getSystemTime()-message.witnessedAt())+" from "+connection);
+
 		// MUST send a HandshakeMessage first to establish handshake //
 		// TODO what if its an OUTBOUND connection and the end point is not who we expect?
 		if (connection.isHandshaked() == false)
@@ -221,9 +247,9 @@ public class Messaging
 					};
 					
 					if (simulatedNetworkLatency + simulatedNetworkLatencyJitter == 0 && (transportParameters == null || transportParameters.async() == false))
-						Executor.getInstance().submit(executor);
+						this.messageProcessor.submit(executor);
 					else
-						Executor.getInstance().schedule(executor, simulatedNetworkLatency + simulatedNetworkLatencyJitter, TimeUnit.MILLISECONDS);
+						this.messageProcessor.schedule(executor, simulatedNetworkLatency + simulatedNetworkLatencyJitter, TimeUnit.MILLISECONDS);
 				}
 			}
 		}

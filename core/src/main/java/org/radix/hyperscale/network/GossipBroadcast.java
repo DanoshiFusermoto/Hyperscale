@@ -50,8 +50,8 @@ final class GossipBroadcast
 		Objects.requireNonNull(shardGroupIDs, "Shard group IDs is null");
 		Numbers.isZero(shardGroupIDs.size(), "Shard group IDs is empty");
 		this.primitive = Objects.requireNonNull(primitive, "Primitive is null");
-		this.shardGroupIDs = new ArrayList<ShardGroupID>(shardGroupIDs);
 		this.timestamp = System.currentTimeMillis();
+		this.shardGroupIDs = new ArrayList<ShardGroupID>(shardGroupIDs);
 	}
 	
 	public boolean isUrgent()
@@ -81,6 +81,7 @@ final class GossipBroadcast
 	public void setShardGroups(final Set<ShardGroupID> shardGroupIDs)
 	{
 		Objects.requireNonNull(shardGroupIDs, "Shard group IDs is null");
+		Numbers.isZero(shardGroupIDs.size(), "Shard groups IDs is empty");
 		this.shardGroupIDs.clear();
 		this.shardGroupIDs.addAll(shardGroupIDs);
 	}

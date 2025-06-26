@@ -105,7 +105,7 @@ public class BootstrapService extends Executable
 		final int readTimeout = this.context.getConfiguration().get("network.discovery.read.timeout", 10000);
 		while(isCompleted == false && isTerminated() == false)
 		{
-			if (this.context.getNetwork().count(Protocol.TCP, ConnectionState.CONNECTED) > 0)
+			if (this.context.getNetwork().count(Protocol.TCP, ConnectionState.SELECT_CONNECTED) > 0)
 			{
 				isCompleted = true;
 				continue;

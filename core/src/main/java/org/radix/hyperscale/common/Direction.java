@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonValue;
 
 public enum Direction 
 {
+	UNDEFINED,
 	OUTBOUND,
 	INBOUND;
 

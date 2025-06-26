@@ -9,7 +9,7 @@ import org.radix.hyperscale.crypto.Hash;
 import org.radix.hyperscale.serialization.Serialization;
 import org.radix.hyperscale.utils.Numbers;
 
-public final class InventoryItem
+public final class InventoryItem implements Comparable<InventoryItem>
 {
 	private final Hash hash;
 	private final String type;
@@ -136,5 +136,20 @@ public final class InventoryItem
 	public String toString() 
 	{
 		return "[type = "+Serialization.getInstance().getClassForId(this.type).getName()+", hash = "+this.hash+"]";
+	}
+
+	@Override
+	public int compareTo(final InventoryItem other)
+	{
+		final boolean ii1Urgent = this.isUrgent();
+		final boolean ii2Urgent = other.isUrgent();
+		if (ii1Urgent == true && ii2Urgent == false)
+			return -1;
+		if (ii1Urgent == false && ii2Urgent == true)
+			return 1;
+		
+		final int ii1Weight = this.getWeight();
+		final int ii2Weight = other.getWeight();
+		return Integer.compare(ii1Weight, ii2Weight);
 	}
 }

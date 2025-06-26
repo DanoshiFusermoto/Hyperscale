@@ -15,7 +15,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
-import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.locks.ReentrantLock;
@@ -151,7 +150,7 @@ public class SimpleWallet implements AutoCloseable
 				continue;
 			}
 			
-			List<AbstractConnection> shardConnected = this.context.getNetwork().get(StandardConnectionFilter.build(this.context).setProtocol(Protocol.TCP).setStates(ConnectionState.CONNECTED).setShardGroupID(ShardGroupID.from(shardGroupID)));
+			List<AbstractConnection> shardConnected = this.context.getNetwork().get(StandardConnectionFilter.build(this.context).setProtocol(Protocol.TCP).setStates(ConnectionState.SELECT_CONNECTED).setShardGroupID(ShardGroupID.from(shardGroupID)));
 			for (AbstractConnection connection : shardConnected)
 			{
 				if (openWebsocket(new URI("ws://"+connection.getURI().getUserInfo()+"@"+connection.getURI().getHost()+":"+connection.getNode().getWebsocketPort()+"#"+shardGroupID)) != null)
@@ -162,7 +161,7 @@ public class SimpleWallet implements AutoCloseable
 	
 	private WebSocketClient openWebSocket(ShardGroupID shardGroupID) throws URISyntaxException, InterruptedException
 	{
-		List<AbstractConnection> shardConnected = this.context.getNetwork().get(StandardConnectionFilter.build(this.context).setProtocol(Protocol.TCP).setStates(ConnectionState.CONNECTED).setShardGroupID(shardGroupID));
+		List<AbstractConnection> shardConnected = this.context.getNetwork().get(StandardConnectionFilter.build(this.context).setProtocol(Protocol.TCP).setStates(ConnectionState.SELECT_CONNECTED).setShardGroupID(shardGroupID));
 		for (AbstractConnection connection : shardConnected)
 		{
 			WebSocketClient webSocketClient = openWebsocket(new URI("ws://"+connection.getURI().getUserInfo()+"@"+connection.getURI().getHost()+":"+connection.getNode().getWebsocketPort()+"#"+shardGroupID));
@@ -346,9 +345,13 @@ public class SimpleWallet implements AutoCloseable
 				atomFuture = new AtomFuture(atom);
 				this.futures.put(atom.getHash(), atomFuture);
 				
-				if (SimpleWallet.this.context.getLedger().submit(atom) == false)
+				try
 				{
-					atomFuture.completeExceptionally(new RejectedExecutionException("Failed to submit atom "+atom.getHash()));
+					this.context.getLedger().submit(atom);
+				}
+				catch (Exception ex)
+				{
+					atomFuture.completeExceptionally(ex);
 					this.futures.remove(atom.getHash());
 					return atomFuture;
 				}

@@ -1,7 +1,7 @@
 package org.radix.hyperscale.network.messages;
 
-import java.nio.BufferOverflowException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
@@ -16,13 +16,14 @@ import org.radix.hyperscale.network.InventoryItem;
 import org.radix.hyperscale.network.TransportParameters;
 import org.radix.hyperscale.serialization.DsonOutput;
 import org.radix.hyperscale.serialization.SerializerId2;
+import org.radix.hyperscale.utils.Numbers;
 import org.radix.hyperscale.serialization.DsonOutput.Output;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 
 @SerializerId2("gossip.items")
-@TransportParameters(cache = true, priority = 50)
+@TransportParameters(priority = 50)
 public final class ItemsMessage extends Message
 {
 	@JsonProperty("inventory")
@@ -39,38 +40,31 @@ public final class ItemsMessage extends Message
 
 	public ItemsMessage(final Primitive item)
 	{
+		Objects.requireNonNull(item, "Item is null");
 		this.inventory = Collections.singletonList(item);
 	}
 
-	public void add(final Primitive item)
+	public ItemsMessage(final Collection<? extends Primitive> items)
 	{
-		Objects.requireNonNull(item, "Item is null");
+		Objects.requireNonNull(items, "Items is null");
+		Numbers.isZero(items.size(), "Items is empty");
+		Numbers.greaterThan(items.size(), Constants.MAX_FETCH_INVENTORY_ITEMS, "Items exceeds limit of "+Constants.MAX_FETCH_INVENTORY_ITEMS);
 		
-		if (this.inventory == null) 
-			this.inventory = new ArrayList<Primitive>();
+		this.inventory = new ArrayList<Primitive>(items);
+	}
 
-		if (this.inventory.size() == Constants.MAX_FETCH_INVENTORY_ITEMS)
-			throw new BufferOverflowException();
-		
-		this.inventory.add(item);
-	}
-	
-	public boolean isAtCapacity()
-	{
-		return this.inventory.size() == Constants.MAX_FETCH_INVENTORY_ITEMS;
-	}
-	
 	public List<InventoryItem> asInventory()
 	{
 		synchronized(this)
 		{
 			if (this.inventoryItems == null)
 			{
-				this.inventoryItems = new ArrayList<InventoryItem>(this.inventory.size());
+				final List<InventoryItem> inventoryItems = new ArrayList<InventoryItem>(this.inventory.size());
 				for (Primitive item : this.inventory)
-					this.inventoryItems.add(new InventoryItem(item));
+					inventoryItems.add(new InventoryItem(item));
 				
-				this.inventoryItems = Collections.unmodifiableList(this.inventoryItems);
+				Collections.sort(inventoryItems);
+				this.inventoryItems = Collections.unmodifiableList(inventoryItems);
 			}
 			
 			return this.inventoryItems;

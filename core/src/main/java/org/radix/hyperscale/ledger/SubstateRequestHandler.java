@@ -112,11 +112,7 @@ public final class SubstateRequestHandler implements Service
 				throw new IllegalArgumentException("Substate address "+substate.getAddress()+" does not match expected "+this.address);
 
 			this.witnessedAt = System.currentTimeMillis();
-			if (this.reattempts == 0)
-				this.connection.updateLatency(this.witnessedAt - this.requestedAt);
-			else
-				this.connection.updateLatency(this.witnessedAt - this.reattemptedAt);
-			
+
 			reset();
 			
 			return super.complete(substate);
@@ -433,7 +429,7 @@ public final class SubstateRequestHandler implements Service
         		throw new IllegalArgumentException("Shard group for substate request "+address+" is local");
 
         	// Discover shard connections
-			final StandardConnectionFilter connectionFilter = StandardConnectionFilter.build(this.context).setStates(ConnectionState.CONNECTED).setSynced(true).setStale(false).setShardGroupID(substateShardGroupID);
+			final StandardConnectionFilter connectionFilter = StandardConnectionFilter.build(this.context).setStates(ConnectionState.SELECT_CONNECTED).setSynced(true).setStale(false).setShardGroupID(substateShardGroupID);
 			final List<AbstractConnection> connections = this.context.getNetwork().get(connectionFilter);
 			if (connections.isEmpty())
 				throw new IOException("No remote connections available to request substate "+address+" version "+version);
@@ -504,7 +500,7 @@ public final class SubstateRequestHandler implements Service
 					}
 	
 					// Discover shard connections
-					final StandardConnectionFilter connectionFilter = StandardConnectionFilter.build(this.context).setStates(ConnectionState.CONNECTED).setSynced(true).setStale(false).setShardGroupID(substateShardGroupID);
+					final StandardConnectionFilter connectionFilter = StandardConnectionFilter.build(this.context).setStates(ConnectionState.SELECT_CONNECTED).setSynced(true).setStale(false).setShardGroupID(substateShardGroupID);
 					final List<AbstractConnection> connections = this.context.getNetwork().get(connectionFilter);
 					if (connections.isEmpty())
 					{

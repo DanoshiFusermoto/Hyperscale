@@ -379,11 +379,18 @@ public class WebService implements Service
 				{
 					final JSONObject transactions = new JSONObject();
 					transactions.put("pending", context.getLedger().getAtomHandler().size());
-					transactions.put("failed", context.getMetaData().get("ledger.processed.atoms.timedout.accept", 0l)+
-											   context.getMetaData().get("ledger.processed.atoms.timedout.execution", 0l)+
-											   context.getMetaData().get("ledger.processed.atoms.timedout.commit", 0l));
 					transactions.put("local", context.getMetaData().get("ledger.processed.atoms.local", 0l));
 					transactions.put("total", context.getMetaData().get("ledger.processed.atoms.total", 0l));
+					
+					final JSONObject failed = new JSONObject();
+					failed.put("total", context.getMetaData().get("ledger.processed.atoms.timedout.accept", 0l)+
+							   			context.getMetaData().get("ledger.processed.atoms.timedout.execution", 0l)+
+							   			context.getMetaData().get("ledger.processed.atoms.timedout.commit", 0l));
+					failed.put("accept", context.getMetaData().get("ledger.processed.atoms.timedout.accept", 0l));
+					failed.put("execute", context.getMetaData().get("ledger.processed.atoms.timedout.accept", 0l));
+					failed.put("commit", context.getMetaData().get("ledger.processed.atoms.timedout.execution", 0l));
+					transactions.put("failed", failed);
+					
 					processed.put("transactions", transactions);
 					
 					final JSONObject executions = new JSONObject();
@@ -437,6 +444,7 @@ public class WebService implements Service
 					proposals.put("size_average", context.getMetaData().get("ledger.blocks.bytes", 0l)/(head.getHeight()+1));
 					
 					final JSONObject intervals = new JSONObject();
+					intervals.put("target", context.getMetaData().get("ledger.interval.target", 0l));
 					intervals.put("phase", context.getMetaData().get("ledger.interval.phase", 0l));
 					intervals.put("round", context.getMetaData().get("ledger.interval.round", 0l));
 					intervals.put("commit", context.getMetaData().get("ledger.interval.commit", 0l));
@@ -820,7 +828,7 @@ public class WebService implements Service
 				long timestamp = System.currentTimeMillis();
 
 				JSONObject statistics = new JSONObject();
-				statistics.put("connections", context.getNetwork().count(ConnectionState.CONNECTED));
+				statistics.put("connections", context.getNetwork().count(ConnectionState.SELECT_CONNECTED));
 
 				JSONObject bandwidth = new JSONObject();
 				{
@@ -897,10 +905,16 @@ public class WebService implements Service
 					final int numShardGroups = context.getLedger().numShardGroups();
 					final ShardGroupID localShardGroupID = ShardMapper.toShardGroup(context.getNode().getIdentity(), numShardGroups);
 
-					List<AbstractConnection> syncConnections = context.getNetwork().get(StandardConnectionFilter.build(context).setShardGroupID(localShardGroupID).setStates(ConnectionState.CONNECTED), false);
+					List<AbstractConnection> syncConnections = context.getNetwork().get(StandardConnectionFilter.build(context).setShardGroupID(localShardGroupID).setStates(ConnectionState.SELECT_CONNECTED), false);
 					JSONArray sync = new JSONArray();
 					for (AbstractConnection syncConnection : syncConnections)
-						sync.put(Serialization.getInstance().toJsonObject(syncConnection, Output.API));
+					{
+						final JSONObject syncConnectionJSON = Serialization.getInstance().toJsonObject(syncConnection, Output.API);
+						syncConnectionJSON.getJSONObject("node").getJSONObject("head").remove("inventory");
+						syncConnectionJSON.getJSONObject("node").getJSONObject("head").remove("view");
+						syncConnectionJSON.getJSONObject("node").getJSONObject("head").remove("typed");
+						sync.put(syncConnectionJSON);
+					}
 					
 					connections.put("sync", sync);
 					
@@ -910,11 +924,16 @@ public class WebService implements Service
 						if (sg == localShardGroupID.intValue())
 							continue;
 						
-						List<AbstractConnection> shardConnections = context.getNetwork().get(StandardConnectionFilter.build(context).setShardGroupID(ShardGroupID.from(sg)).setStates(ConnectionState.CONNECTED), false);
+						List<AbstractConnection> shardConnections = context.getNetwork().get(StandardConnectionFilter.build(context).setShardGroupID(ShardGroupID.from(sg)).setStates(ConnectionState.SELECT_CONNECTED), false);
 						JSONArray shardgroup = new JSONArray();
 						for (AbstractConnection shardConnection : shardConnections)
-							shardgroup.put(Serialization.getInstance().toJsonObject(shardConnection, Output.API));
-						
+						{
+							final JSONObject shardConnectionJSON = Serialization.getInstance().toJsonObject(shardConnection, Output.API);
+							shardConnectionJSON.getJSONObject("node").getJSONObject("head").remove("inventory");
+							shardConnectionJSON.getJSONObject("node").getJSONObject("head").remove("view");
+							shardConnectionJSON.getJSONObject("node").getJSONObject("head").remove("typed");
+							shardgroup.put(shardConnectionJSON);
+						}
 						shardgroups.put(Integer.toString(sg), shardgroup);
 					}
 					connections.put("shardgroups", shardgroups);
@@ -924,7 +943,7 @@ public class WebService implements Service
 					JSONObject shardgroups = new JSONObject();
 					{
 						JSONArray shardgroup = new JSONArray();
-						List<AbstractConnection> shardConnections = context.getNetwork().get(StandardConnectionFilter.build(context).setShardGroupID(targetShardGroupID).setStates(ConnectionState.CONNECTED));
+						List<AbstractConnection> shardConnections = context.getNetwork().get(StandardConnectionFilter.build(context).setShardGroupID(targetShardGroupID).setStates(ConnectionState.SELECT_CONNECTED));
 						for (AbstractConnection shardConnection : shardConnections)
 							shardgroup.put(Serialization.getInstance().toJsonObject(shardConnection, Output.API));
 						shardgroups.put(Integer.toString(targetShardGroupID.intValue()), shardgroup);
