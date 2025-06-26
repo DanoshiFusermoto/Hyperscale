@@ -28,7 +28,7 @@ import org.apache.commons.lang3.mutable.MutableLong;
 import org.json.JSONObject;
 import org.radix.hyperscale.crypto.Hash;
 import org.radix.hyperscale.crypto.Identity;
-import org.radix.hyperscale.crypto.MerkleProof;
+import org.radix.hyperscale.crypto.merkle.MerkleProof;
 import org.radix.hyperscale.ledger.ShardGroupID;
 import org.radix.hyperscale.ledger.ShardID;
 import org.radix.hyperscale.serialization.DsonOutput.Output;

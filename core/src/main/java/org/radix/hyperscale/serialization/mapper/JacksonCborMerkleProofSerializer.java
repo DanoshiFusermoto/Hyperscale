@@ -3,7 +3,7 @@ package org.radix.hyperscale.serialization.mapper;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
-import org.radix.hyperscale.crypto.MerkleProof;
+import org.radix.hyperscale.crypto.merkle.MerkleProof;
 
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.SerializerProvider;
