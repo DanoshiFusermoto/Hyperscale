@@ -35,7 +35,6 @@ import org.eclipse.collections.impl.map.mutable.primitive.ObjectLongHashMap;
 import org.radix.hyperscale.Constants;
 import org.radix.hyperscale.Context;
 import org.radix.hyperscale.Service;
-import org.radix.hyperscale.collections.LRUCacheMap;
 import org.radix.hyperscale.common.Primitive;
 import org.radix.hyperscale.concurrency.MonitoredReentrantLock;
 import org.radix.hyperscale.crypto.Hash;
@@ -48,6 +47,7 @@ import org.radix.hyperscale.exceptions.TerminationException;
 import org.radix.hyperscale.executors.PollingProcessor;
 import org.radix.hyperscale.ledger.ShardGroupID;
 import org.radix.hyperscale.ledger.ShardMapper;
+import org.radix.hyperscale.ledger.primitives.Atom;
 import org.radix.hyperscale.logging.Logger;
 import org.radix.hyperscale.logging.Logging;
 import org.radix.hyperscale.network.events.DisconnectedEvent;
@@ -130,7 +130,6 @@ public class GossipHandler implements Service
 				final long latency = Time.getSystemTime() - this.timestamp;
 				if (this.delivered == this.inventory.size())
 				{
-					getConnection().updateLatency(latency);
 					getConnection().decrementPendingRequests();
 					
 					if (latency > Constants.GOSSIP_REQUEST_LATENT_MILLISECONDS)
@@ -248,7 +247,6 @@ public class GossipHandler implements Service
 						getConnection().decrementPendingRequests();
 						getConnection().decrementPendingRequested(undelivered.size());
 						getConnection().decrementPendingWeight(undelivered.stream().collect(Collectors.summingInt(i -> i.getWeight())));
-						getConnection().updateLatency(Time.getSystemTime() - this.timestamp);
 					}
 				}
 			}
@@ -1224,6 +1222,10 @@ public class GossipHandler implements Service
 				gossipLog.warn(GossipHandler.this.context.getName() + ": Fetch items processing for GossipEvent "+message.getSeq()+" of "+itemsByType.size()+" items ["+typesSummary+"] was latent "+latency+"ms for "+connection);
 			}
 			
+			final List<Hash> atomsFetched = delivered.stream().filter(p -> p.getClass().equals(Atom.class)).map(p -> p.getHash()).collect(Collectors.toList());
+			if (atomsFetched.isEmpty() == false)
+				gossipLog.log(GossipHandler.this.context.getName()+": Fetched "+atomsFetched.size()+" atoms "+atomsFetched+" with request ID "+message.getSeq()+" latency "+latency+"ms from "+connection.toString());
+			
 			// Some items were not fetched?
 			if (delivered.size() < inventory.size())
 			{
@@ -1494,6 +1496,12 @@ public class GossipHandler implements Service
 				
 			if (gossipLog.hasLevel(Logging.DEBUG))
 				gossipLog.debug(GossipHandler.this.context.getName()+": Requested "+itemsToRequest.size()+" items "+itemsToRequest+" with request ID "+requestTask.getID()+":"+requestTask.getInitialDelay()+"ms from "+connection.toString());
+			else
+			{
+				final List<Hash> atomsReqeusted = itemsToRequest.stream().filter(ii -> ii.getType().equals(Atom.class)).map(ii -> ii.getHash()).collect(Collectors.toList());
+				if (atomsReqeusted.isEmpty() == false)
+					gossipLog.log(GossipHandler.this.context.getName()+": Requested "+atomsReqeusted.size()+" atoms "+atomsReqeusted+" with request ID "+requestTask.getID()+":"+requestTask.getInitialDelay()+"ms from "+connection.toString());
+			}
 		}
 		catch (Throwable t)
 		{
@@ -1602,6 +1610,12 @@ public class GossipHandler implements Service
 			{
 				final String typesSummary = itemsByType.keyMultiValuePairsView().collect(pair -> pair.getOne().getSimpleName() + ": " + pair.getTwo().size()).makeString(", ");
 				gossipLog.warn(GossipHandler.this.context.getName() + ": Received items processing for GossipEvent "+message.getSeq()+" of "+itemsByType.size()+" items ["+typesSummary+"] was latent "+latency+"ms for "+connection);
+			}
+			else
+			{
+				final List<Hash> atomsReceived = itemsByType.get(Atom.class).stream().map(p -> p.getHash()).collect(Collectors.toList());
+				if (atomsReceived.isEmpty() == false)
+					gossipLog.log(GossipHandler.this.context.getName()+": Received "+atomsReceived.size()+" atoms "+atomsReceived+" with request ID "+message.getSeq()+" latency "+latency+"ms from "+connection.toString());
 			}
 
 			if (unrequested.isEmpty() == false)

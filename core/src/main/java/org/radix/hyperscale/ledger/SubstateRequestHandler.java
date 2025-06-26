@@ -112,11 +112,7 @@ public final class SubstateRequestHandler implements Service
 				throw new IllegalArgumentException("Substate address "+substate.getAddress()+" does not match expected "+this.address);
 
 			this.witnessedAt = System.currentTimeMillis();
-			if (this.reattempts == 0)
-				this.connection.updateLatency(this.witnessedAt - this.requestedAt);
-			else
-				this.connection.updateLatency(this.witnessedAt - this.reattemptedAt);
-			
+
 			reset();
 			
 			return super.complete(substate);

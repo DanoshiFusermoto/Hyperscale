@@ -110,6 +110,12 @@ public abstract class AbstractConnection extends Serializable implements Compara
 
 						AbstractConnection.this.timeseries.increment("inbound", message.getSize(), System.currentTimeMillis(), TimeUnit.MILLISECONDS);
 						AbstractConnection.this.context.getTimeSeries("bandwidth").increment("inbound", message.getSize(), System.currentTimeMillis(), TimeUnit.MILLISECONDS);
+						
+						final long messageLatency = message.witnessedAt()-message.getTimestamp();
+						if (messageLatency < 0)
+							messagingLog.warn(AbstractConnection.this.context.getName()+": Message latency was negative "+message+" on "+AbstractConnection.this);
+						else
+							AbstractConnection.this.updateLatency(messageLatency);
 					}
 					catch(EOFException eofex)
 					{
