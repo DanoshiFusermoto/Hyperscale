@@ -18,7 +18,6 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.LockSupport;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
-import org.eclipse.collections.api.factory.Maps;
 import org.eclipse.collections.api.map.primitive.MutableObjectLongMap;
 import org.eclipse.collections.impl.factory.primitive.ObjectLongMaps;
 import org.radix.hyperscale.database.DatabaseException;
@@ -95,7 +94,7 @@ class Index
 
         IndexWorker()
         {
-        	this.indexItems = Maps.mutable.ofInitialCapacity(1024);
+        	this.indexItems = new HashMap<InternalKey, IndexItem>(1<<16);
         	this.indexItemsToNodes = ArrayListMultimap.create();
         	this.indexItemsToQueue = new ArrayList<>(1024);
         }
@@ -393,7 +392,7 @@ class Index
     		return indexItem;
 
     	final IndexNodeID indexNodeID = this.environment.toIndexNodeID(internalKey);
-		final Transaction transaction = new Transaction(this.environment);
+		final Transaction transaction = new Transaction(this.environment, 2);
 
 		final IndexNode indexNode;
 		try 

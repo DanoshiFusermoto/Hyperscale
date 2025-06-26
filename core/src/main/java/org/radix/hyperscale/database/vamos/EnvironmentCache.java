@@ -164,6 +164,9 @@ class EnvironmentCache
     private AtomicBoolean logging = new AtomicBoolean(false);
     private void logInfo()
     {
+    	if (vamosLog.hasLevel(Logging.INFO) == false)
+    		return;
+    	
 		long age = TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis() - this.opened);
 		if (age == 0 || age <= this.lastLog)
 			return;

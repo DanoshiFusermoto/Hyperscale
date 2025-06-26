@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -20,11 +21,8 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.LockSupport;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
-import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.mutable.MutableLong;
-import org.eclipse.collections.api.factory.Lists;
-import org.eclipse.collections.api.factory.Maps;
 import org.radix.hyperscale.database.DatabaseException;
 import org.radix.hyperscale.database.vamos.IndexItem.Type;
 import org.radix.hyperscale.logging.Logger;
@@ -129,6 +127,22 @@ class Log
 						{
 							hasExtensionOperations = true;
 							this.extensionOperationsToWrite.addAll(this.extensionOperations.values());
+							
+							// Extension operations must be sorted
+							// TODO integrate to ExtensionObject class
+					    	Collections.sort(this.extensionOperationsToWrite, new Comparator<ExtensionObject>() 
+					    	{
+								@Override
+								public int compare(ExtensionObject o1, ExtensionObject o2) 
+								{
+									if (o1.getExtPosition() < o2.getExtPosition())
+										return -1;
+									if (o1.getExtPosition() > o2.getExtPosition())
+										return 1;
+									return 0;
+								}
+							});
+
 						}
 					}
 					finally
@@ -137,10 +151,10 @@ class Log
 					}
 					
 					if (hasLogOperations)
-						Log.this.writeLogOperations(this.logOperationsToWrite);
+						writeLogOperations(this.logOperationsToWrite);
 					
 					if (hasExtensionOperations)
-						Log.this.writeExtensionOperations(this.extensionOperationsToWrite);
+						writeExtensionOperations(this.extensionOperationsToWrite);
 
 					this.lock.writeLock().lock();
 					try
@@ -159,7 +173,21 @@ class Log
 							for (final ExtensionObject extensionOperation : this.extensionOperationsToWrite)
 							{
 								if (this.extensionOperations.remove(extensionOperation.getExtPosition(), extensionOperation) == false)
+								{
+									// Might be an update
+									final ExtensionObject rogueExtensionOperation = this.extensionOperations.get(extensionOperation.getExtPosition());
+									if (rogueExtensionOperation != null)
+									{
+										if (extensionOperation.getClass().equals(rogueExtensionOperation.getClass()) &&
+											extensionOperation.getKey().equals(rogueExtensionOperation.getKey()) && extensionOperation.getExtPosition() == rogueExtensionOperation.getExtPosition())
+										{
+											vamosLog.warn("Discovered overlapping update for "+extensionOperation.getClass().getSimpleName()+" "+extensionOperation+" with "+rogueExtensionOperation);
+											continue;
+										}
+									}
+									
 									throw new DatabaseException("Extension operation not removed: "+extensionOperation);
+								}
 							}
 						}
 					}
@@ -569,8 +597,8 @@ class Log
 			if (transaction.hasOperations())
 			{
 				txOperations = transaction.getOperations();
-				indexItems = Maps.mutable.ofInitialCapacity(txOperations.size());
-				indexItemAncestors = Maps.mutable.ofInitialCapacity(txOperations.size());
+				indexItems = new HashMap<InternalKey, IndexItem>(txOperations.size());
+				indexItemAncestors = new HashMap<InternalKey, IndexItem>(txOperations.size());
 			}
 			else
 			{
@@ -587,13 +615,11 @@ class Log
 				if (vamosLog.hasLevel(Logging.DEBUG))
 					vamosLog.debug("Starting commit of transaction "+transaction);
 				
-				// Cache the current open databases in the environment
-				final Map<Integer, Database> databaseCache = this.environment.getDatabases().stream().collect(Collectors.toMap(database -> database.getID(), database -> database));
-
-				final Map<Long, ExtensionObject> extensionObjects = Maps.mutable.ofInitialCapacity(txOperations.size());
+				// All log operations might have an extension object so size to tx operations
+				final Map<Long, ExtensionObject> extensionObjects = new HashMap<Long, ExtensionObject>(txOperations.size());
 				
 				// Log operations size is tx operation size + 2 for START_TX and END_TX operations
-				final List<LogOperation> logOperations = Lists.mutable.ofInitialCapacity(txOperations.size()+2);
+				final List<LogOperation> logOperations = new ArrayList<LogOperation>(txOperations.size()+2);
 				synchronized(this.nextLogPosition)
 				{
 					final MutableLong workerNextLogID = new MutableLong(this.nextLogID.get());
@@ -610,7 +636,7 @@ class Log
 					{
 						final TransactionOperation txOperation = txOperations.get(t);
 						
-						final Database database = databaseCache.get(txOperation.getKey().getDatabaseID());
+						final Database database = this.environment.getDatabase(txOperation.getKey().getDatabaseID());
 						
 						// Handle ancestors.  Should exclude index items created during this commit.
 						IndexItem ancestorIndexItem = indexItemAncestors.get(txOperation.getKey());
@@ -1035,31 +1061,17 @@ class Log
 		return new ExtensionItem(buffer);
     }
     
-    private void writeExtensionOperations(final Collection<ExtensionObject> extensionObjects) throws IOException
+    private void writeExtensionOperations(final List<ExtensionObject> extensionObjects) throws IOException
     {
-    	final List<ExtensionObject> sortedExtensionObjects = Lists.mutable.ofAll(extensionObjects);
-    	Collections.sort(sortedExtensionObjects, new Comparator<ExtensionObject>() 
-    	{
-			@Override
-			public int compare(ExtensionObject o1, ExtensionObject o2) 
-			{
-				if (o1.getExtPosition() < o2.getExtPosition())
-					return -1;
-				if (o1.getExtPosition() > o2.getExtPosition())
-					return 1;
-				return 0;
-			}
-		});
-    	
 		final ByteBuffer buffer = byteBuffer.get();
 		synchronized(this.extensionFile)
     	{
 	    	int batchSize = 0;
 			long seekPosition = -1;
 
-			for (int e = 0 ; e < sortedExtensionObjects.size() ; e++)
+			for (int e = 0 ; e < extensionObjects.size() ; e++)
         	{
-        		final ExtensionObject extensionObject = sortedExtensionObjects.get(e);
+        		final ExtensionObject extensionObject = extensionObjects.get(e);
 
         		if (batchSize == 0)
         		{

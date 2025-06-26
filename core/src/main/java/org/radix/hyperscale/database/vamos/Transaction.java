@@ -3,6 +3,7 @@ package org.radix.hyperscale.database.vamos;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -10,7 +11,6 @@ import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
-import org.eclipse.collections.api.factory.Sets;
 import org.radix.hyperscale.database.DatabaseException;
 import org.radix.hyperscale.database.vamos.IndexItem.Type;
 import org.radix.hyperscale.logging.Logger;
@@ -37,7 +37,7 @@ public class Transaction
 	
 	public Transaction(final Environment environment)
 	{
-		this(environment, 16);
+		this(environment, MINIMUM_LOCK_QUOTA);
 	}
 	
 	public Transaction(final Environment environment, final int lockHint)
@@ -45,7 +45,7 @@ public class Transaction
 		this.environment = environment;
 		this.id = Math.abs(ThreadLocalRandom.current().nextLong());
 		this.lockHint = lockHint < MINIMUM_LOCK_QUOTA ? MINIMUM_LOCK_QUOTA : lockHint;
-		this.locked = Sets.mutable.ofInitialCapacity(this.lockHint);
+		this.locked = new HashSet<InternalKey>(this.lockHint);
 		
 		// operations is lazy init as not all transactions will perform writes
 		this.operations = null;
@@ -93,6 +93,21 @@ public class Transaction
 				for (InternalKey key : this.locked)
 					this.environment.getLockManager().unlock(key, this);
 			}
+		}
+	}
+	
+	private void unlock(final Database database, final DatabaseEntry key, final InternalKey internalKey) throws DatabaseException
+	{
+		synchronized(this)
+		{
+			throwIfCompleted();
+			
+			if (this.locked.isEmpty())
+				throw new DatabaseException("Lock not found on key "+key+" in transaction "+this+" on database "+database);
+			
+			this.environment.getLockManager().unlock(internalKey, this);
+			if (this.locked.remove(internalKey) == false)
+				throw new DatabaseException("Lock not released on key "+key+" in transaction "+this+" on database "+database);
 		}
 	}
 
@@ -268,53 +283,61 @@ public class Transaction
 			throwIfCompleted();
 			
 			lock(database, key, internalKey, lockMode);
-
-			// FIXME ISOLATION
-			// TODO anything to do here for duplicates?
-			if (database.getConfig().getAllowDuplicates() == false)
+			try
 			{
-				if (this.operations != null && this.operations.isEmpty() == false)
+				// FIXME ISOLATION
+				// TODO anything to do here for duplicates?
+				if (database.getConfig().getAllowDuplicates() == false)
 				{
-					final TransactionOperation operation = this.operations.get(internalKey);
-					if (operation != null)
+					if (this.operations != null && this.operations.isEmpty() == false)
 					{
-						if (operation.getOperation().equals(Operation.DELETE))
-							return OperationStatus.NOTFOUND;
-							
-						if (operation.getOperation().equals(Operation.PUT) || operation.getOperation().equals(Operation.PUT_NO_OVERWRITE))
+						final TransactionOperation operation = this.operations.get(internalKey);
+						if (operation != null)
 						{
-							if (value != null)
-								value.setData(operation.getData());
-							
-							return OperationStatus.SUCCESS;
+							if (operation.getOperation().equals(Operation.DELETE))
+								return OperationStatus.NOTFOUND;
+								
+							if (operation.getOperation().equals(Operation.PUT) || operation.getOperation().equals(Operation.PUT_NO_OVERWRITE))
+							{
+								if (value != null)
+									value.setData(operation.getData());
+								
+								return OperationStatus.SUCCESS;
+							}
 						}
 					}
 				}
-			}
-
-			if(exists(database, internalKey) == false)
-				return OperationStatus.NOTFOUND;
-
-			final IndexItem indexItem = this.environment.getIndex().getIndexItem(this, internalKey);
-			if (indexItem == null || indexItem == IndexItem.VACANT)
-				return OperationStatus.NOTFOUND;
-
-			if (value != null)
-			{
-				final byte[] logData; 
-				if (indexItem.getType() == Type.EXTENSION)
+	
+				if(exists(database, internalKey) == false)
+					return OperationStatus.NOTFOUND;
+	
+				final IndexItem indexItem = this.environment.getIndex().getIndexItem(this, internalKey);
+				if (indexItem == null || indexItem == IndexItem.VACANT)
+					return OperationStatus.NOTFOUND;
+	
+				if (value != null)
 				{
-					final ExtensionNode extensionNode = this.environment.getLog().readExtensionNode(indexItem);
-					final ExtensionItem extensionItem = this.environment.getLog().readExtensionItem(extensionNode.getKey(), extensionNode.getFirstPosition());
-					logData = this.environment.getLog().readLogData(extensionItem.getLogPosition());
+					final byte[] logData; 
+					if (indexItem.getType() == Type.EXTENSION)
+					{
+						final ExtensionNode extensionNode = this.environment.getLog().readExtensionNode(indexItem);
+						final ExtensionItem extensionItem = this.environment.getLog().readExtensionItem(extensionNode.getKey(), extensionNode.getFirstPosition());
+						logData = this.environment.getLog().readLogData(extensionItem.getLogPosition());
+					}
+					else
+						logData = this.environment.getLog().readLogData(indexItem.getPosition()); 
+						
+					value.setData(logData);
 				}
-				else
-					logData = this.environment.getLog().readLogData(indexItem.getPosition()); 
-					
-				value.setData(logData);
+				
+				return OperationStatus.SUCCESS;
 			}
-			
-			return OperationStatus.SUCCESS;
+			finally
+			{
+				// Lock is a read unless specified, so release
+				if (lockMode.equals(LockMode.RMW) == false)
+					unlock(database, key, internalKey);
+			}
 		}
 	}
 	
