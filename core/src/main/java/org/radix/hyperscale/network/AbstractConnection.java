@@ -63,20 +63,27 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * TODO Currently implements specific functionality for TCP connections and isn't "abstract" anymore, needs a refactor!
  */
 public abstract class AbstractConnection extends Serializable implements Comparable<AbstractConnection>
-{	
+{
 	private static final Logger messagingLog = Logging.getLogger("messaging");
 	private static final Logger networkLog = Logging.getLogger("network");
 
 	private static final int DEFAULT_BANTIME_SECONDS = 60 * 60;
+	
+	private static final int DEFAULT_INBOUND_BUFFER_SIZE = 1<<14;
 	private static final int DEFAULT_OUTBOUND_BUFFER_SIZE = 1<<14;
 	
 	/** The total size of the outbound queue for all message classes **/
-	private static final int DEFAULT_OUTBOUND_QUEUE_SIZE = 1<<10;
+	private static final int DEFAULT_OUTBOUND_QUEUE_TOTAL_QUOTA = 1<<8;
 	
-	/** Queue slots available for non-priority messages such as gossip **/
-	private static final int DEFAULT_OUTBOUND_QUEUE_QUOTA = 1<<4;
+	/** Queue slots available for non-system messages such as gossip **/
+	private static final int DEFAULT_OUTBOUND_QUEUE_STANDARD_QUOTA = 1<<7;
 	
 	private static boolean bufferWarning = false;
+	
+	public static enum QueueClassification
+	{
+		PRIORITY, STANDARD;
+	}
 	
 	private Thread inboundThread = null;
 	private TCPInboundProcessor inboundProcessor = null;
@@ -91,7 +98,7 @@ public abstract class AbstractConnection extends Serializable implements Compara
 			final BufferedInputStream bufferedInputStream;
 			try
 			{
-				bufferedInputStream = new BufferedInputStream(AbstractConnection.this.inputStream, 1<<14);
+				bufferedInputStream = new BufferedInputStream(AbstractConnection.this.inputStream, AbstractConnection.DEFAULT_INBOUND_BUFFER_SIZE);
 				dataInputStream = new DataInputStream(bufferedInputStream);
 
 				if (AbstractConnection.this.direction.equals(Direction.INBOUND))
@@ -112,9 +119,7 @@ public abstract class AbstractConnection extends Serializable implements Compara
 						AbstractConnection.this.context.getTimeSeries("bandwidth").increment("inbound", message.getSize(), System.currentTimeMillis(), TimeUnit.MILLISECONDS);
 						
 						final long messageLatency = message.witnessedAt()-message.getTimestamp();
-						if (messageLatency < 0)
-							messagingLog.warn(AbstractConnection.this.context.getName()+": Message latency was negative "+message+" on "+AbstractConnection.this);
-						else
+						if (messageLatency > 0)
 							AbstractConnection.this.updateLatency(messageLatency);
 					}
 					catch(EOFException eofex)
@@ -164,16 +169,16 @@ public abstract class AbstractConnection extends Serializable implements Compara
 	private TCPOutboundProcessor outboundProcessor = null;
 	private class TCPOutboundProcessor implements Runnable
 	{
-		private long lastFlush = 0;
-		private boolean requiresFlush = true;
 		private final DataOutputStream dataOutputStream;
 		private final BlockingQueue<Message> outboundQueue;
+		private final List<Message> dispatchQueue;
 		
 		TCPOutboundProcessor()
 		{
 			BufferedOutputStream bufferedOutputStream = new BufferedOutputStream(AbstractConnection.this.outputStream, AbstractConnection.DEFAULT_OUTBOUND_BUFFER_SIZE);
 			this.dataOutputStream = new DataOutputStream(bufferedOutputStream);
-			this.outboundQueue = new ArrayBlockingQueue<Message>(AbstractConnection.this.context.getConfiguration().get("messaging.outbound.queue_max", AbstractConnection.DEFAULT_OUTBOUND_QUEUE_SIZE));
+			this.outboundQueue = new ArrayBlockingQueue<Message>(AbstractConnection.this.context.getConfiguration().get("messaging.outbound.queue_max", AbstractConnection.DEFAULT_OUTBOUND_QUEUE_TOTAL_QUOTA));
+			this.dispatchQueue = new ArrayList<Message>(Constants.MAX_REQUEST_INVENTORY_ITEMS_TOTAL);
 		}
 		
 		@Override
@@ -195,36 +200,54 @@ public abstract class AbstractConnection extends Serializable implements Compara
 							AbstractConnection.this.strikeResetAt = Long.MAX_VALUE;
 					}
 					
+					// Queue size monitoring
+					if (this.outboundQueue.size() > AbstractConnection.DEFAULT_OUTBOUND_QUEUE_STANDARD_QUOTA)
+						networkLog.warn(AbstractConnection.this.context.getName()+": Outbound queue is "+this.outboundQueue.size()+" for "+AbstractConnection.this);
+					
 					// Get the batch of messages to send in priority order
-					final List<Message> prioritized = getPrioritizedForDispatch(Constants.QUEUE_POLL_TIMEOUT, TimeUnit.MILLISECONDS);
+					getPrioritizedForDispatch(this.dispatchQueue, Constants.QUEUE_POLL_TIMEOUT, TimeUnit.MILLISECONDS);
 					
-					// Check if a flush is required before processing
-					flush();
-					
-					if (prioritized.isEmpty() == false)
+					if (this.dispatchQueue.isEmpty() == false)
 					{
-						for(final Message message : prioritized)
+						for (int i = 0 ; i < this.dispatchQueue.size() ; i++)
 						{
+							final Message message = this.dispatchQueue.get(i);
 							try
 							{
 								Message.outbound(message, this.dataOutputStream, AbstractConnection.this);
-								this.requiresFlush = true;
 								
 								AbstractConnection.this.totalEgress.addAndGet(message.getSize());
 								AbstractConnection.this.context.getMetaData().increment("network.transferred.outbound", message.getSize());
 								
 								AbstractConnection.this.timeseries.increment("outbound", message.getSize(), System.currentTimeMillis(), TimeUnit.MILLISECONDS);
 								AbstractConnection.this.context.getTimeSeries("bandwidth").increment("outbound", message.getSize(), System.currentTimeMillis(), TimeUnit.MILLISECONDS);
+
+								final long messageLatency = Time.getSystemTime()-message.getTimestamp();
+								if (messageLatency > 0)
+									AbstractConnection.this.updateLatency(messageLatency);
 							}
 							catch (Exception ex)
 							{
 								disconnect("Exception in message sending", ex);
-								return;
+								continue;
 							}
 							
-							flush();
+							try
+							{
+								AbstractConnection.this.context.getNetwork().getMessaging().sent(message, AbstractConnection.this);
+							}
+							catch(Exception ex)
+							{
+								messagingLog.error(AbstractConnection.this.context.getName()+": Message processing error for "+message+" on "+AbstractConnection.this, ex);
+								disconnect("Exception in message processing", ex);
+								continue;
+							}
 						}
+
+						this.dataOutputStream.flush();
 					}
+					
+					this.dispatchQueue.clear();
 				}
 				
 				if (networkLog.hasLevel(Logging.DEBUG))
@@ -236,18 +259,11 @@ public abstract class AbstractConnection extends Serializable implements Compara
 			}
 		}
 		
-		private void flush() throws IOException
+		private void getPrioritizedForDispatch(final List<Message> target, final long timeout, final TimeUnit timeUnit)
 		{
-			if (this.requiresFlush == true && System.currentTimeMillis() > this.lastFlush + Constants.QUEUE_POLL_TIMEOUT)
-			{
-				this.dataOutputStream.flush();
-				this.requiresFlush = false;
-				this.lastFlush = System.currentTimeMillis();
-			}
-		}
-		
-		private List<Message> getPrioritizedForDispatch(final long timeout, final TimeUnit timeUnit)
-		{
+			if (target.isEmpty() == false)
+				throw new IllegalStateException("Dispatch target should be empty");
+			
 			Message message;
 			try 
 			{
@@ -257,23 +273,20 @@ public abstract class AbstractConnection extends Serializable implements Compara
 			{
 				Thread.currentThread().interrupt();
 				messagingLog.warn(AbstractConnection.this.context.getName()+": Message outbound processing was interrupted for "+AbstractConnection.this, ex);
-				return Collections.emptyList();
+				return;
 			}
 			
 			if (message == null)
-				return Collections.emptyList();
+				return;
 			
 			final int numDispatchItems = Math.min(this.outboundQueue.size()+1, Constants.MAX_REQUEST_INVENTORY_ITEMS_TOTAL);
-			final List<Message> messages = new ArrayList<>(numDispatchItems);
-			messages.add(message);
+			target.add(message);
 			
 			if (numDispatchItems > 1)
 			{
-				this.outboundQueue.drainTo(messages, numDispatchItems-1);
-				Collections.sort(messages);
+				this.outboundQueue.drainTo(target, numDispatchItems-1);
+				Collections.sort(target);
 			}
-			
-			return messages;
 		}
 	}
 
@@ -311,7 +324,6 @@ public abstract class AbstractConnection extends Serializable implements Compara
 	private final AtomicInteger latency = new AtomicInteger(1000);
 	private final AtomicInteger timeout = new AtomicInteger(1000);
 	
-	private volatile int maximumRequestQuota = Constants.MAX_REQUEST_INVENTORY_ITEMS_TOTAL;
 	private final AtomicInteger pendingRequests = new AtomicInteger();
 	private final AtomicInteger pendingRequested = new AtomicInteger();
 	private final AtomicInteger pendingWeight = new AtomicInteger();
@@ -858,7 +870,7 @@ public abstract class AbstractConnection extends Serializable implements Compara
 	
 	public int availableRequestQuota()
 	{
-		return this.maximumRequestQuota - (pendingRequests() + pendingWeight());
+		return Math.max(0, Constants.MAX_REQUEST_INVENTORY_ITEMS_TOTAL - (pendingRequests() + pendingWeight()));
 	}
 	
 	public int allocatedRequestQuota()
@@ -866,9 +878,19 @@ public abstract class AbstractConnection extends Serializable implements Compara
 		return pendingRequests() + pendingWeight();
 	}
 	
-	public int availableQueueQuota()
+	public int availableQueueQuota(final QueueClassification classification)
 	{
-		return Math.max(0, AbstractConnection.DEFAULT_OUTBOUND_QUEUE_QUOTA - this.outboundProcessor.outboundQueue.size());
+		double latencyQueueScalar = computeLatencyScalar();
+		int maxQueueSize = classification == QueueClassification.STANDARD ? AbstractConnection.DEFAULT_OUTBOUND_QUEUE_STANDARD_QUOTA : AbstractConnection.DEFAULT_OUTBOUND_QUEUE_TOTAL_QUOTA;
+		int adjustedMaxQueueSize = (int) (maxQueueSize / latencyQueueScalar);
+		int currentQueueSize = this.outboundProcessor.outboundQueue.size() / (classification == QueueClassification.STANDARD ? 2 : 1);
+		return Math.max(0, adjustedMaxQueueSize - currentQueueSize);
+	}
+	
+	private double computeLatencyScalar()
+	{
+		double latencyScalar = Math.min(1, Math.exp(this.latency.get() / 1000));
+		return latencyScalar;
 	}
 
 	public long getNextTimeout(int requestWeight, TimeUnit timeUnit)
