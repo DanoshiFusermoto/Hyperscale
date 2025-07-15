@@ -65,7 +65,7 @@ public class GossipHandler implements Service
 {
 	private static final Logger gossipLog = Logging.getLogger("gossip");
 	
-	private final class GossipRequestTask extends ConnectionTask 
+	private final class RequestTask extends ConnectionTask 
 	{
 		private static enum SourceType { NONE, STALE, AVAILABLE }
 		private static enum Status { PENDING, DELIVERED }
@@ -75,7 +75,7 @@ public class GossipHandler implements Service
 		
 		private volatile int delivered;
 		
-		GossipRequestTask(final AbstractConnection connection, final List<InventoryItem> inventory, long timeout, TimeUnit timeunit)
+		RequestTask(final AbstractConnection connection, final List<InventoryItem> inventory, long timeout, TimeUnit timeunit)
 		{
 			super(connection, timeout, timeunit);
 			
@@ -332,7 +332,7 @@ public class GossipHandler implements Service
 		@Override
 		public String toString()
 		{
-			return "GossipTask{"+"id="+getID()+", timestamp="+this.timestamp+", inventory="+this.inventory.size()+", delivered="+this.delivered+"}";
+			return "RequestTask{"+"id="+getID()+", timestamp="+this.timestamp+", inventory="+this.inventory.size()+", delivered="+this.delivered+"}";
 		}
 	}
 	
@@ -346,9 +346,9 @@ public class GossipHandler implements Service
 	
 	// TODO can merge these to just a map with InventoryItem and Optional GossipTask?
 	private final Set<InventoryItem> toRequest = Collections.synchronizedSet(new LinkedHashSet<InventoryItem>());
-	private final MutableMap<InventoryItem, GossipRequestTask> itemsRequested = Maps.mutable.<InventoryItem, GossipRequestTask>ofInitialCapacity(1<<12).asSynchronized();
+	private final MutableMap<InventoryItem, RequestTask> itemsRequested = Maps.mutable.<InventoryItem, RequestTask>ofInitialCapacity(1<<12).asSynchronized();
 	private final MutableSetMultimap<InventoryItem, AbstractConnection> itemSources = Multimaps.mutable.set.<InventoryItem, AbstractConnection>empty().asSynchronized();
-	private final MutableSetMultimap<AbstractConnection, GossipRequestTask> requestTasks = Multimaps.mutable.set.<AbstractConnection, GossipRequestTask>empty().asSynchronized();
+	private final MutableSetMultimap<AbstractConnection, RequestTask> requestTasks = Multimaps.mutable.set.<AbstractConnection, RequestTask>empty().asSynchronized();
 
 	private final MutableMap<Class<? extends Primitive>, GossipFilter> broadcastFilters = Maps.mutable.<Class<? extends Primitive>, GossipFilter>empty().asSynchronized();
 	private final MutableMap<Class<? extends Primitive>, GossipReceiver> receiverProcessors = Maps.mutable.<Class<? extends Primitive>, GossipReceiver>empty().asSynchronized();
@@ -873,9 +873,9 @@ public class GossipHandler implements Service
 				// Filter connections if can only serve one pending request task at a time 
 				if (this.context.getConfiguration().get("network.gossip.requests.singleton", false) == true)
 				{
-					for (final GossipRequestTask gossipRequestTask : this.requestTasks.get(c))
+					for (final RequestTask requestTask : this.requestTasks.get(c))
 					{
-						if (gossipRequestTask.numRemaining() > 0)
+						if (requestTask.numRemaining() > 0)
 							return false;
 					}
 				}
@@ -1390,7 +1390,7 @@ public class GossipHandler implements Service
 					// Need to check here the status of any required items already in the gossip pipeline
 					for (final InventoryItem item : required)
 					{
-						final GossipRequestTask requestTask = this.itemsRequested.get(item);
+						final RequestTask requestTask = this.itemsRequested.get(item);
 						if (requestTask == null)
 						{
 							this.itemSources.put(item, connection);
@@ -1407,11 +1407,11 @@ public class GossipHandler implements Service
 						else
 						{
 							// Was already delivered?
-							if (requestTask.getStatus(item).equals(GossipRequestTask.Status.DELIVERED))
+							if (requestTask.getStatus(item).equals(RequestTask.Status.DELIVERED))
 								continue;
 							
 							// Is pending?
-							if (requestTask.getStatus(item).equals(GossipRequestTask.Status.PENDING))
+							if (requestTask.getStatus(item).equals(RequestTask.Status.PENDING))
 							{
 								this.itemSources.put(item, connection);
 
@@ -1426,7 +1426,7 @@ public class GossipHandler implements Service
 							}
 								
 							// WTF?
-							throw new IllegalStateException("Gossip state for item "+item+" is invalid");
+							throw new IllegalStateException("Reqeust state for item "+item+" is invalid");
 						}
 					}
 				}
@@ -1459,7 +1459,7 @@ public class GossipHandler implements Service
 		int itemsWeight = 0;
 		int itemsPending = 0;
 
-		GossipRequestTask requestTask = null;
+		RequestTask requestTask = null;
 		final List<InventoryItem> itemsToRequest = new ArrayList<InventoryItem>(items.size());
 		final ObjectLongHashMap<String> itemCountsByType = ObjectLongHashMap.newMap();
 		try
@@ -1469,7 +1469,7 @@ public class GossipHandler implements Service
 			{
 				if (GossipHandler.this.context.getConfiguration().get("network.gossip.requests.singleton", false) == true)
 				{
-					for (final GossipRequestTask existingRequestTask : GossipHandler.this.requestTasks.get(connection))
+					for (final RequestTask existingRequestTask : GossipHandler.this.requestTasks.get(connection))
 					{
 						if (existingRequestTask.numRemaining() != 0)
 							throw new IOException("Gossip task already pending for "+connection);
@@ -1498,7 +1498,7 @@ public class GossipHandler implements Service
 					return Collections.emptyList();
 
 				final long requestTimeout = connection.getNextTimeout(itemsToRequest.size(), TimeUnit.MILLISECONDS);
-				requestTask = new GossipRequestTask(connection, itemsToRequest, Math.min(requestTimeout, Constants.MAX_GOSSIP_REQUEST_TIMEOUT_MILLISECONDS), TimeUnit.MILLISECONDS);
+				requestTask = new RequestTask(connection, itemsToRequest, Math.min(requestTimeout, Constants.MAX_GOSSIP_REQUEST_TIMEOUT_MILLISECONDS), TimeUnit.MILLISECONDS);
 				for (int i = 0 ; i < itemsToRequest.size() ; i++)
 				{
 					final InventoryItem itemToRequest = itemsToRequest.get(i);
@@ -1520,7 +1520,7 @@ public class GossipHandler implements Service
 			this.maintenanceProcessor.schedule(requestTask, requestTask.getDelay(), requestTask.getTimeUnit());
 				
 			if (gossipLog.hasLevel(Logging.DEBUG))
-				gossipLog.debug(GossipHandler.this.context.getName()+": Requested "+itemsToRequest.size()+" items "+itemsToRequest+" with request ID "+requestTask.getID()+":"+requestTask.getDelay()+"ms from "+connection.toString());
+				gossipLog.debug(GossipHandler.this.context.getName()+": Requested "+requestTask+" "+itemsToRequest+" from "+connection.toString());
 		}
 		catch (Throwable t)
 		{
@@ -1576,7 +1576,7 @@ public class GossipHandler implements Service
 			if (gossipLog.hasLevel(Logging.INFO))
 				gossipLog.info(GossipHandler.this.context.getName()+": Processing received items "+inventory.stream().map(i -> i.getHash()).collect(Collectors.toList())+" from "+connection.toString());
 
-			final MutableMap<InventoryItem, GossipRequestTask> itemsToTasks = Maps.mutable.ofInitialCapacity(inventory.size());
+			final MutableMap<InventoryItem, RequestTask> itemsToTasks = Maps.mutable.ofInitialCapacity(inventory.size());
 			final MutableListMultimap<Class<? extends Primitive>, Primitive> itemsByType = Multimaps.mutable.list.empty();
 			this.lock.lock();
 			try
@@ -1584,7 +1584,7 @@ public class GossipHandler implements Service
 				for (int i = 0 ; i < inventory.size() ; i++)
 				{
 					final InventoryItem item = inventory.get(i);
-					final GossipRequestTask itemRequestTask = this.itemsRequested.remove(item);
+					final RequestTask itemRequestTask = this.itemsRequested.remove(item);
 					if (itemRequestTask == null)
 					{
 						unrequested.add(item);
@@ -1600,7 +1600,7 @@ public class GossipHandler implements Service
 				this.lock.unlock();
 			}
 			
-			for (final Entry<InventoryItem, GossipRequestTask> itemAndTask : itemsToTasks.entrySet())
+			for (final Entry<InventoryItem, RequestTask> itemAndTask : itemsToTasks.entrySet())
 			{
 				itemAndTask.getValue().received(itemAndTask.getKey());
 				itemsByType.put(itemAndTask.getKey().getType(), itemAndTask.getKey().getPrimitive());
@@ -1647,10 +1647,9 @@ public class GossipHandler implements Service
    			GossipHandler.this.lock.lock();
     		try
     		{
-     			List<GossipRequestTask> requestTasks = GossipHandler.this.requestTasks.get(event.getConnection()).toList();
-				for (int i = 0 ; i < requestTasks.size() ; i++)
+     			final List<RequestTask> requestTasks = GossipHandler.this.requestTasks.get(event.getConnection()).toList();
+				for (final RequestTask requestTask : requestTasks)
 				{
-					GossipRequestTask requestTask = requestTasks.get(i);
     				try
     				{
     					if (requestTask.isDone() == false)
@@ -1694,8 +1693,8 @@ public class GossipHandler implements Service
 				GossipHandler.this.toRequest.clear();
 				GossipHandler.this.itemsRequested.clear();
 	
-				final List<GossipRequestTask> requestTasks = GossipHandler.this.requestTasks.valuesView().toList();
-				for (final GossipRequestTask requestTask : requestTasks)
+				final List<RequestTask> requestTasks = GossipHandler.this.requestTasks.valuesView().toList();
+				for (final RequestTask requestTask : requestTasks)
 				{
 					try
 					{
