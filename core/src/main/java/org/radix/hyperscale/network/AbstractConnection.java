@@ -68,7 +68,6 @@ public abstract class AbstractConnection extends Serializable implements Compara
 	private static final Logger networkLog = Logging.getLogger("network");
 
 	private static final int DEFAULT_BANTIME_SECONDS = 60 * 60;
-	
 	private static final int DEFAULT_INBOUND_BUFFER_SIZE = 1<<14;
 	private static final int DEFAULT_OUTBOUND_BUFFER_SIZE = 1<<14;
 	
@@ -203,6 +202,19 @@ public abstract class AbstractConnection extends Serializable implements Compara
 					// Queue size monitoring
 					if (this.outboundQueue.size() > AbstractConnection.DEFAULT_OUTBOUND_QUEUE_STANDARD_QUOTA)
 						networkLog.warn(AbstractConnection.this.context.getName()+": Outbound queue is "+this.outboundQueue.size()+" for "+AbstractConnection.this);
+
+					// FAULT: Connection outbound latency
+					if (AbstractConnection.this.context.getConfiguration().get("network.faults.connection.outbound.latent.interval", 0l) > 0 && AbstractConnection.this.getConnectedAt() > 0)
+					{
+						final long latencyIntervalSeconds = AbstractConnection.this.context.getConfiguration().get("network.faults.connection.outbound.latent.interval", 0l);
+						final long latencyTriggerAtSeconds = TimeUnit.MILLISECONDS.toSeconds(AbstractConnection.this.getConnectedAt()) + Math.abs(AbstractConnection.this.hashCode() % latencyIntervalSeconds);
+						if (TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis()) >= latencyTriggerAtSeconds)
+						{
+							long latentDurationSeconds = AbstractConnection.this.context.getConfiguration().get("network.faults.connection.outbound.latent.duration", 1l);
+							networkLog.warn(AbstractConnection.this.context.getName()+": Outbound stream latency triggered for "+latentDurationSeconds+" seconds as per failure configuration "+AbstractConnection.this);
+							Thread.sleep(TimeUnit.SECONDS.toMillis(latentDurationSeconds));
+						}
+					}
 					
 					// Get the batch of messages to send in priority order
 					getPrioritizedForDispatch(this.dispatchQueue, Constants.QUEUE_POLL_TIMEOUT, TimeUnit.MILLISECONDS);
@@ -586,12 +598,14 @@ public abstract class AbstractConnection extends Serializable implements Compara
 	public final void strikeOrDisconnect(final String reason) throws IOException
 	{
 		this.strikes++;
-		if (this.strikes == Constants.MAX_STRIKES_FOR_DISCONNECT)
+		final int maxStrikes = AbstractConnection.this.context.getConfiguration().get("network.connection.strikes.maximum", Constants.DEFAULT_MAX_STRIKES);
+		if (this.strikes == maxStrikes)
 			disconnect(reason);
 		else
 		{
-			networkLog.warn(this.context.getName()+": "+toString()+" - Received a strike "+this.strikes+"/"+Constants.MAX_STRIKES_FOR_DISCONNECT+" - "+reason);
-			this.strikeResetAt = System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(1);
+			networkLog.warn(this.context.getName()+": "+toString()+" - Received a strike "+this.strikes+"/"+maxStrikes+" - "+reason);
+			final int strikeResetDuration = AbstractConnection.this.context.getConfiguration().get("network.connection.strikes.reset", Constants.DEFAULT_STRIKES_RESET_SECONDS);
+			this.strikeResetAt = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(strikeResetDuration);
 		}
 	}
 	
@@ -992,7 +1006,7 @@ public abstract class AbstractConnection extends Serializable implements Compara
 
 	public String toString()
 	{
-		return this.id+" "+getProtocol()+" "+(getNode() != null && getNode().isSynced() ? "synced" : "unsynced")+" "+getURI().getHost()+":"+getURI().getPort()+" "+getState()+" "+getDirection()+" "+getLatency()+"ms "+(getNode() == null ? "" : getNode());
+		return getProtocol()+" "+(getNode() != null && getNode().isSynced() ? "synced" : "unsynced")+" "+getURI().getHost()+":"+getURI().getPort()+" "+getState()+" "+getDirection()+" "+getLatency()+"ms "+(getNode() == null ? "" : getNode());
 	}
 	
 	@Override
