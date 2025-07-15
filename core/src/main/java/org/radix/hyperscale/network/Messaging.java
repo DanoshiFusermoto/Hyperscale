@@ -148,17 +148,17 @@ public class Messaging
 		if (messagingLog.hasLevel(Logging.DEBUG))
 			messagingLog.debug(Messaging.this.context.getName()+": Received "+message+" from "+connection);
 
+		if (Time.getSystemTime() - message.witnessedAt() > TimeUnit.SECONDS.toMillis(this.context.getConfiguration().get("messaging.processing_latency_warn", Constants.DEFAULT_MESSAGE_PLW_SECONDS)))
+			messagingLog.warn(this.context.getName()+": Inbound "+message+" with PLW of "+(Time.getSystemTime()-message.witnessedAt())+"ms from "+connection);
+
 		if (Time.getSystemTime() - message.getTimestamp() > TimeUnit.SECONDS.toMillis(this.context.getConfiguration().get("messaging.time_to_live", Constants.DEFAULT_MESSAGE_TTL_SECONDS)))
 		{
-			messagingLog.warn(this.context.getName()+": Inbound "+message+" with expired TTL of "+(Time.getSystemTime()-message.getTimestamp())+" from "+connection);
+			messagingLog.warn(this.context.getName()+": Inbound "+message+" with expired TTL of "+(Time.getSystemTime()-message.getTimestamp())+"ms from "+connection);
 			return;
 		}
 		
 		if (Time.getSystemTime() - message.getTimestamp() > TimeUnit.SECONDS.toMillis(this.context.getConfiguration().get("messaging.transmit_latency_warn", Constants.DEFAULT_MESSAGE_TLW_SECONDS)))
-			messagingLog.warn(this.context.getName()+": Inbound "+message+" with TLW of "+(Time.getSystemTime()-message.getTimestamp())+" from "+connection);
-
-		if (Time.getSystemTime() - message.witnessedAt() > TimeUnit.SECONDS.toMillis(this.context.getConfiguration().get("messaging.processing_latency_warn", Constants.DEFAULT_MESSAGE_PLW_SECONDS)))
-			messagingLog.warn(this.context.getName()+": Inbound "+message+" with PLW of "+(Time.getSystemTime()-message.witnessedAt())+" from "+connection);
+			messagingLog.warn(this.context.getName()+": Inbound "+message+" with TLW of "+(Time.getSystemTime()-message.getTimestamp())+"ms from "+connection);
 
 		// MUST send a HandshakeMessage first to establish handshake //
 		// TODO what if its an OUTBOUND connection and the end point is not who we expect?
@@ -274,16 +274,25 @@ public class Messaging
 		connection.send(message);
 		
 		this.sentTotal.incrementAndGet();
-		this.sent.compute(message.getClass(), (c, ai) -> {
-			if (ai == null)
-				return new AtomicLong(1);
-			
-			ai.incrementAndGet();
-			return ai;
-		});
+		this.sent.computeIfAbsent(message.getClass(), c -> new AtomicLong(0)).incrementAndGet();
 
 		this.context.getMetaData().increment("messaging.outbound");
 		this.context.getTimeSeries("messages").increment("outbound", 1, System.currentTimeMillis(), TimeUnit.MILLISECONDS);
+	}
+	
+	public void sent(final Message message, final AbstractConnection connection)
+	{
+		if (messagingLog.hasLevel(Logging.DEBUG))
+			messagingLog.debug(Messaging.this.context.getName()+": Sent "+message+" to "+connection);
+
+		if (Time.getSystemTime() - message.witnessedAt() > TimeUnit.SECONDS.toMillis(this.context.getConfiguration().get("messaging.processing_latency_warn", Constants.DEFAULT_MESSAGE_PLW_SECONDS)))
+			messagingLog.warn(this.context.getName()+": Outbound "+message+" with PLW of "+(Time.getSystemTime()-message.witnessedAt())+"ms to "+connection);
+
+		if (Time.getSystemTime() - message.getTimestamp() > TimeUnit.SECONDS.toMillis(this.context.getConfiguration().get("messaging.time_to_live", Constants.DEFAULT_MESSAGE_TTL_SECONDS)))
+			messagingLog.warn(this.context.getName()+": Outbound "+message+" with expired TTL of "+(Time.getSystemTime()-message.getTimestamp())+"ms to "+connection);
+		
+		if (Time.getSystemTime() - message.getTimestamp() > TimeUnit.SECONDS.toMillis(this.context.getConfiguration().get("messaging.transmit_latency_warn", Constants.DEFAULT_MESSAGE_TLW_SECONDS)))
+			messagingLog.warn(this.context.getName()+": Outbound "+message+" with TLW of "+(Time.getSystemTime()-message.getTimestamp())+"ms to "+connection);
 	}
 
 	public long getTotalSent()
