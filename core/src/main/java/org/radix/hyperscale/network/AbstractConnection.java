@@ -110,25 +110,13 @@ public abstract class AbstractConnection extends Serializable implements Compara
 					try
 					{
 						message = Message.inbound(dataInputStream, AbstractConnection.this);
-
-						AbstractConnection.this.totalIngress.addAndGet(message.getSize());
-						AbstractConnection.this.context.getMetaData().increment("network.transferred.inbound", message.getSize());
-
-						AbstractConnection.this.timeseries.increment("inbound", message.getSize(), System.currentTimeMillis(), TimeUnit.MILLISECONDS);
-						AbstractConnection.this.context.getTimeSeries("bandwidth").increment("inbound", message.getSize(), System.currentTimeMillis(), TimeUnit.MILLISECONDS);
-						
-						final long messageLatency = message.witnessedAt()-message.getTimestamp();
-						if (messageLatency > 0)
-							AbstractConnection.this.updateLatency(messageLatency);
-					}
-					catch(EOFException eofex)
-					{
-						disconnect(null, null);
-						return;
 					}
 					catch(IOException ioex)
 					{
-						disconnect(ioex.getMessage(), ioex);
+						if (ioex instanceof EOFException)
+							disconnect(null, null);
+						else
+							disconnect(ioex.getMessage(), ioex);
 						return;
 					}
 					catch(BanException bex)
@@ -144,7 +132,7 @@ public abstract class AbstractConnection extends Serializable implements Compara
 					
 					try
 					{
-						AbstractConnection.this.context.getNetwork().getMessaging().received(message, AbstractConnection.this);
+						AbstractConnection.this.context.getNetwork().getMessaging().onReceived(message, AbstractConnection.this);
 					}
 					catch(Exception ex)
 					{
@@ -227,16 +215,6 @@ public abstract class AbstractConnection extends Serializable implements Compara
 							try
 							{
 								Message.outbound(message, this.dataOutputStream, AbstractConnection.this);
-								
-								AbstractConnection.this.totalEgress.addAndGet(message.getSize());
-								AbstractConnection.this.context.getMetaData().increment("network.transferred.outbound", message.getSize());
-								
-								AbstractConnection.this.timeseries.increment("outbound", message.getSize(), System.currentTimeMillis(), TimeUnit.MILLISECONDS);
-								AbstractConnection.this.context.getTimeSeries("bandwidth").increment("outbound", message.getSize(), System.currentTimeMillis(), TimeUnit.MILLISECONDS);
-
-								final long messageLatency = Time.getSystemTime()-message.getTimestamp();
-								if (messageLatency > 0)
-									AbstractConnection.this.updateLatency(messageLatency);
 							}
 							catch (Exception ex)
 							{
@@ -246,7 +224,7 @@ public abstract class AbstractConnection extends Serializable implements Compara
 							
 							try
 							{
-								AbstractConnection.this.context.getNetwork().getMessaging().sent(message, AbstractConnection.this);
+								AbstractConnection.this.context.getNetwork().getMessaging().onSent(message, AbstractConnection.this);
 							}
 							catch(Exception ex)
 							{
@@ -361,6 +339,8 @@ public abstract class AbstractConnection extends Serializable implements Compara
 		
 		this.timeseries = new TimeSeriesStatistics(30, TimeUnit.SECONDS);
 
+		networkLog.info(this.context.getName()+": OUTBOUND connection opened "+uri);
+
 		try
 		{
 			onConnecting();
@@ -372,11 +352,6 @@ public abstract class AbstractConnection extends Serializable implements Compara
 			this.socket.setReceiveBufferSize(this.context.getConfiguration().get("network.tcp.buffer", Constants.DEFAULT_TCP_BUFFER));
 			this.socket.setSendBufferSize(this.context.getConfiguration().get("network.tcp.buffer", Constants.DEFAULT_TCP_BUFFER));
 			this.socket.connect(new InetSocketAddress(uri.getHost(), uri.getPort()), (int) TimeUnit.SECONDS.toMillis(this.context.getConfiguration().get("network.peer.connect.timeout", 10)));
-
-			networkLog.info(this.context.getName()+": OUTBOUND connection opened to "+this.id+" "+uri);
-   			networkLog.info(this.context.getName()+":    TCP server socket "+this.socket.getLocalSocketAddress()+" RCV_BUF: "+this.socket.getReceiveBufferSize()+" SND_BUF: "+this.socket.getSendBufferSize());
-   			
-   			checkBuffersAndWarn();
 
    			listen();
 		}
@@ -401,7 +376,7 @@ public abstract class AbstractConnection extends Serializable implements Compara
 		
 		this.timeseries = new TimeSeriesStatistics(30, TimeUnit.SECONDS);
 
-		networkLog.info(this.context.getName()+": INBOUND connection from "+this.id+" "+getURI().getHost());
+		networkLog.info(this.context.getName()+": INBOUND connection from "+getURI().getHost());
 
 		try
 		{
@@ -413,9 +388,6 @@ public abstract class AbstractConnection extends Serializable implements Compara
 			this.socket.setKeepAlive(true);
 			this.socket.setReceiveBufferSize(this.context.getConfiguration().get("network.tcp.buffer", Constants.DEFAULT_TCP_BUFFER));
 			this.socket.setSendBufferSize(this.context.getConfiguration().get("network.tcp.buffer", Constants.DEFAULT_TCP_BUFFER));
-
-			networkLog.info(this.context.getName()+":    TCP server socket "+this.socket.getLocalSocketAddress()+" RCV_BUF: "+this.socket.getReceiveBufferSize()+" SND_BUF: "+this.socket.getSendBufferSize());
-   			checkBuffersAndWarn();
 
 			listen();
 		} 
@@ -445,23 +417,16 @@ public abstract class AbstractConnection extends Serializable implements Compara
 	private final void listen() throws IOException
 	{
 		networkLog.info(this.context.getName()+": TCP client socket "+this.socket.getLocalSocketAddress()+" TIMEOUT: "+this.socket.getSoTimeout()+" NO_DELAY: "+this.socket.getTcpNoDelay()+" SND_BUF: "+this.socket.getSendBufferSize()+" RCV_BUF: "+this.socket.getReceiveBufferSize());
-		
+		checkBuffersAndWarn();
+
 		this.inputStream = this.socket.getInputStream();
 		this.outputStream = this.socket.getOutputStream();
 		
 		this.outboundProcessor = new TCPOutboundProcessor();
-		this.outboundThread = new Thread(this.outboundProcessor);
-		this.outboundThread.setDaemon(true);
-		this.outboundThread.setName(this.context.getName()+" Peer-"+this.socket.getInetAddress()+":"+this.socket.getLocalPort()+"-TCP-OUT");
-		this.outboundThread.setPriority(7);
-		this.outboundThread.start();
+		this.outboundThread = Thread.ofVirtual().name(this.context.getName()+" Peer-"+this.socket.getInetAddress()+":"+this.socket.getLocalPort()+"-TCP-OUT").start(this.outboundProcessor);
 
 		this.inboundProcessor = new TCPInboundProcessor();
-		this.inboundThread = new Thread(this.inboundProcessor);
-		this.inboundThread.setDaemon(true);
-		this.inboundThread.setName(this.context.getName()+" Peer-"+this.socket.getInetAddress()+":"+this.socket.getLocalPort()+"-TCP-IN");
-		this.inboundThread.setPriority(7);
-		this.inboundThread.start();
+		this.inboundThread = Thread.ofVirtual().name(this.context.getName()+" Peer-"+this.socket.getInetAddress()+":"+this.socket.getLocalPort()+"-TCP-IN").start(this.inboundProcessor);
 	}
 
 	public int getID()
@@ -691,11 +656,6 @@ public abstract class AbstractConnection extends Serializable implements Compara
 		return this.ephemeralRemotePublicKey;
 	}
 	
-	void receive(final Message message)
-	{
-		Objects.requireNonNull(message, "Message is null");
-	}
-
 	void send(final Message message) throws IOException
 	{
 		Objects.requireNonNull(message, "Message is null");
@@ -727,6 +687,38 @@ public abstract class AbstractConnection extends Serializable implements Compara
 			throw new IOException(ex);
 		}
 	}
+	
+	// MESSAGE CALLBACKS //
+	void onReceived(final Message message)
+	{
+		Objects.requireNonNull(message, "Message is null");
+		
+		this.totalIngress.addAndGet(message.getSize());
+		this.context.getMetaData().increment("network.transferred.inbound", message.getSize());
+
+		this.timeseries.increment("inbound", message.getSize(), System.currentTimeMillis(), TimeUnit.MILLISECONDS);
+		this.context.getTimeSeries("bandwidth").increment("inbound", message.getSize(), System.currentTimeMillis(), TimeUnit.MILLISECONDS);
+		
+		final long messageLatency = message.witnessedAt()-message.getTimestamp();
+		if (messageLatency > 0)
+			updateLatency(messageLatency);
+	}
+	
+	void onSent(final Message message)
+	{
+		Objects.requireNonNull(message, "Message is null");
+		
+		this.totalEgress.addAndGet(message.getSize());
+		this.context.getMetaData().increment("network.transferred.outbound", message.getSize());
+		
+		this.timeseries.increment("outbound", message.getSize(), System.currentTimeMillis(), TimeUnit.MILLISECONDS);
+		this.context.getTimeSeries("bandwidth").increment("outbound", message.getSize(), System.currentTimeMillis(), TimeUnit.MILLISECONDS);
+
+		final long messageLatency = Time.getSystemTime()-message.getTimestamp();
+		if (messageLatency > 0)
+			updateLatency(messageLatency);
+	}
+
 
 	// STATE //
 	public final ConnectionState getState()

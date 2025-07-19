@@ -140,7 +140,30 @@ public class Messaging
 		}
 	}
 
-	public void received(final Message message, final AbstractConnection connection) throws IOException
+	public void send(final Message message, final AbstractConnection connection) throws IOException
+	{
+		Objects.requireNonNull(message, "Message is null");
+		Objects.requireNonNull(connection, "Connection is null");
+
+		if (messagingLog.hasLevel(Logging.DEBUG))
+			messagingLog.debug(this.context.getName()+": Sending "+message+" to "+connection);
+
+		if (connection.getState().equals(ConnectionState.DISCONNECTED) || connection.getState().equals(ConnectionState.DISCONNECTING))
+			throw new SocketNotConnectedException(connection+" is "+connection.getState());
+
+		message.setDirection(Direction.OUTBOUND);
+			
+		connection.send(message);
+		
+		this.sentTotal.incrementAndGet();
+		this.sent.computeIfAbsent(message.getClass(), c -> new AtomicLong(0)).incrementAndGet();
+
+		this.context.getMetaData().increment("messaging.outbound");
+		this.context.getTimeSeries("messages").increment("outbound", 1, System.currentTimeMillis(), TimeUnit.MILLISECONDS);
+	}
+	
+	// MESSAGE CALLBACKS //
+	void onReceived(final Message message, final AbstractConnection connection) throws IOException
 	{
 		Objects.requireNonNull(message, "Message is null");
 		Objects.requireNonNull(connection, "Connection is null");
@@ -211,7 +234,7 @@ public class Messaging
 		this.receivedTotal.incrementAndGet();
 		this.received.computeIfAbsent(message.getClass(), c -> new AtomicLong(0)).incrementAndGet();
 		
-		connection.receive(message);
+		connection.onReceived(message);
 		
 		// SIMULATED LATENCY //
 		final int simulatedNetworkLatency = Messaging.this.context.getConfiguration().get("network.latency", 0);
@@ -258,29 +281,7 @@ public class Messaging
 		this.context.getTimeSeries("messages").increment("inbound", 1, System.currentTimeMillis(), TimeUnit.MILLISECONDS);
 	}
 
-	public void send(final Message message, final AbstractConnection connection) throws IOException
-	{
-		Objects.requireNonNull(message, "Message is null");
-		Objects.requireNonNull(connection, "Connection is null");
-
-		if (messagingLog.hasLevel(Logging.DEBUG))
-			messagingLog.debug(this.context.getName()+": Sending "+message+" to "+connection);
-
-		if (connection.getState().equals(ConnectionState.DISCONNECTED) || connection.getState().equals(ConnectionState.DISCONNECTING))
-			throw new SocketNotConnectedException(connection+" is "+connection.getState());
-
-		message.setDirection(Direction.OUTBOUND);
-			
-		connection.send(message);
-		
-		this.sentTotal.incrementAndGet();
-		this.sent.computeIfAbsent(message.getClass(), c -> new AtomicLong(0)).incrementAndGet();
-
-		this.context.getMetaData().increment("messaging.outbound");
-		this.context.getTimeSeries("messages").increment("outbound", 1, System.currentTimeMillis(), TimeUnit.MILLISECONDS);
-	}
-	
-	public void sent(final Message message, final AbstractConnection connection)
+	void onSent(final Message message, final AbstractConnection connection)
 	{
 		if (messagingLog.hasLevel(Logging.DEBUG))
 			messagingLog.debug(Messaging.this.context.getName()+": Sent "+message+" to "+connection);
@@ -293,6 +294,8 @@ public class Messaging
 		
 		if (Time.getSystemTime() - message.getTimestamp() > TimeUnit.SECONDS.toMillis(this.context.getConfiguration().get("messaging.transmit_latency_warn", Constants.DEFAULT_MESSAGE_TLW_SECONDS)))
 			messagingLog.warn(this.context.getName()+": Outbound "+message+" with TLW of "+(Time.getSystemTime()-message.getTimestamp())+"ms to "+connection);
+		
+		connection.onSent(message);
 	}
 
 	public long getTotalSent()
