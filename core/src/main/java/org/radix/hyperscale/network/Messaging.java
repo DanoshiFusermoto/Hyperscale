@@ -140,7 +140,30 @@ public class Messaging
 		}
 	}
 
-	public void received(final Message message, final AbstractConnection connection) throws IOException
+	public void send(final Message message, final AbstractConnection connection) throws IOException
+	{
+		Objects.requireNonNull(message, "Message is null");
+		Objects.requireNonNull(connection, "Connection is null");
+
+		if (messagingLog.hasLevel(Logging.DEBUG))
+			messagingLog.debug(this.context.getName()+": Sending "+message+" to "+connection);
+
+		if (connection.getState().equals(ConnectionState.DISCONNECTED) || connection.getState().equals(ConnectionState.DISCONNECTING))
+			throw new SocketNotConnectedException(connection+" is "+connection.getState());
+
+		message.setDirection(Direction.OUTBOUND);
+			
+		connection.send(message);
+		
+		this.sentTotal.incrementAndGet();
+		this.sent.computeIfAbsent(message.getClass(), c -> new AtomicLong(0)).incrementAndGet();
+
+		this.context.getMetaData().increment("messaging.outbound");
+		this.context.getTimeSeries("messages").increment("outbound", 1, System.currentTimeMillis(), TimeUnit.MILLISECONDS);
+	}
+	
+	// MESSAGE CALLBACKS //
+	void onReceived(final Message message, final AbstractConnection connection) throws IOException
 	{
 		Objects.requireNonNull(message, "Message is null");
 		Objects.requireNonNull(connection, "Connection is null");
@@ -148,17 +171,17 @@ public class Messaging
 		if (messagingLog.hasLevel(Logging.DEBUG))
 			messagingLog.debug(Messaging.this.context.getName()+": Received "+message+" from "+connection);
 
+		if (Time.getSystemTime() - message.witnessedAt() > TimeUnit.SECONDS.toMillis(this.context.getConfiguration().get("messaging.processing_latency_warn", Constants.DEFAULT_MESSAGE_PLW_SECONDS)))
+			messagingLog.warn(this.context.getName()+": Inbound "+message+" with PLW of "+(Time.getSystemTime()-message.witnessedAt())+"ms from "+connection);
+
 		if (Time.getSystemTime() - message.getTimestamp() > TimeUnit.SECONDS.toMillis(this.context.getConfiguration().get("messaging.time_to_live", Constants.DEFAULT_MESSAGE_TTL_SECONDS)))
 		{
-			messagingLog.warn(this.context.getName()+": Inbound "+message+" with expired TTL of "+(Time.getSystemTime()-message.getTimestamp())+" from "+connection);
+			messagingLog.warn(this.context.getName()+": Inbound "+message+" with expired TTL of "+(Time.getSystemTime()-message.getTimestamp())+"ms from "+connection);
 			return;
 		}
 		
 		if (Time.getSystemTime() - message.getTimestamp() > TimeUnit.SECONDS.toMillis(this.context.getConfiguration().get("messaging.transmit_latency_warn", Constants.DEFAULT_MESSAGE_TLW_SECONDS)))
-			messagingLog.warn(this.context.getName()+": Inbound "+message+" with TLW of "+(Time.getSystemTime()-message.getTimestamp())+" from "+connection);
-
-		if (Time.getSystemTime() - message.witnessedAt() > TimeUnit.SECONDS.toMillis(this.context.getConfiguration().get("messaging.processing_latency_warn", Constants.DEFAULT_MESSAGE_PLW_SECONDS)))
-			messagingLog.warn(this.context.getName()+": Inbound "+message+" with PLW of "+(Time.getSystemTime()-message.witnessedAt())+" from "+connection);
+			messagingLog.warn(this.context.getName()+": Inbound "+message+" with TLW of "+(Time.getSystemTime()-message.getTimestamp())+"ms from "+connection);
 
 		// MUST send a HandshakeMessage first to establish handshake //
 		// TODO what if its an OUTBOUND connection and the end point is not who we expect?
@@ -211,7 +234,7 @@ public class Messaging
 		this.receivedTotal.incrementAndGet();
 		this.received.computeIfAbsent(message.getClass(), c -> new AtomicLong(0)).incrementAndGet();
 		
-		connection.receive(message);
+		connection.onReceived(message);
 		
 		// SIMULATED LATENCY //
 		final int simulatedNetworkLatency = Messaging.this.context.getConfiguration().get("network.latency", 0);
@@ -258,32 +281,21 @@ public class Messaging
 		this.context.getTimeSeries("messages").increment("inbound", 1, System.currentTimeMillis(), TimeUnit.MILLISECONDS);
 	}
 
-	public void send(final Message message, final AbstractConnection connection) throws IOException
+	void onSent(final Message message, final AbstractConnection connection)
 	{
-		Objects.requireNonNull(message, "Message is null");
-		Objects.requireNonNull(connection, "Connection is null");
-
 		if (messagingLog.hasLevel(Logging.DEBUG))
-			messagingLog.debug(this.context.getName()+": Sending "+message+" to "+connection);
+			messagingLog.debug(Messaging.this.context.getName()+": Sent "+message+" to "+connection);
 
-		if (connection.getState().equals(ConnectionState.DISCONNECTED) || connection.getState().equals(ConnectionState.DISCONNECTING))
-			throw new SocketNotConnectedException(connection+" is "+connection.getState());
+		if (Time.getSystemTime() - message.witnessedAt() > TimeUnit.SECONDS.toMillis(this.context.getConfiguration().get("messaging.processing_latency_warn", Constants.DEFAULT_MESSAGE_PLW_SECONDS)))
+			messagingLog.warn(this.context.getName()+": Outbound "+message+" with PLW of "+(Time.getSystemTime()-message.witnessedAt())+"ms to "+connection);
 
-		message.setDirection(Direction.OUTBOUND);
-			
-		connection.send(message);
+		if (Time.getSystemTime() - message.getTimestamp() > TimeUnit.SECONDS.toMillis(this.context.getConfiguration().get("messaging.time_to_live", Constants.DEFAULT_MESSAGE_TTL_SECONDS)))
+			messagingLog.warn(this.context.getName()+": Outbound "+message+" with expired TTL of "+(Time.getSystemTime()-message.getTimestamp())+"ms to "+connection);
 		
-		this.sentTotal.incrementAndGet();
-		this.sent.compute(message.getClass(), (c, ai) -> {
-			if (ai == null)
-				return new AtomicLong(1);
-			
-			ai.incrementAndGet();
-			return ai;
-		});
-
-		this.context.getMetaData().increment("messaging.outbound");
-		this.context.getTimeSeries("messages").increment("outbound", 1, System.currentTimeMillis(), TimeUnit.MILLISECONDS);
+		if (Time.getSystemTime() - message.getTimestamp() > TimeUnit.SECONDS.toMillis(this.context.getConfiguration().get("messaging.transmit_latency_warn", Constants.DEFAULT_MESSAGE_TLW_SECONDS)))
+			messagingLog.warn(this.context.getName()+": Outbound "+message+" with TLW of "+(Time.getSystemTime()-message.getTimestamp())+"ms to "+connection);
+		
+		connection.onSent(message);
 	}
 
 	public long getTotalSent()

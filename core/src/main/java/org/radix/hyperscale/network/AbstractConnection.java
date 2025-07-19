@@ -63,20 +63,26 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * TODO Currently implements specific functionality for TCP connections and isn't "abstract" anymore, needs a refactor!
  */
 public abstract class AbstractConnection extends Serializable implements Comparable<AbstractConnection>
-{	
+{
 	private static final Logger messagingLog = Logging.getLogger("messaging");
 	private static final Logger networkLog = Logging.getLogger("network");
 
 	private static final int DEFAULT_BANTIME_SECONDS = 60 * 60;
+	private static final int DEFAULT_INBOUND_BUFFER_SIZE = 1<<14;
 	private static final int DEFAULT_OUTBOUND_BUFFER_SIZE = 1<<14;
 	
 	/** The total size of the outbound queue for all message classes **/
-	private static final int DEFAULT_OUTBOUND_QUEUE_SIZE = 1<<10;
+	private static final int DEFAULT_OUTBOUND_QUEUE_TOTAL_QUOTA = 1<<8;
 	
-	/** Queue slots available for non-priority messages such as gossip **/
-	private static final int DEFAULT_OUTBOUND_QUEUE_QUOTA = 1<<4;
+	/** Queue slots available for non-system messages such as gossip **/
+	private static final int DEFAULT_OUTBOUND_QUEUE_STANDARD_QUOTA = 1<<7;
 	
 	private static boolean bufferWarning = false;
+	
+	public static enum QueueClassification
+	{
+		PRIORITY, STANDARD;
+	}
 	
 	private Thread inboundThread = null;
 	private TCPInboundProcessor inboundProcessor = null;
@@ -91,7 +97,7 @@ public abstract class AbstractConnection extends Serializable implements Compara
 			final BufferedInputStream bufferedInputStream;
 			try
 			{
-				bufferedInputStream = new BufferedInputStream(AbstractConnection.this.inputStream, 1<<14);
+				bufferedInputStream = new BufferedInputStream(AbstractConnection.this.inputStream, AbstractConnection.DEFAULT_INBOUND_BUFFER_SIZE);
 				dataInputStream = new DataInputStream(bufferedInputStream);
 
 				if (AbstractConnection.this.direction.equals(Direction.INBOUND))
@@ -104,27 +110,13 @@ public abstract class AbstractConnection extends Serializable implements Compara
 					try
 					{
 						message = Message.inbound(dataInputStream, AbstractConnection.this);
-
-						AbstractConnection.this.totalIngress.addAndGet(message.getSize());
-						AbstractConnection.this.context.getMetaData().increment("network.transferred.inbound", message.getSize());
-
-						AbstractConnection.this.timeseries.increment("inbound", message.getSize(), System.currentTimeMillis(), TimeUnit.MILLISECONDS);
-						AbstractConnection.this.context.getTimeSeries("bandwidth").increment("inbound", message.getSize(), System.currentTimeMillis(), TimeUnit.MILLISECONDS);
-						
-						final long messageLatency = message.witnessedAt()-message.getTimestamp();
-						if (messageLatency < 0)
-							messagingLog.warn(AbstractConnection.this.context.getName()+": Message latency was negative "+message+" on "+AbstractConnection.this);
-						else
-							AbstractConnection.this.updateLatency(messageLatency);
-					}
-					catch(EOFException eofex)
-					{
-						disconnect(null, null);
-						return;
 					}
 					catch(IOException ioex)
 					{
-						disconnect(ioex.getMessage(), ioex);
+						if (ioex instanceof EOFException)
+							disconnect(null, null);
+						else
+							disconnect(ioex.getMessage(), ioex);
 						return;
 					}
 					catch(BanException bex)
@@ -140,7 +132,7 @@ public abstract class AbstractConnection extends Serializable implements Compara
 					
 					try
 					{
-						AbstractConnection.this.context.getNetwork().getMessaging().received(message, AbstractConnection.this);
+						AbstractConnection.this.context.getNetwork().getMessaging().onReceived(message, AbstractConnection.this);
 					}
 					catch(Exception ex)
 					{
@@ -164,16 +156,16 @@ public abstract class AbstractConnection extends Serializable implements Compara
 	private TCPOutboundProcessor outboundProcessor = null;
 	private class TCPOutboundProcessor implements Runnable
 	{
-		private long lastFlush = 0;
-		private boolean requiresFlush = true;
 		private final DataOutputStream dataOutputStream;
 		private final BlockingQueue<Message> outboundQueue;
+		private final List<Message> dispatchQueue;
 		
 		TCPOutboundProcessor()
 		{
 			BufferedOutputStream bufferedOutputStream = new BufferedOutputStream(AbstractConnection.this.outputStream, AbstractConnection.DEFAULT_OUTBOUND_BUFFER_SIZE);
 			this.dataOutputStream = new DataOutputStream(bufferedOutputStream);
-			this.outboundQueue = new ArrayBlockingQueue<Message>(AbstractConnection.this.context.getConfiguration().get("messaging.outbound.queue_max", AbstractConnection.DEFAULT_OUTBOUND_QUEUE_SIZE));
+			this.outboundQueue = new ArrayBlockingQueue<Message>(AbstractConnection.this.context.getConfiguration().get("messaging.outbound.queue_max", AbstractConnection.DEFAULT_OUTBOUND_QUEUE_TOTAL_QUOTA));
+			this.dispatchQueue = new ArrayList<Message>(Constants.MAX_REQUEST_INVENTORY_ITEMS_TOTAL);
 		}
 		
 		@Override
@@ -195,36 +187,57 @@ public abstract class AbstractConnection extends Serializable implements Compara
 							AbstractConnection.this.strikeResetAt = Long.MAX_VALUE;
 					}
 					
-					// Get the batch of messages to send in priority order
-					final List<Message> prioritized = getPrioritizedForDispatch(Constants.QUEUE_POLL_TIMEOUT, TimeUnit.MILLISECONDS);
-					
-					// Check if a flush is required before processing
-					flush();
-					
-					if (prioritized.isEmpty() == false)
+					// Queue size monitoring
+					if (this.outboundQueue.size() > AbstractConnection.DEFAULT_OUTBOUND_QUEUE_STANDARD_QUOTA)
+						networkLog.warn(AbstractConnection.this.context.getName()+": Outbound queue is "+this.outboundQueue.size()+" for "+AbstractConnection.this);
+
+					// FAULT: Connection outbound latency
+					if (AbstractConnection.this.context.getConfiguration().get("network.faults.connection.outbound.latent.interval", 0l) > 0 && AbstractConnection.this.getConnectedAt() > 0)
 					{
-						for(final Message message : prioritized)
+						final long latencyIntervalSeconds = AbstractConnection.this.context.getConfiguration().get("network.faults.connection.outbound.latent.interval", 0l);
+						final long latencyTriggerAtSeconds = TimeUnit.MILLISECONDS.toSeconds(AbstractConnection.this.getConnectedAt()) + Math.abs(AbstractConnection.this.hashCode() % latencyIntervalSeconds);
+						if (TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis()) >= latencyTriggerAtSeconds)
 						{
+							long latentDurationSeconds = AbstractConnection.this.context.getConfiguration().get("network.faults.connection.outbound.latent.duration", 1l);
+							networkLog.warn(AbstractConnection.this.context.getName()+": Outbound stream latency triggered for "+latentDurationSeconds+" seconds as per failure configuration "+AbstractConnection.this);
+							Thread.sleep(TimeUnit.SECONDS.toMillis(latentDurationSeconds));
+						}
+					}
+					
+					// Get the batch of messages to send in priority order
+					getPrioritizedForDispatch(this.dispatchQueue, Constants.QUEUE_POLL_TIMEOUT, TimeUnit.MILLISECONDS);
+					
+					if (this.dispatchQueue.isEmpty() == false)
+					{
+						for (int i = 0 ; i < this.dispatchQueue.size() ; i++)
+						{
+							final Message message = this.dispatchQueue.get(i);
 							try
 							{
 								Message.outbound(message, this.dataOutputStream, AbstractConnection.this);
-								this.requiresFlush = true;
-								
-								AbstractConnection.this.totalEgress.addAndGet(message.getSize());
-								AbstractConnection.this.context.getMetaData().increment("network.transferred.outbound", message.getSize());
-								
-								AbstractConnection.this.timeseries.increment("outbound", message.getSize(), System.currentTimeMillis(), TimeUnit.MILLISECONDS);
-								AbstractConnection.this.context.getTimeSeries("bandwidth").increment("outbound", message.getSize(), System.currentTimeMillis(), TimeUnit.MILLISECONDS);
 							}
 							catch (Exception ex)
 							{
 								disconnect("Exception in message sending", ex);
-								return;
+								continue;
 							}
 							
-							flush();
+							try
+							{
+								AbstractConnection.this.context.getNetwork().getMessaging().onSent(message, AbstractConnection.this);
+							}
+							catch(Exception ex)
+							{
+								messagingLog.error(AbstractConnection.this.context.getName()+": Message processing error for "+message+" on "+AbstractConnection.this, ex);
+								disconnect("Exception in message processing", ex);
+								continue;
+							}
 						}
+
+						this.dataOutputStream.flush();
 					}
+					
+					this.dispatchQueue.clear();
 				}
 				
 				if (networkLog.hasLevel(Logging.DEBUG))
@@ -236,18 +249,11 @@ public abstract class AbstractConnection extends Serializable implements Compara
 			}
 		}
 		
-		private void flush() throws IOException
+		private void getPrioritizedForDispatch(final List<Message> target, final long timeout, final TimeUnit timeUnit)
 		{
-			if (this.requiresFlush == true && System.currentTimeMillis() > this.lastFlush + Constants.QUEUE_POLL_TIMEOUT)
-			{
-				this.dataOutputStream.flush();
-				this.requiresFlush = false;
-				this.lastFlush = System.currentTimeMillis();
-			}
-		}
-		
-		private List<Message> getPrioritizedForDispatch(final long timeout, final TimeUnit timeUnit)
-		{
+			if (target.isEmpty() == false)
+				throw new IllegalStateException("Dispatch target should be empty");
+			
 			Message message;
 			try 
 			{
@@ -257,23 +263,20 @@ public abstract class AbstractConnection extends Serializable implements Compara
 			{
 				Thread.currentThread().interrupt();
 				messagingLog.warn(AbstractConnection.this.context.getName()+": Message outbound processing was interrupted for "+AbstractConnection.this, ex);
-				return Collections.emptyList();
+				return;
 			}
 			
 			if (message == null)
-				return Collections.emptyList();
+				return;
 			
 			final int numDispatchItems = Math.min(this.outboundQueue.size()+1, Constants.MAX_REQUEST_INVENTORY_ITEMS_TOTAL);
-			final List<Message> messages = new ArrayList<>(numDispatchItems);
-			messages.add(message);
+			target.add(message);
 			
 			if (numDispatchItems > 1)
 			{
-				this.outboundQueue.drainTo(messages, numDispatchItems-1);
-				Collections.sort(messages);
+				this.outboundQueue.drainTo(target, numDispatchItems-1);
+				Collections.sort(target);
 			}
-			
-			return messages;
 		}
 	}
 
@@ -311,7 +314,6 @@ public abstract class AbstractConnection extends Serializable implements Compara
 	private final AtomicInteger latency = new AtomicInteger(1000);
 	private final AtomicInteger timeout = new AtomicInteger(1000);
 	
-	private volatile int maximumRequestQuota = Constants.MAX_REQUEST_INVENTORY_ITEMS_TOTAL;
 	private final AtomicInteger pendingRequests = new AtomicInteger();
 	private final AtomicInteger pendingRequested = new AtomicInteger();
 	private final AtomicInteger pendingWeight = new AtomicInteger();
@@ -337,6 +339,8 @@ public abstract class AbstractConnection extends Serializable implements Compara
 		
 		this.timeseries = new TimeSeriesStatistics(30, TimeUnit.SECONDS);
 
+		networkLog.info(this.context.getName()+": OUTBOUND connection opened "+uri);
+
 		try
 		{
 			onConnecting();
@@ -348,11 +352,6 @@ public abstract class AbstractConnection extends Serializable implements Compara
 			this.socket.setReceiveBufferSize(this.context.getConfiguration().get("network.tcp.buffer", Constants.DEFAULT_TCP_BUFFER));
 			this.socket.setSendBufferSize(this.context.getConfiguration().get("network.tcp.buffer", Constants.DEFAULT_TCP_BUFFER));
 			this.socket.connect(new InetSocketAddress(uri.getHost(), uri.getPort()), (int) TimeUnit.SECONDS.toMillis(this.context.getConfiguration().get("network.peer.connect.timeout", 10)));
-
-			networkLog.info(this.context.getName()+": OUTBOUND connection opened to "+this.id+" "+uri);
-   			networkLog.info(this.context.getName()+":    TCP server socket "+this.socket.getLocalSocketAddress()+" RCV_BUF: "+this.socket.getReceiveBufferSize()+" SND_BUF: "+this.socket.getSendBufferSize());
-   			
-   			checkBuffersAndWarn();
 
    			listen();
 		}
@@ -377,7 +376,7 @@ public abstract class AbstractConnection extends Serializable implements Compara
 		
 		this.timeseries = new TimeSeriesStatistics(30, TimeUnit.SECONDS);
 
-		networkLog.info(this.context.getName()+": INBOUND connection from "+this.id+" "+getURI().getHost());
+		networkLog.info(this.context.getName()+": INBOUND connection from "+getURI().getHost());
 
 		try
 		{
@@ -389,9 +388,6 @@ public abstract class AbstractConnection extends Serializable implements Compara
 			this.socket.setKeepAlive(true);
 			this.socket.setReceiveBufferSize(this.context.getConfiguration().get("network.tcp.buffer", Constants.DEFAULT_TCP_BUFFER));
 			this.socket.setSendBufferSize(this.context.getConfiguration().get("network.tcp.buffer", Constants.DEFAULT_TCP_BUFFER));
-
-			networkLog.info(this.context.getName()+":    TCP server socket "+this.socket.getLocalSocketAddress()+" RCV_BUF: "+this.socket.getReceiveBufferSize()+" SND_BUF: "+this.socket.getSendBufferSize());
-   			checkBuffersAndWarn();
 
 			listen();
 		} 
@@ -421,23 +417,16 @@ public abstract class AbstractConnection extends Serializable implements Compara
 	private final void listen() throws IOException
 	{
 		networkLog.info(this.context.getName()+": TCP client socket "+this.socket.getLocalSocketAddress()+" TIMEOUT: "+this.socket.getSoTimeout()+" NO_DELAY: "+this.socket.getTcpNoDelay()+" SND_BUF: "+this.socket.getSendBufferSize()+" RCV_BUF: "+this.socket.getReceiveBufferSize());
-		
+		checkBuffersAndWarn();
+
 		this.inputStream = this.socket.getInputStream();
 		this.outputStream = this.socket.getOutputStream();
 		
 		this.outboundProcessor = new TCPOutboundProcessor();
-		this.outboundThread = new Thread(this.outboundProcessor);
-		this.outboundThread.setDaemon(true);
-		this.outboundThread.setName(this.context.getName()+" Peer-"+this.socket.getInetAddress()+":"+this.socket.getLocalPort()+"-TCP-OUT");
-		this.outboundThread.setPriority(7);
-		this.outboundThread.start();
+		this.outboundThread = Thread.ofVirtual().name(this.context.getName()+" Peer-"+this.socket.getInetAddress()+":"+this.socket.getLocalPort()+"-TCP-OUT").start(this.outboundProcessor);
 
 		this.inboundProcessor = new TCPInboundProcessor();
-		this.inboundThread = new Thread(this.inboundProcessor);
-		this.inboundThread.setDaemon(true);
-		this.inboundThread.setName(this.context.getName()+" Peer-"+this.socket.getInetAddress()+":"+this.socket.getLocalPort()+"-TCP-IN");
-		this.inboundThread.setPriority(7);
-		this.inboundThread.start();
+		this.inboundThread = Thread.ofVirtual().name(this.context.getName()+" Peer-"+this.socket.getInetAddress()+":"+this.socket.getLocalPort()+"-TCP-IN").start(this.inboundProcessor);
 	}
 
 	public int getID()
@@ -574,12 +563,14 @@ public abstract class AbstractConnection extends Serializable implements Compara
 	public final void strikeOrDisconnect(final String reason) throws IOException
 	{
 		this.strikes++;
-		if (this.strikes == Constants.MAX_STRIKES_FOR_DISCONNECT)
+		final int maxStrikes = AbstractConnection.this.context.getConfiguration().get("network.connection.strikes.maximum", Constants.DEFAULT_MAX_STRIKES);
+		if (this.strikes == maxStrikes)
 			disconnect(reason);
 		else
 		{
-			networkLog.warn(this.context.getName()+": "+toString()+" - Received a strike "+this.strikes+"/"+Constants.MAX_STRIKES_FOR_DISCONNECT+" - "+reason);
-			this.strikeResetAt = System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(1);
+			networkLog.warn(this.context.getName()+": "+toString()+" - Received a strike "+this.strikes+"/"+maxStrikes+" - "+reason);
+			final int strikeResetDuration = AbstractConnection.this.context.getConfiguration().get("network.connection.strikes.reset", Constants.DEFAULT_STRIKES_RESET_SECONDS);
+			this.strikeResetAt = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(strikeResetDuration);
 		}
 	}
 	
@@ -665,11 +656,6 @@ public abstract class AbstractConnection extends Serializable implements Compara
 		return this.ephemeralRemotePublicKey;
 	}
 	
-	void receive(final Message message)
-	{
-		Objects.requireNonNull(message, "Message is null");
-	}
-
 	void send(final Message message) throws IOException
 	{
 		Objects.requireNonNull(message, "Message is null");
@@ -701,6 +687,38 @@ public abstract class AbstractConnection extends Serializable implements Compara
 			throw new IOException(ex);
 		}
 	}
+	
+	// MESSAGE CALLBACKS //
+	void onReceived(final Message message)
+	{
+		Objects.requireNonNull(message, "Message is null");
+		
+		this.totalIngress.addAndGet(message.getSize());
+		this.context.getMetaData().increment("network.transferred.inbound", message.getSize());
+
+		this.timeseries.increment("inbound", message.getSize(), System.currentTimeMillis(), TimeUnit.MILLISECONDS);
+		this.context.getTimeSeries("bandwidth").increment("inbound", message.getSize(), System.currentTimeMillis(), TimeUnit.MILLISECONDS);
+		
+		final long messageLatency = message.witnessedAt()-message.getTimestamp();
+		if (messageLatency > 0)
+			updateLatency(messageLatency);
+	}
+	
+	void onSent(final Message message)
+	{
+		Objects.requireNonNull(message, "Message is null");
+		
+		this.totalEgress.addAndGet(message.getSize());
+		this.context.getMetaData().increment("network.transferred.outbound", message.getSize());
+		
+		this.timeseries.increment("outbound", message.getSize(), System.currentTimeMillis(), TimeUnit.MILLISECONDS);
+		this.context.getTimeSeries("bandwidth").increment("outbound", message.getSize(), System.currentTimeMillis(), TimeUnit.MILLISECONDS);
+
+		final long messageLatency = Time.getSystemTime()-message.getTimestamp();
+		if (messageLatency > 0)
+			updateLatency(messageLatency);
+	}
+
 
 	// STATE //
 	public final ConnectionState getState()
@@ -858,7 +876,7 @@ public abstract class AbstractConnection extends Serializable implements Compara
 	
 	public int availableRequestQuota()
 	{
-		return this.maximumRequestQuota - (pendingRequests() + pendingWeight());
+		return Math.max(0, Constants.MAX_REQUEST_INVENTORY_ITEMS_TOTAL - (pendingRequests() + pendingWeight()));
 	}
 	
 	public int allocatedRequestQuota()
@@ -866,9 +884,19 @@ public abstract class AbstractConnection extends Serializable implements Compara
 		return pendingRequests() + pendingWeight();
 	}
 	
-	public int availableQueueQuota()
+	public int availableQueueQuota(final QueueClassification classification)
 	{
-		return Math.max(0, AbstractConnection.DEFAULT_OUTBOUND_QUEUE_QUOTA - this.outboundProcessor.outboundQueue.size());
+		double latencyQueueScalar = computeLatencyScalar();
+		int maxQueueSize = classification == QueueClassification.STANDARD ? AbstractConnection.DEFAULT_OUTBOUND_QUEUE_STANDARD_QUOTA : AbstractConnection.DEFAULT_OUTBOUND_QUEUE_TOTAL_QUOTA;
+		int adjustedMaxQueueSize = (int) (maxQueueSize / latencyQueueScalar);
+		int currentQueueSize = this.outboundProcessor.outboundQueue.size() / (classification == QueueClassification.STANDARD ? 2 : 1);
+		return Math.max(0, adjustedMaxQueueSize - currentQueueSize);
+	}
+	
+	private double computeLatencyScalar()
+	{
+		double latencyScalar = Math.min(1, Math.exp(this.latency.get() / 1000));
+		return latencyScalar;
 	}
 
 	public long getNextTimeout(int requestWeight, TimeUnit timeUnit)
@@ -970,7 +998,7 @@ public abstract class AbstractConnection extends Serializable implements Compara
 
 	public String toString()
 	{
-		return this.id+" "+getProtocol()+" "+(getNode() != null && getNode().isSynced() ? "synced" : "unsynced")+" "+getURI().getHost()+":"+getURI().getPort()+" "+getState()+" "+getDirection()+" "+getLatency()+"ms "+(getNode() == null ? "" : getNode());
+		return getProtocol()+" "+(getNode() != null && getNode().isSynced() ? "synced" : "unsynced")+" "+getURI().getHost()+":"+getURI().getPort()+" "+getState()+" "+getDirection()+" "+getLatency()+"ms "+(getNode() == null ? "" : getNode());
 	}
 	
 	@Override
