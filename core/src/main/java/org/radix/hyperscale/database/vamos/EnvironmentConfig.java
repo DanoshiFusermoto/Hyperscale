@@ -22,12 +22,12 @@ public class EnvironmentConfig implements Cloneable
     private long checkpointAfterBytesWritten = 1l<<32l;
 
     private boolean hasLogCache = true;
-    private int logCacheMaxEntries = 1<<18;
+    private int logCacheMaxEntries = 1<<16;
     private int logCacheMaxItemSize = 1<<12;
     private int logCompressionThreshold = 1024;
     
     private boolean hasIndexNodeCache = true;
-    private int indexNodeCacheMaxEntries = 1<<18;
+    private int indexNodeCacheMaxEntries = 1<<16;
 
     private boolean hasIndexItemCache = true;
     private int indexItemCacheMaxEntries = 1<<16;

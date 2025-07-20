@@ -59,7 +59,7 @@ public final class DatabaseEnvironment
 					{
 						try
 						{
-							if (environment.context.getConfiguration().get("ledger.pruning", Boolean.TRUE) == Boolean.TRUE)
+							if (environment.context.getConfiguration().get("ledger.pruning", true) == true)
 							{
 								if(environment.getEnvironment().isClosed() == false && DatabaseEnvironment.environments.contains(environment) == true)
 									environment.getEnvironment().cleanLog();
@@ -184,7 +184,7 @@ public final class DatabaseEnvironment
 		
 		// CLEANER PARAMS //
 		environmentConfig.setConfigParam(EnvironmentConfig.ENV_RUN_CLEANER, "false");
-		if (this.context.getConfiguration().get("ledger.pruning", Boolean.TRUE) == Boolean.TRUE)
+		if (this.context.getConfiguration().get("ledger.pruning", true) == true)
 		{
 			environmentConfig.setConfigParam(EnvironmentConfig.CLEANER_WAKEUP_INTERVAL, "3600 s");
 			environmentConfig.setConfigParam(EnvironmentConfig.CLEANER_BYTES_INTERVAL, String.valueOf(1l<<32l));
