@@ -1,6 +1,7 @@
 package org.radix.hyperscale.database.vamos;
 
 import java.io.IOException;
+import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
 import java.util.Objects;
 
@@ -25,8 +26,10 @@ class IndexItem
 	
 	private final int hashCode;
 	
-	static final IndexItem from(byte[] bytes) throws IOException
+	static final IndexItem from(final byte[] bytes) throws IOException
 	{
+		Objects.requireNonNull(bytes, "Bytes is null");
+		
 		ByteBuffer buffer = byteBuffer.get(); 
 		buffer.clear();
 		buffer.put(bytes);
@@ -47,17 +50,24 @@ class IndexItem
 	{
 		Objects.requireNonNull(buffer, "Byte buffer is null");
 
-		int type = buffer.get();
-		if (type == 0)
-			this.type = Type.DATA;
-		else if (type == 1)
-			this.type = Type.EXTENSION;
-		else 
-			throw new IllegalArgumentException("Type "+type+" is unknown");
-			
-		this.key = InternalKey.from(buffer.getInt(), buffer.getLong());
-		this.position = buffer.getLong();
-		this.hashCode = computeHashCode();
+		try
+		{
+			int type = buffer.get();
+			if (type == 0)
+				this.type = Type.DATA;
+			else if (type == 1)
+				this.type = Type.EXTENSION;
+			else 
+				throw new IllegalArgumentException("Type "+type+" is unknown");
+				
+			this.key = InternalKey.from(buffer.getInt(), buffer.getLong());
+			this.position = buffer.getLong();
+			this.hashCode = computeHashCode();
+		}
+		catch(BufferUnderflowException | IllegalArgumentException ex)
+		{
+			throw new IOException(ex);
+		}
 	}
 	
 	IndexItem(final InternalKey key)
@@ -98,6 +108,8 @@ class IndexItem
 	
 	void update(final IndexItem other)
 	{
+		Objects.requireNonNull(other, "Update index item is null");
+		
 		if (this.hashCode != other.hashCode ||
 			this.type.equals(other.type) == false ||
 			this.key.equals(other.key) == false)
@@ -108,6 +120,8 @@ class IndexItem
 
 	void write(final ByteBuffer output)
 	{
+		Objects.requireNonNull(output, "Output byte buffer is null");
+
 		if (this.type == Type.DATA)
 			output.put((byte) 0x00);
 		else if (this.type == Type.EXTENSION)
@@ -122,12 +136,12 @@ class IndexItem
 	
 	byte[] toByteArray() throws IOException
 	{
-		ByteBuffer buffer = byteBuffer.get(); 
+		final ByteBuffer buffer = byteBuffer.get(); 
 		buffer.clear();
 		write(buffer);
 
 		buffer.flip();
-		byte[] bytes = new byte[buffer.limit()];
+		final byte[] bytes = new byte[buffer.limit()];
 		buffer.get(bytes);
 		return bytes;
 	}
