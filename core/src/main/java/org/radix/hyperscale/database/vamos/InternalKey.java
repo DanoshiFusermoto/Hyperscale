@@ -1,6 +1,8 @@
 package org.radix.hyperscale.database.vamos;
 
 import org.radix.hyperscale.crypto.SipHash24;
+import org.radix.hyperscale.utils.Ints;
+import org.radix.hyperscale.utils.Longs;
 
 import com.sleepycat.je.DatabaseEntry;
 
@@ -48,6 +50,13 @@ final class InternalKey
 		return cache(databaseID, value);
 	}
 
+	final static InternalKey from(final byte[] bytes, int offset)
+	{
+		int databaseID = Ints.fromByteArray(bytes, offset);
+		long value = Longs.fromByteArray(bytes, offset+Integer.BYTES);
+		return cache(databaseID, value);
+	}
+
 	private static long hash(final int databaseID, final byte[] key)
 	{
 		return SipHash24.hash24(databaseID, 0, key);
@@ -66,10 +75,21 @@ final class InternalKey
 		
 		final int prime = 31;
 		int result = 1;
-		result = prime * result + this.databaseID;
 		result = prime * result + (int) (this.value ^ (this.value >>> 32));
-		this.hashCode = result;
+		result = prime * result + this.databaseID;
+		this.hashCode = murmur3Hash(result);
 	}
+	
+    private int murmur3Hash(final int input)
+    {
+        int hash = input;
+        hash ^= hash >>> 16;
+        hash *= 0x85ebca6b;
+        hash ^= hash >>> 13;
+        hash *= 0xc2b2ae35;
+        hash ^= hash >>> 16;
+        return hash;
+    }
 	
 	long value()
 	{
