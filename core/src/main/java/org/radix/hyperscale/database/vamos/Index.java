@@ -20,13 +20,11 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import org.eclipse.collections.api.map.primitive.MutableObjectLongMap;
 import org.eclipse.collections.impl.factory.primitive.ObjectLongMaps;
+import org.radix.hyperscale.collections.SimpleObjectPool;
 import org.radix.hyperscale.database.DatabaseException;
 import org.radix.hyperscale.logging.Logger;
 import org.radix.hyperscale.logging.Logging;
 import org.radix.hyperscale.utils.Longs;
-
-import com.google.common.collect.ArrayListMultimap;
-import com.google.common.collect.Multimap;
 
 class Index 
 {
@@ -69,6 +67,8 @@ class Index
 	}
 	
     private final IndexFile indexFiles[];
+    private final SimpleObjectPool<IndexNode> indexNodePool; 
+    private final SimpleObjectPool<byte[]> indexItemBytesPool; 
     private final Object indexMutex = new Object();
     
     private final AtomicLong indexItemReads;
@@ -87,7 +87,7 @@ class Index
     {
         private final List<IndexItem> indexItemsToQueue;
         private final Map<InternalKey, IndexItem> indexItems;
-        private final Multimap<IndexNodeID, IndexItem> indexItemsToNodes;
+        private final Map<IndexNodeID, ArrayList<IndexItem>> indexItemsToNodes;
         private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
         
     	private volatile boolean terminated = false;
@@ -95,7 +95,7 @@ class Index
         IndexWorker()
         {
         	this.indexItems = new HashMap<InternalKey, IndexItem>(1<<16);
-        	this.indexItemsToNodes = ArrayListMultimap.create();
+        	this.indexItemsToNodes = new HashMap<IndexNodeID, ArrayList<IndexItem>>();
         	this.indexItemsToQueue = new ArrayList<>(1024);
         }
 
@@ -123,7 +123,8 @@ class Index
 							{
 								final IndexItem indexItem = this.indexItemsToQueue.get(i);
 								final IndexNodeID indexNodeID = Index.this.environment.toIndexNodeID(indexItem.getKey());
-								final Collection<IndexItem> indexItems = this.indexItemsToNodes.get(indexNodeID);
+								
+								final Collection<IndexItem> indexItems = this.indexItemsToNodes.computeIfAbsent(indexNodeID, id -> new ArrayList<IndexItem>(4));
 								indexItems.add(indexItem);
 								
 						    	if (Index.this.environment.getConfig().isIndexNodeDeferredWriteAvailable() == false || 
@@ -206,7 +207,8 @@ class Index
 						{
 							final IndexItem indexItem = indexItemsToWrite.get(i);
 							this.indexItems.remove(indexItem.getKey(), indexItem);
-							this.indexItemsToNodes.remove(Index.this.environment.toIndexNodeID(indexItem.getKey()), indexItem);
+							final Collection<IndexItem> indexItems = this.indexItemsToNodes.computeIfAbsent(Index.this.environment.toIndexNodeID(indexItem.getKey()), id -> new ArrayList<IndexItem>(4));
+							indexItems.remove(indexItem);
 						}
 					}
 					finally
@@ -279,6 +281,10 @@ class Index
 		this.profiledIndexNodeReads = new AtomicLong(0);
 		this.profiledIndexNodeWrites = new AtomicLong(0);
 		
+		this.indexNodePool = new SimpleObjectPool<IndexNode>("Index Node ", this.environment.getConfig().getIndexNodeCacheMaxEntries(), () -> new IndexNode(this.environment), null);
+		final int indexItemBytesPoolSize = this.environment.getConfig().getIndexNodeCacheMaxEntries() * (this.environment.getConfig().getIndexNodeSize() / IndexItem.BYTES);
+		this.indexItemBytesPool = new SimpleObjectPool<byte[]>("Index Item Bytes", indexItemBytesPoolSize, () -> new byte[IndexItem.BYTES], null);
+		
 		this.indexFiles = new IndexFile[environment.getConfig().getIndexNodeCount() / environment.getConfig().getIndexNodesPerFile()];
 		
 		int i = 0;
@@ -324,8 +330,9 @@ class Index
 			
 			for (int n = 0 ; n < this.environment.getConfig().getIndexNodeCount() ; n++)
 			{
-				IndexNodeID indexNodeID = IndexNodeID.from(n);
-				IndexNode indexNode = new IndexNode(indexNodeID, this.environment.getConfig().getIndexNodeSize());
+				IndexNode indexNode = new IndexNode(this.environment);
+				indexNode.reset(IndexNodeID.from(n));
+
 				byte[] indexNodeBytes = indexNode.toByteArray();
 				System.arraycopy(indexNodeBytes, 0, paddedIndexNodeBytes, 0, indexNodeBytes.length);
 
@@ -346,6 +353,16 @@ class Index
 		indexWorkerThread.setPriority(7);
 		indexWorkerThread.start();
 	}
+    
+    SimpleObjectPool<IndexNode> getIndexNodePool()
+    {
+    	return this.indexNodePool;
+    }
+
+    SimpleObjectPool<byte[]> getIndexItemBytesPool()
+    {
+    	return this.indexItemBytesPool;
+    }
     
     IndexItem getIndexItem(final Transaction transaction, final InternalKey internalKey) throws IOException
     {
@@ -460,7 +477,8 @@ class Index
     		final long indexNodePosition = getIndexNodePosition(indexNodeID, false);
 			if (indexNodePosition < 0)
 			{
-				indexNode = new IndexNode(indexNodeID, this.environment.getConfig().getIndexNodeSize());
+				indexNode = getIndexNodePool().acquire();
+				indexNode.reset(indexNodeID);
 				
 				if (vamosLog.hasLevel(Logging.DEBUG))
 					vamosLog.debug("Created index node "+indexNode.getID()+":"+indexNode.toString()+" containing "+indexNode.size()+" items");
@@ -494,9 +512,10 @@ class Index
 		
 		this.indexNodeReads.incrementAndGet();
 
-		final IndexNode indexNode = new IndexNode(byteBuffer);
+		final IndexNode indexNode = getIndexNodePool().acquire();
+		indexNode.reset(byteBuffer);
 		if (vamosLog.hasLevel(Logging.DEBUG))
-			vamosLog.debug("Read index node "+indexNode);
+			vamosLog.debug("Index node read: "+indexNode);
 
 		logInfo();
 
@@ -595,7 +614,7 @@ class Index
 		this.indexNodeWrites.incrementAndGet();
 		
 		if (vamosLog.hasLevel(Logging.DEBUG))
-			vamosLog.debug("Wrote index node "+indexNode);
+			vamosLog.debug("Index node write: "+indexNode);
 		
 		logInfo();
     }

@@ -4,64 +4,115 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicInteger;
 
+import org.radix.hyperscale.collections.PoolBorrower;
 import org.radix.hyperscale.logging.Logger;
 import org.radix.hyperscale.logging.Logging;
-import org.radix.hyperscale.utils.Numbers;
 
-class IndexNode 
+class IndexNode implements PoolBorrower
 {
     private static final Logger vamosLog = Logging.getLogger("vamos");
+    private static final AtomicInteger incrementer = new AtomicInteger(1);
     private static final ThreadLocal<ByteBuffer> byteBuffer = ThreadLocal.withInitial(() -> ByteBuffer.allocate(65535));
 
-    private final IndexNodeID id;
+    private final Environment environment;
+    private final int 	instance;
     private final short capacity;
     private final short length;
     private final int[] keys;
     private final Object[] entries;
 
+    private volatile IndexNodeID id;
     private transient long modifiedAt = -1;
     private transient int modifications = 0;
     private transient int size = 0;
 
-    IndexNode(final IndexNodeID id, final int length) 
+    IndexNode(final Environment environment)
     {
-        Objects.requireNonNull(id, "Index node ID is null");
-        Numbers.lessThan(length, 1024, "Max index node length is less than 1kb");
-        Numbers.greaterThan(length, 65535, "Max index node length is greater than 64kb");
+		Objects.requireNonNull(environment, "Environment is null");
 
-        this.id = id;
-        this.length = (short) length;
-        this.capacity = (short) (length / (Integer.BYTES + IndexItem.BYTES));
+        this.environment = environment;
+        this.instance = IndexNode.incrementer.getAndIncrement();
+        this.length = (short) environment.getConfig().getIndexNodeSize();
+        this.capacity = (short) (this.length / (Integer.BYTES + IndexItem.BYTES));
 
         this.keys = new int[this.capacity];
         this.entries = new Object[this.capacity];
         Arrays.fill(this.keys, -1);
     }
-
-    IndexNode(final ByteBuffer buffer) throws IOException 
+    
+    void reset(final ByteBuffer buffer) throws IOException
     {
-        Objects.requireNonNull(buffer, "Index node constructor buffer is null");
+        reset(IndexNodeID.from(buffer.getInt()));
 
-        this.id = IndexNodeID.from(buffer.getInt());
-        this.length = buffer.getShort();
-        this.capacity = buffer.getShort();
+        if (this.length != buffer.getShort())
+        	throw new IOException("Length mismatch");
+        
+        if (this.capacity != buffer.getShort())
+        	throw new IOException("Capacity mismatch");
+
         this.size = buffer.getShort();
-
-        this.keys = new int[this.capacity];
-        this.entries = new Object[this.capacity];
         Arrays.fill(this.keys, -1);
+        Arrays.fill(this.entries, null);
 
         for (short i = 0; i < this.size; i++) 
         {
             int hash = buffer.getInt();
-            byte[] entry = new byte[IndexItem.BYTES];
+            byte[] entry = this.environment.getIndex().getIndexItemBytesPool().acquire();
             buffer.get(entry);
             load(hash, entry);
         }
     }
 
-    IndexNodeID getID() 
+    void reset(final IndexNodeID id)
+    {
+    	this.id = id;
+	    this.modifiedAt = -1;
+	    this.modifications = 0;
+	    this.size = 0;
+	    
+        Arrays.fill(this.keys, -1);
+        Arrays.fill(this.entries, null);
+    }
+
+	@Override
+	public void release()
+	{
+		if (this.modifications != 0)
+			throw new IllegalStateException("Index node not flushed before release: "+this);
+		
+		for (int i = 0 ; i < this.entries.length ; i++)
+		{
+			if (this.entries[i] instanceof Object[] chain)
+			{
+				for (int c = 0 ; c < chain.length ; c++)
+				{
+					if (chain[c] instanceof byte[] bytes)
+						release(bytes);
+				}
+			}
+			else if (this.entries[i] instanceof byte[] bytes)
+				release(bytes);
+		}
+		
+		this.id = null;
+	    this.modifiedAt = -1;
+	    this.modifications = 0;
+	    this.size = 0;
+	    
+        Arrays.fill(this.keys, -1);
+        Arrays.fill(this.entries, null);
+
+        this.environment.getIndex().getIndexNodePool().release(this);
+	}
+	
+	private void release(final byte[] bytes)
+	{
+		this.environment.getIndex().getIndexItemBytesPool().release(bytes);
+	}
+
+	IndexNodeID getID() 
     { 
     	return this.id; 
     }
@@ -112,8 +163,7 @@ class IndexNode
             if (this.keys[slot] == -1) 
             	return null;
 
-            final Object entry = this.entries[slot];
-            return retrieveItem(key, entry);
+            return retrieveItem(key, slot);
         }
     }
 
@@ -131,18 +181,18 @@ class IndexNode
             if (this.keys[slot] == -1) 
             	return null;
 
-            final Object entry = this.entries[slot];
-            final IndexItem removed = removeItem(key, entry);
+            final IndexItem removed = removeItem(key, slot);
             if (removed != null) 
             {
-            	if (isKeyVoid(key))
+                modified();
+
+                if (isSlotVoid(slot))
             	{
             		this.keys[slot] = -1;
             		this.entries[slot] = null;
             	}
             	
             	this.size--;
-                modified();
             }
             
             return removed;
@@ -161,15 +211,14 @@ class IndexNode
             modified();
 
             final int slot = slot(item.getKey().hashCode());
-            if (this.keys[slot] == -1) 
+            if (mergeItem(item, slot) == true)
             {
-            	this.keys[slot] = item.getKey().hashCode();
-            	this.entries[slot] = item;
             	this.size++;
-                return;
+            	if (vamosLog.hasLevel(Logging.DEBUG))
+            		vamosLog.debug("Inserted index item: "+item+" node="+this);
             }
-
-            this.entries[slot] = mergeItem(item, this.entries[slot]);
+            else if (vamosLog.hasLevel(Logging.DEBUG))
+            	vamosLog.debug("Updated index item: "+item+" node="+this);
         }
     }
 
@@ -200,15 +249,14 @@ class IndexNode
         return Math.abs(hash % this.capacity);
     }
     
-    private boolean isKeyVoid(final InternalKey key)
+    private boolean isSlotVoid(final int slot)
     {
-    	final int slot = slot(key.hashCode());
     	if (this.keys[slot] == -1)
     		return true;
     	
     	// Entry should never be null if key is set; indicates internal inconsistency
     	if (this.entries[slot] == null)
-    		throw new IllegalStateException("Entry is null for key "+key.hashCode()+" in slot "+slot);
+    		throw new IllegalStateException("Entry is null for slot "+slot);
     	
     	final Object entry = this.entries[slot];
     	if (entry instanceof Object[] bucket)
@@ -223,11 +271,14 @@ class IndexNode
     	return true;
     }
 
-    private IndexItem retrieveItem(final InternalKey key, final Object entry) throws IOException 
+    private IndexItem retrieveItem(final InternalKey key, final int slot) throws IOException 
     {
+    	final Object entry = this.entries[slot];
         if (entry instanceof byte[] bytes) 
         {
             final IndexItem indexItem = IndexItem.from(bytes);
+            this.entries[slot] = indexItem;
+            release(bytes);
             return key.equals(indexItem.getKey()) ? indexItem : null;
         } 
         else if (entry instanceof IndexItem indexItem) 
@@ -236,29 +287,34 @@ class IndexNode
         } 
         else if (entry instanceof Object[] bucket) 
         {
-            for (final Object e : bucket) 
+        	for (int i = 0 ; i < bucket.length ; i++)
             {
-                if (e instanceof byte[] b) 
+                if (bucket[i] instanceof byte[] bytes) 
                 {
-                    IndexItem ii = IndexItem.from(b);
-                    if (key.equals(ii.getKey())) 
-                    	return ii;
+                    final IndexItem indexItem = IndexItem.from(bytes);
+                    bucket[i] = indexItem;
+                    release(bytes);
+                    if (key.equals(indexItem.getKey())) 
+                    	return indexItem;
                 } 
-                else if (e instanceof IndexItem ii) 
+                else if (bucket[i] instanceof IndexItem indexItem) 
                 {
-                    if (key.equals(ii.getKey())) 
-                    	return ii;
+                    if (key.equals(indexItem.getKey())) 
+                    	return indexItem;
                 }
             }
         }
         return null;
     }
 
-    private IndexItem removeItem(final InternalKey key, final Object entry) throws IOException 
+    private IndexItem removeItem(final InternalKey key, final int slot) throws IOException 
     {
+    	final Object entry = this.entries[slot];
         if (entry instanceof byte[] bytes) 
         {
             IndexItem indexItem = IndexItem.from(bytes);
+            this.entries[slot] = indexItem;
+            release(bytes);
             return key.equals(indexItem.getKey()) ? indexItem : null;
         } 
         else if (entry instanceof IndexItem indexItem) 
@@ -269,9 +325,11 @@ class IndexNode
         {
             for (int i = 0; i < bucket.length; i++) 
             {
-                if (bucket[i] instanceof byte[] b) 
+                if (bucket[i] instanceof byte[] bytes) 
                 {
-                    IndexItem indexItem = IndexItem.from(b);
+                    IndexItem indexItem = IndexItem.from(bytes);
+                    bucket[i] = indexItem;
+                    release(bytes);
                     if (key.equals(indexItem.getKey())) 
                     {
                         bucket[i] = null;
@@ -292,46 +350,65 @@ class IndexNode
         return null;
     }
 
-    private Object mergeItem(final IndexItem item, final Object entry) throws IOException 
+    private boolean mergeItem(final IndexItem item, final int slot) throws IOException 
     {
-        if (entry instanceof IndexItem existing) 
+    	final Object entry = this.entries[slot];
+    	if (entry == null)
+    	{
+    		this.keys[slot] = item.getKey().hashCode();
+    		this.entries[slot] = item;
+    		return true;
+    	}
+    	else if (entry instanceof IndexItem existing) 
         {
             if (item.getKey().equals(existing.getKey())) 
             {
                 existing.update(item);
-                return existing;
+                return false;
             } 
             else 
-                return new Object[]{existing, item};
+            {
+            	this.entries[slot] = new Object[]{existing, item};
+            	return true;
+            }
         } 
         else if (entry instanceof byte[] bytes) 
         {
         	final IndexItem existing = IndexItem.from(bytes);
+            this.entries[slot] = existing;
+            release(bytes);
             if (item.getKey().equals(existing.getKey())) 
             {
                 existing.update(item);
-                return existing;
+                return false;
             } 
             else 
-                return new Object[]{existing, item};
+            {
+            	this.entries[slot] = new Object[]{existing, item};
+            	return true;
+            }
         } 
         else if (entry instanceof Object[] bucket) 
         {
             for (int i = 0; i < bucket.length; i++) 
             {
-                if (bucket[i] instanceof IndexItem indexItem && item.getKey().equals(indexItem.getKey())) 
+                if (bucket[i] instanceof IndexItem existing) 
                 {
-                    indexItem.update(item);
-                    return bucket;
+                	if (item.getKey().equals(existing.getKey()))
+          			{
+                		existing.update(item);
+                		return false;
+          			}
                 } 
                 else if (bucket[i] instanceof byte[] bytes) 
                 {
-                	final IndexItem indexItem = IndexItem.from(bytes);
-                    if (item.getKey().equals(indexItem.getKey())) 
+                	final IndexItem existing = IndexItem.from(bytes);
+                    bucket[i] = existing;
+                    release(bytes);
+                    if (item.getKey().equals(existing.getKey())) 
                     {
-                    	indexItem.update(item);
-                        bucket[i] = indexItem;
-                        return bucket;
+                    	existing.update(item);
+                        return false;
                     }
                 }
             }
@@ -341,13 +418,14 @@ class IndexNode
                 if (bucket[i] == null) 
                 {
                     bucket[i] = item;
-                    return bucket;
+                    return true;
                 }
             }
             
             final Object[] expanded = Arrays.copyOf(bucket, bucket.length * 2);
             expanded[bucket.length] = item;
-            return expanded;
+            this.entries[slot] = expanded;
+            return true;
         }
         
         throw new IllegalArgumentException("Unsupported entry type: " + entry.getClass());
@@ -382,6 +460,11 @@ class IndexNode
         	this.entries[slot] = new Object[]{bytes, entry};
     }
 
+    void write(final ByteBuffer output) throws IOException 
+    {
+        write(output, true);
+    }
+
     private void write(final ByteBuffer output, final boolean padding) throws IOException 
     {
         int startPos = output.position();
@@ -403,39 +486,33 @@ class IndexNode
         	output.position(startPos + this.length);
     }
 
-    private void writeEntry(final int key, final Object entry, final ByteBuffer output) throws IOException 
+    private void writeEntry(final int hash, final Object entry, final ByteBuffer output) throws IOException 
     {
         if (entry instanceof Object[] bucket) 
         {
             for (Object e : bucket) 
             {
-                if (e != null) writeEntry(key, e, output);
+                if (e != null) 
+                	writeEntry(hash, e, output);
             }
         } 
-        else if (entry instanceof byte[] b) 
+        else if (entry instanceof byte[] bytes) 
         {
-            output.putInt(key);
-            output.put(b);
+            output.putInt(hash);
+            output.put(bytes);
         } 
-        else if (entry instanceof IndexItem ii) 
+        else if (entry instanceof IndexItem indexItem) 
         {
-            output.putInt(key);
-            ii.write(output);
+            output.putInt(hash);
+            indexItem.write(output);
         } 
         else 
-        {
             throw new IllegalArgumentException("Unsupported entry type: " + entry.getClass());
-        }
     }
 
     @Override
     public String toString() 
     {
-        return "[id="+this.id.value()+" size="+this.length+" capacity="+this.capacity+" items="+this.size+"]";
-    }
-
-    void write(final ByteBuffer output) throws IOException 
-    {
-        write(output, true);
+        return "[inst="+this.instance+" id="+this.id.value()+" size="+this.length+" capacity="+this.capacity+" items="+this.size+" mods="+this.modifications+"]";
     }
 }
