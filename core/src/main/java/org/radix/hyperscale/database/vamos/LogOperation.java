@@ -5,10 +5,11 @@ import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
 import java.util.Objects;
 
+import org.radix.hyperscale.collections.PoolBorrower;
 import org.radix.hyperscale.utils.Numbers;
 import org.xerial.snappy.Snappy;
 
-class LogOperation 
+class LogOperation implements PoolBorrower
 {
 	public static final int COMPRESSION_BUFFER_SIZE = 1<<20;  // 1MB compression buffer
 	private static final ThreadLocal<ByteBuffer> compressionBuffer = ThreadLocal.withInitial(() -> ByteBuffer.allocate(COMPRESSION_BUFFER_SIZE));
@@ -65,18 +66,19 @@ class LogOperation
 	private final long 		txID;
 	private final long      logPosition; 
 	private final long      extPosition; 
+	private final Environment environment;
 
 	private final InternalKey key;
 	private final long 		ancestor;
-	private final byte[] 	data;
-	private final int		dataLength;
-	private final boolean 	compressed;
 	private final Operation operation;
 
+	private final boolean 	compressed;
+	private volatile ByteBuffer data;
 	private transient byte[] uncompressed;
 	
 	LogOperation(final Environment environment, final long ID, final long logPosition, final long txID, Operation operation)
 	{
+		Objects.requireNonNull(environment, "Environment is null");
 		Objects.requireNonNull(operation, "Operation is null");
 		Numbers.isNegative(ID, "Log ID is negative");
 		Numbers.isNegative(txID, "TX ID is negative");
@@ -85,6 +87,7 @@ class LogOperation
 		if (operation.equals(Operation.START_TX) == false && operation.equals(Operation.END_TX) == false)
 			throw new IllegalArgumentException("Invalid log operation "+operation+"; Must be "+Operation.START_TX+" or "+Operation.END_TX);
 
+		this.environment = environment;
 		this.ID = ID;
 		this.txID = txID;
 		this.logPosition = logPosition;
@@ -92,13 +95,13 @@ class LogOperation
 		this.compressed = false;
 		this.key = null;
 		this.data = null;
-		this.dataLength = -1;
 		this.ancestor = -1;
 		this.operation = operation;
 	}
 	
 	LogOperation(final Environment environment, final long ID, final long logPosition, final long txID, final InternalKey key, final long extPosition, final Operation operation)
 	{
+		Objects.requireNonNull(environment, "Environment is null");
 		Objects.requireNonNull(operation, "Operation is null");
 		Objects.requireNonNull(key, "Key is null");
 		Numbers.isNegative(ID, "Log ID is negative");
@@ -109,6 +112,7 @@ class LogOperation
 		if (operation.equals(Operation.EXT_NODE) == false)
 			throw new IllegalArgumentException("Invalid log operation "+operation+"; Must be "+Operation.EXT_NODE);
 
+		this.environment = environment;
 		this.ID = ID;
 		this.txID = txID;
 		this.logPosition = logPosition;
@@ -116,13 +120,13 @@ class LogOperation
 		this.key = key;
 		this.compressed = false;
 		this.data = null;
-		this.dataLength = -1;
 		this.ancestor = -1;
 		this.operation = operation;
 	}
 
 	LogOperation(final Environment environment, final long ID, final long logPosition, final long txID, final TransactionOperation txOperation, long extPosition, final long ancestor) throws IOException
 	{
+		Objects.requireNonNull(environment, "Environment is null");
 		Objects.requireNonNull(txOperation, "Operation is null");
 		Numbers.isNegative(ID, "Log ID is negative");
 		Numbers.isNegative(txID, "TX ID is negative");
@@ -135,31 +139,39 @@ class LogOperation
 		if (txOperation.getData() != null && txOperation.getOperation().equals(Operation.PUT) == false && txOperation.getOperation().equals(Operation.PUT_NO_OVERWRITE) == false)
 			throw new IllegalArgumentException("Unsupported database operation "+txOperation.getOperation());
 
+		this.environment = environment;
 		this.ID = ID;
 		this.key = txOperation.getKey();
 		this.txID = txID;
 		this.logPosition = logPosition;
 		this.extPosition = extPosition;
 
-		byte[] data = txOperation.getData();
-		int dataLength = txOperation.getDataLength();
+		// Copy the data from the TransactionOperation
+		final ByteBuffer source = txOperation.getData();
+		if (source.limit() <= environment.getBufferPool().getMaxBufferSize())
+			this.data = environment.getBufferPool().acquire(this, source.limit());
+		else
+			this.data = ByteBuffer.allocate(source.limit());
+		
+		this.data.put(0, txOperation.getData(), 0, source.limit());
+		this.data.position(source.limit());
+		this.data.flip();
+		
 		boolean compressed = false;
-		if (dataLength >= environment.getConfig().getLogCompressionThreshold())
+		if (this.data.limit() >= environment.getConfig().getLogCompressionThreshold())
 		{
-			final int maxCompressedLength = Snappy.maxCompressedLength(dataLength);
-			if (maxCompressedLength >= dataLength)
+			final int maxCompressedLength = Snappy.maxCompressedLength(this.data.limit());
+			if (maxCompressedLength < this.data.limit())
 			{
 				final ByteBuffer compressionBuffer = maxCompressedLength > COMPRESSION_BUFFER_SIZE ? ByteBuffer.allocate(maxCompressedLength) : LogOperation.compressionBuffer.get().clear();
-				final int compressedLength = Snappy.compress(data, 0, dataLength, compressionBuffer.array(), 0);
+				final int compressedLength = Snappy.compress(this.data.array(), 0, this.data.limit(), compressionBuffer.array(), 0);
 				
-				System.arraycopy(compressionBuffer.array(), 0, data, 0, compressedLength);
-				dataLength = compressedLength;
+				this.data.put(0, compressionBuffer, 0, compressedLength);
+				this.data.limit(compressedLength);
+				this.data.flip();
 				compressed = true;
 			}
 		}
-
-		this.data = data;
-		this.dataLength = dataLength;
 		this.compressed = compressed;
 		
 		this.operation = txOperation.getOperation();
@@ -169,12 +181,15 @@ class LogOperation
 			return;
 	}
 
-	LogOperation(final ByteBuffer input) throws IOException
+	LogOperation(final Environment environment, final ByteBuffer input) throws IOException
 	{
+		Objects.requireNonNull(environment, "Environment is null");
 		Objects.requireNonNull(input, "Input buffer is null");
 		
 		try
 		{
+			this.environment = environment;
+
 			this.ID = input.getLong();
 			this.logPosition = input.getLong();
 
@@ -203,14 +218,18 @@ class LogOperation
 			if (this.operation.equals(Operation.PUT) == true || this.operation.equals(Operation.PUT_NO_OVERWRITE) == true)
 			{
 				this.compressed = input.get() != 0 ? true : false;
-				this.dataLength = input.getInt();
-				this.data = new byte[this.dataLength];
-				input.get(this.data);
+				int dataLength = input.getInt();
+				if (dataLength <= environment.getBufferPool().getMaxBufferSize())
+					this.data = environment.getBufferPool().acquire(this, dataLength);
+				else
+					this.data = ByteBuffer.allocate(dataLength);
+				this.data.put(0, input, input.position(), dataLength);
+				this.data.position(dataLength);
+				this.data.flip();
 			}
 			else
 			{
 				this.data = null;
-				this.dataLength = -1;
 				this.compressed = false;
 			}
 			
@@ -223,6 +242,15 @@ class LogOperation
 		}
 	}
 	
+	@Override
+	public void release()
+	{
+		if (this.data != null && this.data.limit() <= environment.getBufferPool().getMaxBufferSize())
+			this.environment.getBufferPool().release(this, this.data);
+		
+		this.data = null;
+	}
+
 	long getID()
 	{
 		return this.ID;
@@ -281,7 +309,7 @@ class LogOperation
 		
 		// DATA //
 		if (this.operation.equals(Operation.PUT) == true || this.operation.equals(Operation.PUT_NO_OVERWRITE) == true)
-			length += Byte.BYTES + Integer.BYTES + this.data.length;
+			length += Byte.BYTES + Integer.BYTES + this.data.limit();
 
 		return length;
 	}
@@ -294,17 +322,19 @@ class LogOperation
 		if (this.uncompressed == null)
 		{
 			if (this.compressed)
-				this.uncompressed = Snappy.uncompress(this.data);
+			{
+				int uncompressedLength = Snappy.uncompressedLength(this.data.array(), 0, this.data.limit());
+				this.uncompressed = new byte[uncompressedLength];
+				Snappy.uncompress(this.data.array(), 0, this.data.limit(), uncompressed, 0);
+			}
 			else
-				this.uncompressed = this.data;
+			{
+				this.uncompressed = new byte[this.data.limit()];
+				System.arraycopy(data.array(), 0, this.uncompressed, 0, this.data.limit());
+			}
 		}
 		
 		return this.uncompressed;
-	}
-	
-	int getDataLength()
-	{
-		return this.dataLength;
 	}
 	
 	void write(final ByteBuffer output) throws IOException
@@ -333,8 +363,8 @@ class LogOperation
 		if (this.operation.equals(Operation.PUT) == true || this.operation.equals(Operation.PUT_NO_OVERWRITE) == true)
 		{
 			output.put(this.compressed ? (byte) 1 : (byte) 0);
-			output.putInt(this.dataLength);
-			output.put(this.data, 0, this.dataLength);
+			output.putInt(this.data.limit());
+			output.put(this.data.array(), 0, this.data.limit());
 		}
 	}
 }

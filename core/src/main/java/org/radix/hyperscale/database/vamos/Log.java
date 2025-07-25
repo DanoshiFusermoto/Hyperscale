@@ -74,16 +74,16 @@ class Log
     private class LogWorker implements Runnable
     {
         private final LinkedHashMap<Long, LogOperation> logOperations;
-        private final List<LogOperation> logOperationsToWrite;
+        private final ArrayList<LogOperation> logOperationsToWrite;
         private final LinkedHashMap<Long, ExtensionObject> extensionOperations;
-        private final List<ExtensionObject> extensionOperationsToWrite;
+        private final ArrayList<ExtensionObject> extensionOperationsToWrite;
         private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
         
     	private volatile boolean terminated = false;
     	private volatile Thread thread;
     	private volatile boolean signalled;
     	private final AtomicReference<Thread> latch;
-
+    	
         LogWorker()
         {
         	this.logOperations = new LinkedHashMap<>(1024);
@@ -161,8 +161,9 @@ class Log
 					{
 						if (hasLogOperations)
 						{
-							for (final LogOperation logOperation : this.logOperationsToWrite)
+							for (int i = 0 ; i < this.logOperationsToWrite.size() ; i++)
 							{
+								final LogOperation logOperation = this.logOperationsToWrite.get(i);
 								if (this.logOperations.remove(logOperation.getLogPosition(), logOperation) == false)
 									throw new DatabaseException("Log operation not removed: "+logOperation);
 							}
@@ -170,8 +171,9 @@ class Log
 
 						if (hasExtensionOperations)
 						{
-							for (final ExtensionObject extensionOperation : this.extensionOperationsToWrite)
+							for (int i = 0 ; i < this.extensionOperationsToWrite.size() ; i++)
 							{
+								final ExtensionObject extensionOperation = this.extensionOperationsToWrite.get(i);
 								if (this.extensionOperations.remove(extensionOperation.getExtPosition(), extensionOperation) == false)
 								{
 									// Might be an update
@@ -419,7 +421,7 @@ class Log
 				
 				IndexNodeID indexNodeID = this.environment.toIndexNodeID(logOperation.getKey());
 				IndexNode indexNode = this.environment.getIndex().readIndexNode(indexNodeID);
-				
+
 				// Hanging TX, revert to ancestor
 				if (txIDs.contains(logOperation.getTXID()))
 				{
@@ -831,7 +833,7 @@ class Log
 
 	    		buffer.position(logOperationSize);
 	    		buffer.flip();
-	    		logOperation = new LogOperation(buffer);
+	    		logOperation = new LogOperation(this.environment, buffer);
 	    	}
 	    	catch (Exception ex)
 	    	{
@@ -842,8 +844,11 @@ class Log
 	    	this.logReads.incrementAndGet();
     	}
 	    
-    	if (logOperation.length() <= this.environment.getConfig().getLogCacheMaxItemSize())
-    		this.environment.getCache().putLogOperation(logOperation);
+		if (logOperation.getOperation().equals(Operation.PUT) || logOperation.getOperation().equals(Operation.PUT_NO_OVERWRITE))
+		{
+			if (logOperation.length() <= this.environment.getConfig().getLogCacheMaxItemSize())
+				this.environment.getCache().putLogOperation(logOperation);
+		}
 	    
 	    return logOperation;
     }
@@ -925,8 +930,9 @@ class Log
     	int logBytesWritten = 0;
     	long writeLogPosition = -1;
     	long sequenceLogPosition = -1;
-		for (final LogOperation logOperation : logOperations)
+		for (int i = 0 ; i < logOperations.size() ; i++)
 		{
+			final LogOperation logOperation = logOperations.get(i);
 	    	if (writeLogPosition == -1)
 	    	{
 	    		writeLogPosition = logOperation.getLogPosition();
@@ -959,9 +965,18 @@ class Log
 	    		logOperation.write(buffer);
 	    	}
     		
+	    	boolean releaseNow = true;
 	    	if (logOperation.getOperation().equals(Operation.PUT) || logOperation.getOperation().equals(Operation.PUT_NO_OVERWRITE))
+	    	{
 	    		if (logOperation.length() <= this.environment.getConfig().getLogCacheMaxItemSize())
+	    		{
 	    			this.environment.getCache().putLogOperation(logOperation);
+	    			releaseNow = false;
+	    		}
+	    	}
+
+	    	if (releaseNow)
+	    		logOperation.release();
     	}
 
     	if (buffer.position() > 0)
