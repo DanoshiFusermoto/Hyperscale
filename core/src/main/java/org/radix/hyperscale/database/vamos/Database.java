@@ -66,8 +66,7 @@ public class Database
     	if (transaction == null)
     	{
     		OperationStatus status;
-    		transaction = new Transaction(this.environment, 2);
-    		
+    		transaction = this.environment.getTransactionPool().acquire();
     		try
     		{
     			status = deleteInternal(transaction, key, lockMode);
@@ -78,6 +77,10 @@ public class Database
     		{
     			transaction.abort();
     			throw ex;
+    		}
+    		finally
+    		{
+    			this.environment.getTransactionPool().release(transaction);
     		}
     		
     		return status;
@@ -123,8 +126,7 @@ public class Database
     	if (transaction == null)
     	{
     		OperationStatus status;
-    		transaction = new Transaction(this.environment, 2);
-    		
+    		transaction = this.environment.getTransactionPool().acquire();
     		try
     		{
     			status = putInternal(transaction, key, value, operation, lockMode);
@@ -136,7 +138,11 @@ public class Database
     			transaction.abort();
     			throw ex;
     		}
-    		
+    		finally
+    		{
+    			this.environment.getTransactionPool().release(transaction);
+    		}
+
     		return status;
     	}
     	else
@@ -173,8 +179,7 @@ public class Database
 		if (transaction == null)
 		{
 			OperationStatus status;
-			transaction = new Transaction(this.environment, 2);
-			
+    		transaction = this.environment.getTransactionPool().acquire();
 			try
 			{
 				status = getInternal(transaction, key, value, lockMode);
@@ -186,7 +191,11 @@ public class Database
 				transaction.abort();
 				throw ex;
 			}
-			
+    		finally
+    		{
+    			this.environment.getTransactionPool().release(transaction);
+    		}
+
 			return status;
 		}
 		else
