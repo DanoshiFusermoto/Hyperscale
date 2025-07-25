@@ -3,7 +3,10 @@ package org.radix.hyperscale.collections;
 import java.util.Arrays;
 import java.util.Objects;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.function.Function;
+
+import org.radix.hyperscale.utils.Numbers;
 
 public class LRUCacheMap<K, V> 
 {
@@ -14,21 +17,28 @@ public class LRUCacheMap<K, V>
     private final Node<K, V> head;
     private final Node<K, V> tail;
     private final Object mutex;
+    private final Consumer<V> evictor;
     
     private volatile int size;
 
     private volatile Node<K, V> nodePool;
 
-    public LRUCacheMap(int capacity) 
+    public LRUCacheMap(final int capacity) 
     {
-    	this(capacity, DEFAULT_COLLISION_SCALAR);
+    	this(capacity, DEFAULT_COLLISION_SCALAR, null);
+    }
+
+    public LRUCacheMap(final int capacity, final Consumer<V> evictor) 
+    {
+    	this(capacity, DEFAULT_COLLISION_SCALAR, evictor);
     }
 
     @SuppressWarnings("unchecked")
-    public LRUCacheMap(int capacity, int scalar) 
+    public LRUCacheMap(final int capacity, final int scalar, final Consumer<V> evictor) 
     {
-        if (capacity <= 0)
-            throw new IllegalArgumentException("Capacity must be greater than zero");
+        Numbers.isNegative(capacity, "Capacity must be greater than zero");
+        Numbers.lessThan(scalar, 1, "Scalar is less than 1");
+        Numbers.greaterThan(scalar, 16, "Scalar is excessive");
 
         this.capacity = capacity;
         this.size = 0;
@@ -37,6 +47,8 @@ public class LRUCacheMap<K, V>
         this.tail = new Node<>(null, null, -1); // Dummy tail
         this.head.next = this.tail;
         this.tail.prev = this.head;
+        
+        this.evictor = evictor;
         this.mutex = new Object();
     }
 
@@ -170,8 +182,12 @@ public class LRUCacheMap<K, V>
 	        	final Node<K, V> lru = removeTail();
 	            if (lru != null) 
 	            {
+	            	final V evicted = lru.value;
 	                removeFromBucket(lru, lru.bucket);
 	                returnNodeToPool(lru);
+	                
+	                if (this.evictor != null)
+	                	this.evictor.accept(evicted);
 	            }
 	        } 
 	        else 
