@@ -1,30 +1,35 @@
 package org.radix.hyperscale.database.vamos;
 
+import java.nio.ByteBuffer;
 import java.util.Objects;
 
+import org.radix.hyperscale.collections.PoolBorrower;
 import org.radix.hyperscale.utils.Numbers;
 
-class TransactionOperation 
+class TransactionOperation implements PoolBorrower
 {
+	private final Environment environment;
 	private final Operation operation;
 	private final InternalKey key;
-	private final byte[] data;
+	private volatile ByteBuffer data;
 	
-	TransactionOperation(Operation operation, InternalKey key)
+	TransactionOperation(final Environment environment, final Operation operation, InternalKey key)
 	{
-		this(operation, key, null);
+		this(environment, operation, key, null);
 	}
 	
-	TransactionOperation(Operation operation, InternalKey key, byte[] data)
+	TransactionOperation(final Environment environment, final Operation operation, final InternalKey key, final byte[] data)
 	{
-		this(operation, key, data, 0, data.length);
+		this(environment, operation, key, data, 0, data.length);
 	}
 
-	TransactionOperation(Operation operation, InternalKey key, byte[] data, int dataOffset, int dataLength)
+	TransactionOperation(final Environment environment, final Operation operation, final InternalKey key, final byte[] data, final int offset, final int length)
 	{
+		Objects.requireNonNull(environment, "Environment is null");
 		Objects.requireNonNull(operation, "Operation is null");
 		Objects.requireNonNull(key, "Hash key is null");
 
+		this.environment = environment;
 		this.operation = operation;
 		this.key = key;
 		
@@ -40,9 +45,23 @@ class TransactionOperation
 			Objects.requireNonNull(data, "Data is null");
 			Numbers.isZero(data.length, "Data is empty");
 			
-			this.data = new byte[dataLength];
-			System.arraycopy(data, dataOffset, this.data, 0, dataLength);
+			if(length <= environment.getBufferPool().getMaxBufferSize())
+				this.data = environment.getBufferPool().acquire(this, length);
+			else
+				this.data = ByteBuffer.allocate(length);
+			
+			this.data.put(data, offset, length);
+			this.data.flip();
 		}
+	}
+	
+	@Override
+	public void release()
+	{
+		if (this.data.limit() <= this.environment.getBufferPool().getMaxBufferSize())
+			this.environment.getBufferPool().release(this, this.data);
+		
+		this.data = null;
 	}
 
 	Operation getOperation() 
@@ -55,13 +74,8 @@ class TransactionOperation
 		return this.key;
 	}
 
-	byte[] getData() 
+	ByteBuffer getData() 
 	{
 		return this.data;
-	}
-	
-	int getDataLength() 
-	{
-		return this.data.length;
 	}
 }
