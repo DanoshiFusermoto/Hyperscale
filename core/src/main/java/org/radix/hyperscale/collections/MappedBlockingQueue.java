@@ -8,7 +8,6 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -21,15 +20,11 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 
-import org.eclipse.collections.api.factory.Maps;
-import org.eclipse.collections.api.map.MutableMap;
-import org.eclipse.collections.api.set.MutableSet;
-import org.eclipse.collections.impl.factory.Sets;
 import org.radix.hyperscale.utils.Numbers;
 
 public class MappedBlockingQueue<K, V> 
 {
-	private final HashMap<K, V> map;
+	private final Map<K, V> map;
 	private final Deque<K> keys;
 	private final int capacity;
 
@@ -305,7 +300,7 @@ public class MappedBlockingQueue<K, V>
 		this.lock.writeLock().lock();
 		try
 		{
-			final Set<K> puts = new HashSet<K>();
+			final AdaptiveHashSet<K> puts = new AdaptiveHashSet<K>(values.size());
 			for (final Entry<K, V> entry : values.entrySet())
 			{
 				while(this.count >= this.capacity)
@@ -328,7 +323,7 @@ public class MappedBlockingQueue<K, V>
 			if (puts.isEmpty() == false)
 				this.notEmpty.signalAll();
 
-			return puts;
+			return puts.freeze();
 		}
 		finally
 		{
@@ -349,7 +344,7 @@ public class MappedBlockingQueue<K, V>
 		this.lock.writeLock().lock();
 		try
 		{
-			final Set<V> puts = new HashSet<V>();
+			final AdaptiveHashSet<V> puts = new AdaptiveHashSet<V>(values.size());
 			for (final V value : values)
 			{
 				while(this.count >= this.capacity)
@@ -373,7 +368,7 @@ public class MappedBlockingQueue<K, V>
 			if (puts.isEmpty() == false)
 				this.notEmpty.signalAll();
 
-			return puts;
+			return puts.freeze();
 		}
 		finally
 		{
@@ -651,22 +646,22 @@ public class MappedBlockingQueue<K, V>
 	{
 		Objects.requireNonNull(keys, "Keys to test contains is null");
 		
+		final AdaptiveHashSet<K> contains = new AdaptiveHashSet<K>(keys.size());
 		this.lock.readLock().lock();
 		try			
 		{
-			final MutableSet<K> contains = Sets.mutable.withInitialCapacity(keys.size());
 			for (final K key : keys)
 			{
 				if (this.map.containsKey(key))
 					contains.add(key);
 			}
-			
-			return contains.asUnmodifiable();
 		}
 		finally
 		{
 			this.lock.readLock().unlock();
 		}
+
+		return contains.freeze();
 	}
 
 	public Set<V> contains(final Collection<V> items, Function<V,K> keyFunction)
@@ -677,22 +672,22 @@ public class MappedBlockingQueue<K, V>
 		for (final V item : items)
 			map.put(keyFunction.apply(item), item);
 		
+		final AdaptiveHashSet<V> contains = new AdaptiveHashSet<V>(map.size());
 		this.lock.readLock().lock();
 		try			
 		{
-			final MutableSet<V> contains = Sets.mutable.withInitialCapacity(map.size());
 			for (final Entry<K, V> mapping : map.entrySet())
 			{
 				if (this.map.containsKey(mapping.getKey()))
 					contains.add(mapping.getValue());
 			}
-			
-			return contains.asUnmodifiable();
 		}
 		finally
 		{
 			this.lock.readLock().unlock();
 		}
+
+		return contains.freeze();
 	}
 
 	public V get(final K key)
@@ -717,26 +712,38 @@ public class MappedBlockingQueue<K, V>
 
 	public List<V> getMany(final int limit, final Comparator<V> comparator)
 	{
+		final List<V> target = new ArrayList<V>(limit);
+		getMany(target, limit, comparator);
+		return target;
+	}
+	
+	public void getMany(final List<V> target, final int limit)
+	{
+		getMany(target, limit, null);
+	}
+	
+	public void getMany(final List<V> target, final int limit, final Comparator<V> comparator)
+	{
+		Objects.requireNonNull(target, "Target list is null");
+		Numbers.isZero(limit, "Limit is zero");
+		
 		this.lock.readLock().lock();
 		try			
 		{
-			final List<V> list = new ArrayList<V>(limit);
 			for (final K key : this.keys)
 			{
 				final V value = this.map.get(key);
 				if (value == null)
 					throw new IllegalStateException("Key "+key+" integrity failure");
 				
-				list.add(value);
+				target.add(value);
 				
-				if (list.size() == limit)
+				if (target.size() == limit)
 					break;
 			}
 			
 			if (comparator != null)
-				list.sort(comparator);
-
-			return Collections.unmodifiableList(list);
+				target.sort(comparator);
 		}
 		finally
 		{
@@ -801,7 +808,7 @@ public class MappedBlockingQueue<K, V>
 	{
 		Objects.requireNonNull(keys, "Keys to get is null");
 
-		final MutableMap<K,V> results = Maps.mutable.ofInitialCapacity(keys.size());
+		final Map<K,V> results = new HashMap<K,V>(keys.size()+1, 1.0f);
 		this.lock.readLock().lock();
 		try			
 		{
@@ -822,7 +829,7 @@ public class MappedBlockingQueue<K, V>
 		if (consumer != null)
 			results.forEach(consumer);
 		
-		return results.toList();
+		return results.values();
 	}
 
 	public V remove(final K key) 
@@ -885,7 +892,7 @@ public class MappedBlockingQueue<K, V>
 		if (keys.isEmpty())
 			return Collections.emptyMap();
 		
-		final MutableMap<K,V> removed = Maps.mutable.ofInitialCapacity(keys.size());
+		final Map<K,V> removed = new HashMap<K,V>(keys.size()+1, 1.0f);
 		this.lock.writeLock().lock();
 		try
 		{
@@ -912,6 +919,6 @@ public class MappedBlockingQueue<K, V>
 			this.lock.writeLock().unlock();
 		}
 
-		return removed.asUnmodifiable();
+		return removed;
 	}
 }
