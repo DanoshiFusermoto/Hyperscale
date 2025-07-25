@@ -68,9 +68,10 @@ public class ByteBufferOutputStream extends OutputStream
 	 *
 	 * @see java.io.ByteArrayInputStream#count
 	 */
-	public void reset() 
+	public ByteBufferOutputStream clear() 
 	{
-		wrappedBuffer.rewind();
+		wrappedBuffer.clear();
+		return this;
 	}
 
 	/**

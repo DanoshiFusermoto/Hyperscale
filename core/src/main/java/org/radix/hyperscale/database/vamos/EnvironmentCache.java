@@ -38,7 +38,7 @@ class EnvironmentCache
 		this.environment = Objects.requireNonNull(environment, "Environment is null");
 	
 	    if (this.environment.getConfig().hasIndexNodeCache())
-	    	this.indexNodeCache = new LRUCacheMap<IndexNodeID, IndexNode>(this.environment.getConfig().getIndexNodeCacheMaxEntries());
+	    	this.indexNodeCache = new LRUCacheMap<IndexNodeID, IndexNode>(this.environment.getConfig().getIndexNodeCacheMaxEntries(), IndexNode::release);
 	    else
 	    	this.indexNodeCache = null;
 	    
@@ -48,7 +48,7 @@ class EnvironmentCache
 	    	this.indexItemCache = null;
 	    
 	    if (this.environment.getConfig().hasLogCache())
-	    	this.logOperationCache = new LRUCacheMap<Long, LogOperation>(this.environment.getConfig().getLogCacheMaxEntries());
+	    	this.logOperationCache = new LRUCacheMap<Long, LogOperation>(this.environment.getConfig().getLogCacheMaxEntries(), LogOperation::release);
 	    else
 	    	this.logOperationCache = null;
 	    

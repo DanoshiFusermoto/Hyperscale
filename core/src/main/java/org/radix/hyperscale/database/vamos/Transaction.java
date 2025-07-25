@@ -1,16 +1,18 @@
 package org.radix.hyperscale.database.vamos;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
+import org.radix.hyperscale.collections.AdaptiveHashSet;
 import org.radix.hyperscale.database.DatabaseException;
 import org.radix.hyperscale.database.vamos.IndexItem.Type;
 import org.radix.hyperscale.logging.Logger;
@@ -23,37 +25,40 @@ import com.sleepycat.je.OperationStatus;
 public class Transaction 
 {
 	private static final Logger vamosLog = Logging.getLogger("vamos");
-
-	private static final int MINIMUM_LOCK_QUOTA = 4;
 	
 	private final Environment environment;
-	private final long id;
-	private final int lockHint;
 	private final Set<InternalKey> locked;
-	private volatile Map<InternalKey, TransactionOperation> operations;
+	private final Map<InternalKey, TransactionOperation> operations;
 
+	private volatile long id;
 	private volatile boolean isComplete = false;
 	private volatile Throwable thrown;
 	
-	public Transaction(final Environment environment)
+	Transaction(final Environment environment)
 	{
-		this(environment, MINIMUM_LOCK_QUOTA);
+		this(environment, 16);
 	}
 	
-	public Transaction(final Environment environment, final int lockHint)
+	public Transaction(final Environment environment, int lockHint)
 	{
-		this.environment = environment;
+		this.environment = Objects.requireNonNull(environment, "Environment is null");
 		this.id = Math.abs(ThreadLocalRandom.current().nextLong());
-		this.lockHint = lockHint < MINIMUM_LOCK_QUOTA ? MINIMUM_LOCK_QUOTA : lockHint;
-		this.locked = new HashSet<InternalKey>(this.lockHint);
-		
-		// operations is lazy init as not all transactions will perform writes
-		this.operations = null;
+		this.locked = new AdaptiveHashSet<InternalKey>(lockHint);
+		this.operations = new LinkedHashMap<>(lockHint);
 	}
-	
+
 	long ID()
 	{
 		return this.id;
+	}
+	
+	void reset()
+	{
+		this.id = Math.abs(ThreadLocalRandom.current().nextLong());
+		this.locked.clear();
+		this.operations.clear();
+		this.isComplete = false;
+		this.thrown = null;
 	}
 
 	private void lock(final Database database, final DatabaseEntry key, final InternalKey internalKey, final LockMode lockMode) throws DatabaseException
@@ -92,6 +97,12 @@ public class Transaction
 			{
 				for (InternalKey key : this.locked)
 					this.environment.getLockManager().unlock(key, this);
+			}
+			
+			if (this.operations != null && this.operations.isEmpty() == false)
+			{
+				for (final TransactionOperation operation : this.operations.values())
+					operation.release();
 			}
 		}
 	}
@@ -183,8 +194,10 @@ public class Transaction
 		{
 			throwIfCompletedOrError();
 			
-			return (this.operations == null || this.operations.isEmpty()) ? Collections.emptyList() : 
-																		    Collections.unmodifiableList(new ArrayList<>(this.operations.values()));
+			if (this.operations == null || this.operations.isEmpty()) 
+				return Collections.emptyList();
+			
+			return Collections.unmodifiableList(new ArrayList<>(this.operations.values()));
 		}		
 	}
 
@@ -268,9 +281,7 @@ public class Transaction
 			if(exists(database, internalKey) == false)
 				return OperationStatus.NOTFOUND;
 	
-			final TransactionOperation transactionOperation = new TransactionOperation(Operation.DELETE, internalKey);
-			if (this.operations == null)
-				this.operations = new LinkedHashMap<>(this.lockHint);
+			final TransactionOperation transactionOperation = new TransactionOperation(this.environment, Operation.DELETE, internalKey);
 			this.operations.put(internalKey, transactionOperation);
 			return OperationStatus.SUCCESS;
 		}
@@ -300,14 +311,17 @@ public class Transaction
 							if (operation.getOperation().equals(Operation.PUT) || operation.getOperation().equals(Operation.PUT_NO_OVERWRITE))
 							{
 								if (value != null)
-									value.setData(operation.getData());
+								{
+									final ByteBuffer data = operation.getData();
+									value.setData(data.array(), 0, data.limit());
+								}
 								
 								return OperationStatus.SUCCESS;
 							}
 						}
 					}
 				}
-	
+				
 				if(exists(database, internalKey) == false)
 					return OperationStatus.NOTFOUND;
 	
@@ -360,9 +374,7 @@ public class Transaction
 					return OperationStatus.KEYEXIST;
 			}
 	
-			final TransactionOperation transactionOperation = new TransactionOperation(operation, internalKey, value.getData(), value.getOffset(), value.getSize()); 
-			if (this.operations == null)
-				this.operations = new LinkedHashMap<>(this.lockHint);
+			final TransactionOperation transactionOperation = new TransactionOperation(this.environment, operation, internalKey, value.getData(), value.getOffset(), value.getSize()); 
 			this.operations.put(internalKey, transactionOperation);
 			return OperationStatus.SUCCESS;
 		}
