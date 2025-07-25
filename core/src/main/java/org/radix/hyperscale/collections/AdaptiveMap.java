@@ -64,4 +64,16 @@ public interface AdaptiveMap<K, E> extends Map<K, E>
         if (isFrozen())
             throw new UnsupportedOperationException("Map is frozen and cannot be modified");
     }
+    
+    /**
+     * Default implementation for checking if collection growth is allowed.
+     * Implementations should call this before any growth operation.
+     * 
+     * @throws UnsupportedOperationException if the collection is fixed
+     */
+    default void checkGrowable() 
+    {
+        if (isFixed())
+            throw new UnsupportedOperationException("Collection is fixed and cannot be grown");
+    }
 }
