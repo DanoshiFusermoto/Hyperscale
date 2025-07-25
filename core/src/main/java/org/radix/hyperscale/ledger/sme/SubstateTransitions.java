@@ -11,9 +11,6 @@ import org.radix.hyperscale.ledger.StateAddressable;
 import org.radix.hyperscale.ledger.Substate;
 import org.radix.hyperscale.ledger.SubstateOutput;
 import org.radix.hyperscale.ledger.Substate.NativeField;
-import org.radix.hyperscale.logging.Logger;
-import org.radix.hyperscale.logging.Logging;
-import org.radix.hyperscale.serialization.DsonCached;
 import org.radix.hyperscale.serialization.DsonOutput;
 import org.radix.hyperscale.serialization.SerializerId2;
 import org.radix.hyperscale.serialization.DsonOutput.Output;
@@ -26,11 +23,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 
 @SerializerId2("ledger.substate.transitions")
-@DsonCached
 public final class SubstateTransitions extends BasicObject implements StateAddressable
 {
-	private static final Logger serializerlog = Logging.getLogger("serializer");
-
 	@JsonProperty("address")
 	@DsonOutput(Output.ALL)
 	private StateAddress address;
