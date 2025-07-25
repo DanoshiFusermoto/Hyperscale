@@ -2,6 +2,8 @@ package org.radix.hyperscale.database.vamos;
 
 import java.util.concurrent.TimeUnit;
 
+import org.radix.hyperscale.utils.Numbers;
+
 public class EnvironmentConfig implements Cloneable 
 {
     /**
@@ -194,15 +196,13 @@ public class EnvironmentConfig implements Cloneable
         return this.indexNodeSize;
     }
 
-    public EnvironmentConfig setIndexNodeSize(int indexNodeSize) 
+    public EnvironmentConfig setIndexNodeSize(int size) 
     {
-        this.indexNodeSize = indexNodeSize;
-        return this;
-    }
+        Numbers.lessThan(size, 1024, "Max index node length is less than 1kb");
+        Numbers.greaterThan(size, 65535, "Max index node length is greater than 64kb");
 
-    public int getIndexNodeCapacity() 
-    {
-        return this.indexNodeSize / IndexItem.BYTES;
+        this.indexNodeSize = size;
+        return this;
     }
 
     public int getIndexNodeCount() 
