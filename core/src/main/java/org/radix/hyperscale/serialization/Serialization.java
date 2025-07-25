@@ -26,6 +26,7 @@ import java.util.stream.Stream;
 
 import org.apache.commons.lang3.mutable.MutableLong;
 import org.json.JSONObject;
+import org.radix.hyperscale.collections.ByteBufferPool;
 import org.radix.hyperscale.crypto.Hash;
 import org.radix.hyperscale.crypto.Identity;
 import org.radix.hyperscale.crypto.merkle.MerkleProof;
@@ -53,6 +54,7 @@ public class Serialization
 	private static final int SERIALIZATION_BUFFER_SIZE = 1<<20;
 	private static final ThreadLocal<ByteBuffer> serializationBuffer = ThreadLocal.withInitial(() -> ByteBuffer.allocate(SERIALIZATION_BUFFER_SIZE));
 	private static final ThreadLocal<ByteBufferOutputStream> serializationBufferOutputStream = ThreadLocal.withInitial(() -> new ByteBufferOutputStream(serializationBuffer.get(), true));
+	public static final ByteBufferPool bufferPool = new ByteBufferPool("Serialization", 1<<27, ByteBufferPool.MIN_BUFFER_SIZE, 1<<18, true);
 
 	public static boolean DEBUG_STATISTICS = Boolean.getBoolean("debug");
 	
@@ -157,29 +159,20 @@ public class Serialization
 			// Is cached?
 			if (object instanceof Serializable serializable)
 			{
-				final byte[] cachedOutput = serializable.getCachedDsonOutput();
+				final ByteBuffer cachedOutput = serializable.getCachedDsonOutput();
 				if (cachedOutput == null)
 					serializable.onSerialize(output);
 				else if(output.equals(Output.WIRE) || output.equals(Output.PERSIST))
 				{
 					statistics("output:cached", 0);
-					return cachedOutput;
+					return Arrays.copyOfRange(cachedOutput.array(), 0, cachedOutput.limit());
 				}
 			}
 
-			final ByteBufferOutputStream serializationBufferOutputStream = Serialization.serializationBufferOutputStream.get();
-			serializationBufferOutputStream.reset();
+			final ByteBufferOutputStream serializationBufferOutputStream = Serialization.serializationBufferOutputStream.get().clear();
 			dsonMapper(output).writeValue(serializationBufferOutputStream, object);
 			statistics("output:bytes", 0);
 
-			// Was cached?
-			if (object instanceof Serializable serializable)
-			{
-				final byte[] cachedOutput = serializable.getCachedDsonOutput();
-				if (cachedOutput != null)
-					return cachedOutput;
-			}
-			
 			return Arrays.copyOfRange(serializationBufferOutputStream.getByteBuffer().array(), 0, serializationBufferOutputStream.getByteBuffer().position());
 		} 
 		catch (IOException ex) 
@@ -188,6 +181,47 @@ public class Serialization
 		}
 	}
 	
+	/**
+	 * Convert the specified object to DSON encoded bytes for the specified
+	 * output mode.
+	 *
+	 * @param o The object to serialize
+	 * @param output The output mode to serialize for
+	 * @return The size of the serialized object in bytes
+	 * @throws SerializationException if something goes wrong with serialization
+	 */
+	public int toDsonSize(final Object object, final DsonOutput.Output output) throws SerializationException 
+	{
+		Objects.requireNonNull(object, "Object is null");
+		Objects.requireNonNull(output, "Output is null");
+		
+		try 
+		{
+			// Is cached?
+			if (object instanceof Serializable serializable)
+			{
+				final ByteBuffer cachedOutput = serializable.getCachedDsonOutput();
+				if (cachedOutput == null)
+					serializable.onSerialize(output);
+				else if(output.equals(Output.WIRE) || output.equals(Output.PERSIST))
+				{
+					statistics("output:cached", 0);
+					return cachedOutput.limit();
+				}
+			}
+
+			final ByteBufferOutputStream serializationBufferOutputStream = Serialization.serializationBufferOutputStream.get().clear();
+			dsonMapper(output).writeValue(serializationBufferOutputStream, object);
+			statistics("output:bytes", 0);
+
+			return serializationBufferOutputStream.getByteBuffer().position();
+		} 
+		catch (IOException ex) 
+		{
+			throw new SerializationException("Error serializing to DSON", ex);
+		}
+	}
+
 	/**
 	 * Convert the specified object to DSON encoded bytes for the specified
 	 * output mode.
@@ -207,12 +241,12 @@ public class Serialization
 			// Is cached?
 			if (object instanceof Serializable serializable)
 			{
-				final byte[] cachedOutput = serializable.getCachedDsonOutput();
+				final ByteBuffer cachedOutput = serializable.getCachedDsonOutput();
 				if (cachedOutput == null)
 					serializable.onSerialize(output);
 				else if(output.equals(Output.WIRE) || output.equals(Output.PERSIST))
 				{
-					stream.write(cachedOutput);
+					stream.write(cachedOutput.array(), 0, cachedOutput.limit());
 					statistics("output:cached", 0);
 					return;
 				}
@@ -243,8 +277,7 @@ public class Serialization
 			if (object instanceof Serializable serializable)
 				serializable.onSerialize(Output.HASH);
 			
-			final ByteBufferOutputStream serializationBufferOutputStream = Serialization.serializationBufferOutputStream.get();
-			serializationBufferOutputStream.reset();
+			final ByteBufferOutputStream serializationBufferOutputStream = Serialization.serializationBufferOutputStream.get().clear();
 			dsonMapper(Output.HASH).writeValue(serializationBufferOutputStream, object);
 			statistics("output:hash", 0);
 			

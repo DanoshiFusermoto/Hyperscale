@@ -1,5 +1,7 @@
 package org.radix.hyperscale.serialization;
 
+import java.nio.ByteBuffer;
+
 import org.radix.hyperscale.serialization.DsonOutput.Output;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -8,7 +10,7 @@ import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 @JsonPropertyOrder({ SerializerConstants.SERIALIZER_TYPE_NAME })
 public abstract class Serializable 
 {
-	private volatile byte[] cachedDsonOutput;
+	private volatile ByteBuffer cachedOutput;
 	
 	@JsonProperty(SerializerConstants.SERIALIZER_TYPE_NAME)
 	@DsonOutput(Output.ALL)
@@ -25,18 +27,23 @@ public abstract class Serializable
 		return getClass().getAnnotation(DsonCached.class) != null;
 	}
 	
-	public final byte[] getCachedDsonOutput()
+	public final ByteBuffer getCachedDsonOutput()
 	{
-		return this.cachedDsonOutput;
+		return this.cachedOutput;
 	}
 
-	public final void setCachedDsonOutput(byte[] output)
+	public final void setCachedDsonOutput(final ByteBuffer cachedOutput)
 	{
-		this.cachedDsonOutput = output;
+		this.cachedOutput = cachedOutput;
 	}
 	
 	public final void flushCachedDsonOutput()
 	{
-		this.cachedDsonOutput = null;
+		final ByteBuffer byteBuffer = this.cachedOutput;
+		if (byteBuffer != null)
+		{
+			this.cachedOutput = null;
+			Serialization.bufferPool.release(this, byteBuffer);
+		}
 	}
 }
