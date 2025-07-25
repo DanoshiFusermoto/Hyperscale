@@ -18,9 +18,8 @@ final class Lock<T>
     private volatile boolean stale;
     private volatile Transaction owner;
     
-    Lock(final T key) 
+    Lock() 
     {
-        this.key = key;
     }
     
     boolean isStale()
@@ -124,6 +123,7 @@ final class Lock<T>
             this.key = key;
             this.owner = null;
             this.stale = false;
+            this.signals.set(0);
        }
     }
 }
