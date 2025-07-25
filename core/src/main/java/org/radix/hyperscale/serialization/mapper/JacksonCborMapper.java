@@ -1,6 +1,8 @@
 package org.radix.hyperscale.serialization.mapper;
 
 import java.io.IOException;
+import java.nio.BufferOverflowException;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
@@ -13,8 +15,6 @@ import org.radix.hyperscale.crypto.Hash;
 import org.radix.hyperscale.crypto.Identity;
 import org.radix.hyperscale.crypto.Signature;
 import org.radix.hyperscale.crypto.bls12381.BLSSignature;
-import org.radix.hyperscale.crypto.ed25519.EDKeyPair;
-import org.radix.hyperscale.crypto.ed25519.EDPublicKey;
 import org.radix.hyperscale.crypto.ed25519.EDSignature;
 import org.radix.hyperscale.crypto.merkle.MerkleProof;
 import org.radix.hyperscale.ledger.ShardGroupID;
@@ -79,6 +79,8 @@ import com.fasterxml.jackson.datatype.jsonorg.JsonOrgModule;
  */
 public class JacksonCborMapper extends ObjectMapper 
 {
+	private static final Logger serializerlog = Logging.getLogger("serializer");
+
 	private static final long serialVersionUID = 4917479892309630214L;
 	
 	private final DsonOutput.Output dsonOutput;
@@ -447,6 +449,7 @@ class SerializerCachedOutput extends StdSerializer<Serializable>
 	@Override
 	public void serialize(final Serializable bean, final JsonGenerator gen, final SerializerProvider provider) throws IOException 
 	{
+		boolean serialized = false;
 		if (gen instanceof RadixCBORGenerator rgen)
 		{
 			if (rgen.getCodec() instanceof JacksonCborMapper jcm && (jcm.getDsonOutput() == DsonOutput.Output.WIRE || jcm.getDsonOutput() == DsonOutput.Output.PERSIST))
@@ -454,18 +457,17 @@ class SerializerCachedOutput extends StdSerializer<Serializable>
 				// Synchronized to prevent "overlapping" serializations 
 				synchronized(bean)
 				{
-					final byte[] cachedOutput = bean.getCachedDsonOutput();
+					ByteBuffer cachedOutput = bean.getCachedDsonOutput();
 					if (cachedOutput != null)
 					{
 						rgen.writeStartObject();
-						rgen.writeBytes(cachedOutput, 1, cachedOutput.length-2);
+						rgen.writeBytes(cachedOutput.array(), 1, cachedOutput.limit()-2);
 						rgen.writeEndObject();
 						return;
 					}
 	
 					if (bean.shouldCacheDsonOutput())
 					{
-						boolean serialized = false;
 						int sectionStart = 0;
 						int sectionEnd = 0;
 						int sectionLength = 0;					
@@ -493,7 +495,19 @@ class SerializerCachedOutput extends StdSerializer<Serializable>
 							{
 								if (sectionLength > 0 && rgen._outputTail - sectionLength >= 0)
 								{
-									bean.setCachedDsonOutput(Arrays.copyOfRange(rgen._outputBuffer, (rgen._outputTail - sectionLength), rgen._outputTail));
+									try
+									{
+										cachedOutput = Serialization.bufferPool.acquire(bean, sectionLength);
+										cachedOutput.put(rgen._outputBuffer, (rgen._outputTail - sectionLength), sectionLength);
+										cachedOutput.flip();
+									}
+									catch (BufferOverflowException boex)
+									{
+										serializerlog.fatal("buffer.capacity="+cachedOutput.capacity()+", buffer.limit="+cachedOutput.limit()+", rgen._outputTail="+rgen._outputTail+", sectionstart="+sectionStart+", sectionend="+sectionEnd+", sectionlength="+sectionLength, boex);
+										throw boex;
+									}
+									
+									bean.setCachedDsonOutput(cachedOutput);
 									Serialization.getInstance().statistics(bean.getClass().getSimpleName(), sectionLength);
 								}
 								else if (serializerlog.hasLevel(Logging.DEBUG))
@@ -503,16 +517,20 @@ class SerializerCachedOutput extends StdSerializer<Serializable>
 							{
 								throw ex;
 							}
-							
-							return;
 						}
 					}
+					else
+						serialized = false;
 				}
 			}
 		}
-
-		this.delegate.serialize(bean, gen, provider);
-		Serialization.getInstance().statistics(bean.getClass().getSimpleName(), 0);
+		
+		// No special serialization path available 
+		if (serialized == false)
+		{
+			this.delegate.serialize(bean, gen, provider);
+			Serialization.getInstance().statistics(bean.getClass().getSimpleName(), 0);
+		}
 	}
 }
 

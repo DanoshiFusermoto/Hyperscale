@@ -1,22 +1,17 @@
 package org.radix.hyperscale.ledger.primitives;
 
-import java.util.Collection;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-import org.eclipse.collections.api.factory.Lists;
-import org.eclipse.collections.api.list.MutableList;
+import org.radix.hyperscale.collections.AdaptiveArrayList;
 import org.radix.hyperscale.crypto.Certificate;
 import org.radix.hyperscale.crypto.Hash;
 import org.radix.hyperscale.exceptions.ValidationException;
 import org.radix.hyperscale.ledger.CommitDecision;
+import org.radix.hyperscale.ledger.StateAddress;
 import org.radix.hyperscale.ledger.StateContext;
-import org.radix.hyperscale.logging.Logger;
-import org.radix.hyperscale.logging.Logging;
-import org.radix.hyperscale.serialization.DsonCached;
 import org.radix.hyperscale.serialization.DsonOutput;
-import org.radix.hyperscale.serialization.Serialization;
-import org.radix.hyperscale.serialization.SerializationException;
 import org.radix.hyperscale.serialization.SerializerId2;
 import org.radix.hyperscale.serialization.DsonOutput.Output;
 
@@ -24,11 +19,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 
 @SerializerId2("ledger.atom.certificate")
 @StateContext("atom.certificate")
-@DsonCached
 public final class AtomCertificate extends Certificate
 {
-	private static final Logger serializerlog = Logging.getLogger("serializer");
-
 	@JsonProperty("atom")
 	@DsonOutput(Output.ALL)
 	private Hash atom;
@@ -45,7 +37,7 @@ public final class AtomCertificate extends Certificate
 		// FOR SERIALIZER
 	}
 	
-	public AtomCertificate(final Hash atom, final CommitDecision decision, final Collection<? extends StateOutput> inventory) throws ValidationException
+	public AtomCertificate(final Hash atom, final CommitDecision decision, final List<StateOutput> inventory) throws ValidationException
 	{
 		super(decision);
 		
@@ -57,24 +49,19 @@ public final class AtomCertificate extends Certificate
 		if (inventory.isEmpty())
 			throw new IllegalArgumentException("State output inventory is empty");
 		
-		this.inventory = Lists.mutable.ofAll(inventory);
+		this.inventory = new ArrayList<>(inventory);
+		
+		StateAddress prevStateOutput = null;
 		for (int i = 0 ; i < this.inventory.size() ; i++)
 		{
 			StateOutput stateOutput = this.inventory.get(i);
 			if (stateOutput.getAtom().equals(this.atom) == false)
 				throw new ValidationException(stateOutput, "State certificate for "+stateOutput.getAddress()+" does not reference atom "+this.atom);
-		}
-
-		this.inventory.sort((so1, so2) -> so1.getAddress().compareTo(so2.getAddress()));
-		
-		// Ensure the DSON output caching is triggered.
-		try 
-		{
-			Serialization.getInstance().toDson(this, Output.PERSIST);
-		} 
-		catch (SerializationException ex) 
-		{
-			serializerlog.error("DSON cache priming failed", ex);
+			
+			if (prevStateOutput != null && prevStateOutput.compareTo(stateOutput.getAddress()) > 0)
+				throw new ValidationException(stateOutput, "State certificate outputs are not sorted for atom "+this.atom);
+			
+			prevStateOutput = stateOutput.getAddress();
 		}
 	}
 
@@ -97,7 +84,7 @@ public final class AtomCertificate extends Certificate
 	
 	public <T extends StateOutput> List<T> getInventory(Class<T> clazz)
 	{
-		MutableList<T> inventory = Lists.mutable.ofInitialCapacity(this.inventory.size());
+		final AdaptiveArrayList<T> inventory = new AdaptiveArrayList<T>(this.inventory.size());
 		for (int i = 0 ; i < this.inventory.size() ; i++)
 		{
 			StateOutput output = this.inventory.get(i);
@@ -107,6 +94,6 @@ public final class AtomCertificate extends Certificate
 			inventory.add(clazz.cast(output));
 		}
 		
-		return inventory.asUnmodifiable();
+		return inventory.freeze();
 	}
 }

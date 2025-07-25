@@ -26,8 +26,6 @@ import org.radix.hyperscale.logging.Logger;
 import org.radix.hyperscale.logging.Logging;
 import org.radix.hyperscale.serialization.DsonCached;
 import org.radix.hyperscale.serialization.DsonOutput;
-import org.radix.hyperscale.serialization.Serialization;
-import org.radix.hyperscale.serialization.SerializationException;
 import org.radix.hyperscale.serialization.SerializerId2;
 import org.radix.hyperscale.serialization.DsonOutput.Output;
 import org.radix.hyperscale.utils.Numbers;
@@ -353,19 +351,6 @@ public final class Atom extends ExtendedObject implements Primitive
 		}
 		
 		this.immutable = true;
-		
-		// Verified, also is now immutable so trigger the DSON caching
-		try 
-		{
-			if(getCachedDsonOutput() == null)
-				Serialization.getInstance().toDson(this, Output.PERSIST);
-			else
-				serializerlog.warn("DSON cache already present for atom "+this);
-		} 
-		catch (SerializationException ex) 
-		{
-			serializerlog.error("DSON cache priming failed", ex);
-		}
 		
 		return true;
 	}

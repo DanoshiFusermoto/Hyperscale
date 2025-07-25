@@ -1,7 +1,6 @@
 package org.radix.hyperscale.serialization.mapper;
 
 import java.util.Arrays;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.io.*;
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -222,8 +221,6 @@ public class RadixCBORGenerator extends GeneratorBase
      */
     protected boolean _bufferRecyclable;
     
-    private static AtomicInteger instantiations = new AtomicInteger(0);
-
     /*
     /**********************************************************
     /* Life-cycle
@@ -246,8 +243,6 @@ public class RadixCBORGenerator extends GeneratorBase
         if (_outputEnd < MIN_BUFFER_LENGTH) {
             throw new IllegalStateException("Internal encoding buffer length (" + _outputEnd + ") too short, must be at least " + MIN_BUFFER_LENGTH);
         }
-        
-        instantiations.incrementAndGet();
     }
 
     /**
@@ -277,8 +272,6 @@ public class RadixCBORGenerator extends GeneratorBase
         if (_outputEnd < MIN_BUFFER_LENGTH) {
             throw new IllegalStateException("Internal encoding buffer length (" + _outputEnd + ") too short, must be at least " + MIN_BUFFER_LENGTH);
         }
-        
-        instantiations.incrementAndGet();
     }
 
     /*
