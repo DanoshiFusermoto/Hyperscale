@@ -5,7 +5,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -18,6 +17,8 @@ import java.util.stream.Collectors;
 import org.radix.hyperscale.Constants;
 import org.radix.hyperscale.Context;
 import org.radix.hyperscale.Universe;
+import org.radix.hyperscale.collections.AdaptiveArrayList;
+import org.radix.hyperscale.collections.AdaptiveHashSet;
 import org.radix.hyperscale.crypto.Hash;
 import org.radix.hyperscale.crypto.Hashable;
 import org.radix.hyperscale.exceptions.ValidationException;
@@ -236,7 +237,7 @@ public final class PendingAtom implements Hashable, StateAddressable
 			double additionalTimeout = Math.log(atom.getManifest().size()) * Constants.ATOM_ACCEPT_TIMEOUT_SECONDS;
 			scheduleTimeout(AcceptTimeout.class, this.witnessedAt + TimeUnit.SECONDS.toMillis((long) (Constants.ATOM_ACCEPT_TIMEOUT_SECONDS + additionalTimeout)));
 
-			if (this.context.getConfiguration().get("ledger.atompool", Boolean.TRUE) == Boolean.FALSE)
+			if (this.context.getConfiguration().get("ledger.atompool", true) == false)
 				this.acceptableAt = this.witnessedAt;
 		}
 	}
@@ -276,7 +277,7 @@ public final class PendingAtom implements Hashable, StateAddressable
 
 		synchronized(this.pendingStates)
 		{
-			final Set<ShardID> shardIDs = new HashSet<ShardID>(this.pendingStates.size());
+			final AdaptiveHashSet<ShardID> shardIDs = new AdaptiveHashSet<ShardID>(this.pendingStates.size());
 			for(final PendingState pendingState : this.pendingStates.values())
 			{
 				if (lockMode != null && pendingState.getStateLockMode().equals(lockMode) == false)
@@ -284,7 +285,7 @@ public final class PendingAtom implements Hashable, StateAddressable
 				
 				shardIDs.add(pendingState.getAddress().getShardID());
 			}
-			return Collections.unmodifiableSet(shardIDs);
+			return shardIDs.freeze();
 		}
 	}
 
@@ -303,7 +304,7 @@ public final class PendingAtom implements Hashable, StateAddressable
 			if (this.pendingStates.isEmpty())
 				throw new IllegalStateException("Pending states for "+getHash()+" is empty");
 				
-			final Set<PendingState> pendingStates = new HashSet<PendingState>(this.pendingStates.size());
+			final AdaptiveHashSet<PendingState> pendingStates = new AdaptiveHashSet<PendingState>(this.pendingStates.size());
 			for(final PendingState pendingState : this.pendingStates.values())
 			{
 				if (lockMode != null && pendingState.getStateLockMode().equals(lockMode) == false)
@@ -311,7 +312,7 @@ public final class PendingAtom implements Hashable, StateAddressable
 
 				pendingStates.add(pendingState);
 			}
-			return Collections.unmodifiableSet(pendingStates);
+			return pendingStates.freeze();
 		}
 	}
 	
@@ -373,16 +374,16 @@ public final class PendingAtom implements Hashable, StateAddressable
 			if (this.pendingStates.isEmpty())
 				throw new IllegalStateException("Pending states for "+getHash()+" is empty"); 
 			
-			final List<StateAddress> stateAddresses = new ArrayList<StateAddress>(this.pendingStates.size());
+			final AdaptiveArrayList<StateAddress> stateAddresses = new AdaptiveArrayList<StateAddress>(this.pendingStates.size());
 			for(PendingState pendingState : this.pendingStates.values())
 			{
 				if (lockMode != null && pendingState.getStateLockMode().equals(lockMode) == false)
 					continue;
-				
+				 
 				stateAddresses.add(pendingState.getAddress());
 			}
 
-			return Collections.unmodifiableList(stateAddresses);
+			return stateAddresses.freeze();
 		}
 	}
 	
@@ -560,7 +561,7 @@ public final class PendingAtom implements Hashable, StateAddressable
 			if (isProvisioned())
 				throw new IllegalStateException("Atom "+getHash()+" is already PROVISIONED when loading packages "+pakages.stream().map(p -> p.getAddress()).collect(Collectors.toList()));
 			
-			final Collection<PolyglotPackage> loadedPackages = this.stateMachine.load(pakages, throwIfNotRequired);
+			final List<PolyglotPackage> loadedPackages = this.stateMachine.load(pakages, throwIfNotRequired);
 			if (loadedPackages.isEmpty() == false && this.stateMachine.isProvisioned() && isProvisioned() == false)
 				provisioned();
 			
@@ -952,7 +953,7 @@ public final class PendingAtom implements Hashable, StateAddressable
 	{
 		synchronized(this.stateVoteBlocks)
 		{
-			return Collections.unmodifiableList(new ArrayList<>(this.stateVoteBlocks.values()));
+			return new AdaptiveArrayList<>(this.stateVoteBlocks.values()).freeze();
 		}
 	}
 
@@ -1012,7 +1013,7 @@ public final class PendingAtom implements Hashable, StateAddressable
 	{
 		synchronized(this.pendingStates)
 		{
-			final List<StateOutput> inventory = new ArrayList<StateOutput>(this.pendingStates.size());
+			final AdaptiveArrayList<StateOutput> inventory = new AdaptiveArrayList<StateOutput>(this.pendingStates.size());
 			for (final PendingState pendingState : this.pendingStates.values())
 			{
 				final StateOutput stateOutput = pendingState.getStateOutput();
@@ -1022,7 +1023,7 @@ public final class PendingAtom implements Hashable, StateAddressable
 				inventory.add(stateOutput);
 			}
 				
-			return inventory;
+			return inventory.freeze();
 		}
 	}
 
@@ -1032,7 +1033,7 @@ public final class PendingAtom implements Hashable, StateAddressable
 		
 		synchronized(this.pendingStates)
 		{
-			final List<T> inventory = new ArrayList<T>(this.pendingStates.size());
+			final AdaptiveArrayList<T> inventory = new AdaptiveArrayList<T>(this.pendingStates.size());
 			for (final PendingState pendingState : this.pendingStates.values())
 			{
 				final StateOutput stateOutput = pendingState.getStateOutput();
@@ -1045,7 +1046,7 @@ public final class PendingAtom implements Hashable, StateAddressable
 				inventory.add(type.cast(stateOutput));
 			}
 				
-			return inventory;
+			return inventory.freeze();
 		}
 	}
 
@@ -1368,14 +1369,14 @@ public final class PendingAtom implements Hashable, StateAddressable
 			// TODO where does the validation of received certificates from other shard groups go? 
 			//	    and what does it do?
 			
-			final List<StateOutput> stateOutputs;
+			final AdaptiveArrayList<StateOutput> stateOutputs;
 			CommitDecision decision = CommitDecision.ACCEPT;
 			synchronized(this.pendingStates)
 			{
 				if (this.pendingStates.values().stream().allMatch(PendingState::isFinalized) == false)
 					return null;
 
-				stateOutputs = new ArrayList<StateOutput>(this.pendingStates.size());
+				stateOutputs = new AdaptiveArrayList<StateOutput>(this.pendingStates.size());
 
 				// Investigate possibility of creating an atom certificate.  All state references / certificates must have been created.
 				for (final PendingState pendingState : this.pendingStates.values())
@@ -1403,6 +1404,9 @@ public final class PendingAtom implements Hashable, StateAddressable
 					
 					stateOutputs.add(pendingState.getStateOutput());
 				}
+				
+				stateOutputs.sort((so1, so2) -> so1.getAddress().compareTo(so2.getAddress()));
+				stateOutputs.freeze();
 			}
 			
 			final AtomCertificate atomCertificate = new AtomCertificate(getHash(), decision, stateOutputs);

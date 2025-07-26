@@ -4,8 +4,7 @@ import java.util.Collection;
 import java.util.Objects;
 import java.util.Set;
 
-import org.eclipse.collections.api.factory.Sets;
-import org.eclipse.collections.api.set.MutableSet;
+import org.radix.hyperscale.collections.AdaptiveHashSet;
 import org.radix.hyperscale.crypto.Identity;
 import org.radix.hyperscale.utils.Numbers;
 
@@ -33,17 +32,20 @@ public final class ShardMapper
 
 	public static Set<ShardGroupID> toShardGroups(final Collection<ShardID> shards, final int numShardGroups)
 	{
-		final MutableSet<ShardGroupID> shardGroups = Sets.mutable.ofInitialCapacity(shards.size());
-		for (ShardID shard : Objects.requireNonNull(shards, "Shards is null"))
+		Objects.requireNonNull(shards, "Shards is null");
+		final AdaptiveHashSet<ShardGroupID> shardGroups = new AdaptiveHashSet<ShardGroupID>(shards.size());
+		for (ShardID shard : shards)
 			shardGroups.add(toShardGroup(shard, numShardGroups));
 		
-		return shardGroups.asUnmodifiable();
+		return shardGroups.freeze();
 	}
 
 	public static Set<ShardGroupID> toShardGroups(final Collection<ShardID> shards, ShardGroupID exclude, final int numShardGroups)
 	{
-		final MutableSet<ShardGroupID> shardGroups = Sets.mutable.ofInitialCapacity(shards.size());
-		for (ShardID shard : Objects.requireNonNull(shards, "Shards is null"))
+		Objects.requireNonNull(shards, "Shards is null");
+		
+		final AdaptiveHashSet<ShardGroupID> shardGroups = new AdaptiveHashSet<ShardGroupID>(shards.size());
+		for (ShardID shard : shards)
 		{
 			ShardGroupID shardGroupID = toShardGroup(shard, numShardGroups);
 			if (shardGroupID.equals(exclude))
@@ -52,7 +54,7 @@ public final class ShardMapper
 			shardGroups.add(shardGroupID);
 		}
 		
-		return shardGroups.asUnmodifiable();
+		return shardGroups.freeze();
 	}
 
 	public static Set<ShardGroupID> toShardGroups(final PendingAtom atom, final StateLockMode lockMode, final int numShardGroups)
@@ -60,13 +62,13 @@ public final class ShardMapper
 		if (atom.isGlobal())
 			return toAllShardGroups(numShardGroups);
 
-		final MutableSet<ShardGroupID> shardGroups = Sets.mutable.ofInitialCapacity(atom.numStateAddresses(lockMode));
+		final AdaptiveHashSet<ShardGroupID> shardGroups = new AdaptiveHashSet<ShardGroupID>(atom.numStateLocks(lockMode));
 		atom.forShards(lockMode, (stateAddress, shardID) -> {
 			ShardGroupID shardGroupID = toShardGroup(shardID, numShardGroups);
 			shardGroups.add(shardGroupID);
 		});
 
-		return shardGroups.asUnmodifiable();
+		return shardGroups.freeze();
 	}
 
 	public static Set<ShardGroupID> toShardGroups(final PendingAtom atom, final StateLockMode lockMode, final ShardGroupID exclude, final int numShardGroups)
@@ -74,7 +76,7 @@ public final class ShardMapper
 		if (atom.isGlobal())
 			return toAllShardGroups(exclude, numShardGroups);
 
-		final MutableSet<ShardGroupID> shardGroups = Sets.mutable.ofInitialCapacity(atom.numStateAddresses(lockMode));
+		final AdaptiveHashSet<ShardGroupID> shardGroups = new AdaptiveHashSet<ShardGroupID>(atom.numStateLocks(lockMode));
 		atom.forShards(lockMode, (stateAddress, shardID) -> {
 			ShardGroupID shardGroupID = toShardGroup(shardID, numShardGroups);
 			if (shardGroupID.equals(exclude))
@@ -83,7 +85,7 @@ public final class ShardMapper
 			shardGroups.add(shardGroupID);
 		});
 		
-		return shardGroups.asUnmodifiable();
+		return shardGroups.freeze();
 	}
 
 	// TODO test this heavily ... UInts may have low value ranges and so all end up in similar shards ... don't want that
@@ -109,7 +111,7 @@ public final class ShardMapper
 	
 	public static Set<ShardGroupID> toAllShardGroups(final ShardGroupID exclude, final int numShardGroups)
 	{
-		final MutableSet<ShardGroupID> shardGroups = Sets.mutable.ofInitialCapacity(numShardGroups);
+		final AdaptiveHashSet<ShardGroupID> shardGroups = new AdaptiveHashSet<ShardGroupID>(numShardGroups);
 		for (int s = 0 ; s < numShardGroups ; s++)
 		{
 			if (exclude != null && s == exclude.intValue())
@@ -117,7 +119,7 @@ public final class ShardMapper
 			
 			shardGroups.add(ShardGroupID.from(s));
 		}
-		return shardGroups;
+		return shardGroups.freeze();
 	}
 
 	private ShardMapper() {}

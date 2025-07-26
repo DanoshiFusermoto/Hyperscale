@@ -8,13 +8,14 @@ import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
 import org.radix.hyperscale.Constants;
+import org.radix.hyperscale.collections.AdaptiveArrayList;
 import org.radix.hyperscale.common.EphemeralPrimitive;
 import org.radix.hyperscale.common.ExtendedObject;
 import org.radix.hyperscale.crypto.CryptoException;
 import org.radix.hyperscale.crypto.Hash;
-import org.radix.hyperscale.crypto.MerkleTree;
 import org.radix.hyperscale.crypto.bls12381.BLSPublicKey;
 import org.radix.hyperscale.crypto.bls12381.BLSSignature;
+import org.radix.hyperscale.crypto.merkle.MerkleTree;
 import org.radix.hyperscale.exceptions.ValidationException;
 import org.radix.hyperscale.network.TransportParameters;
 import org.radix.hyperscale.serialization.DsonCached;
@@ -196,11 +197,11 @@ public final class StateVoteBlock extends ExtendedObject implements EphemeralPri
 	
 	public List<StateAddress> getStateAddresses()
 	{
-		List<StateAddress> stateAddresses = new ArrayList<StateAddress>(this.votes.size());
+		final AdaptiveArrayList<StateAddress> stateAddresses = new AdaptiveArrayList<StateAddress>(this.votes.size());
 		for (StateVote vote : this.votes)
 			stateAddresses.add(vote.getAddress());
 
-		return Collections.unmodifiableList(stateAddresses);
+		return stateAddresses.freeze();
 	}
 
 	public List<StateVote> getVotes() throws ValidationException
@@ -234,13 +235,13 @@ public final class StateVoteBlock extends ExtendedObject implements EphemeralPri
 		if (this.size != referenceStateVoteBlock.size)
 			throw new ValidationException(referenceStateVoteBlock, "State size "+this.size+" mismatch in "+referenceStateVoteBlock);
 		
-		ArrayList<StateVote> votes = new ArrayList<StateVote>(referenceStateVoteBlock.votes.size());
+		final AdaptiveArrayList<StateVote> votes = new AdaptiveArrayList<StateVote>(referenceStateVoteBlock.votes.size());
 		for(int i = 0 ; i < referenceStateVoteBlock.votes.size() ; i++)
 		{
 			StateVote vote = referenceStateVoteBlock.votes.get(i);
 			votes.add(new StateVote(vote.getObject(), vote.getAddress(), vote.getAtom(), this.block, vote.getExecution(), vote.getVoteMerkle(), vote.getVoteAudit(), this.owner, this.signature, votePower));
 		}
-		return Collections.unmodifiableList(votes);
+		return votes.freeze();
 	}
 	
 	public void validate() throws ValidationException

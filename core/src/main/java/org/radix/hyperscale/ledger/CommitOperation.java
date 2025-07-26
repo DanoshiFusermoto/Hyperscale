@@ -1,18 +1,16 @@
 package org.radix.hyperscale.ledger;
 
-import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map.Entry;
 
+import org.radix.hyperscale.collections.AdaptiveArrayList;
 import org.radix.hyperscale.crypto.Hash;
 import org.radix.hyperscale.ledger.primitives.Atom;
 import org.radix.hyperscale.ledger.sme.SubstateTransitions;
 import org.radix.hyperscale.time.Time;
 
 import java.util.Objects;
-
-import com.google.common.collect.ImmutableList;
 
 public class CommitOperation
 {
@@ -25,7 +23,7 @@ public class CommitOperation
 	private final List<Entry<StateAddress, Hash>> associations;
 	
 	public CommitOperation(final CommitDecision decision, final BlockHeader head, final Atom atom, 
-			               final Collection<SubstateTransitions> transitions, final Collection<Entry<StateAddress, Hash>> associations, final SubstateOpLog substateOpLog)
+			               final List<SubstateTransitions> transitions, final List<Entry<StateAddress, Hash>> associations, final SubstateOpLog substateOpLog)
 	{
 		this.decision = Objects.requireNonNull(decision, "Decision is null");
 		this.head = Objects.requireNonNull(head, "Head is null");
@@ -53,8 +51,17 @@ public class CommitOperation
 			Objects.requireNonNull(associations, "Associations is null");
 
 			this.substateOpLog = substateOpLog;
-			this.transitions = transitions.isEmpty() ? Collections.emptyList() : ImmutableList.copyOf(transitions);
-			this.associations = associations.isEmpty() ? Collections.emptyList() : ImmutableList.copyOf(associations);
+			
+			if (transitions instanceof AdaptiveArrayList adaptableArrayList && adaptableArrayList.isFrozen())
+				this.transitions = transitions;
+			else
+				this.transitions = transitions.isEmpty() ? Collections.emptyList() : 
+															transitions.size() == 1 ? Collections.singletonList(transitions.getFirst()) : new AdaptiveArrayList<>(transitions).freeze();
+
+			if (associations instanceof AdaptiveArrayList adaptableArrayList && adaptableArrayList.isFrozen())
+				this.associations = associations;
+			else
+				this.associations = associations.isEmpty() ? Collections.emptyList() : associations.size() == 1 ? Collections.singletonList(associations.getFirst()) : new AdaptiveArrayList<>(associations).freeze();
 		}
 	}
 

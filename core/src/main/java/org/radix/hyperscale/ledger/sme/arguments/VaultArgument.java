@@ -1,12 +1,11 @@
 package org.radix.hyperscale.ledger.sme.arguments;
 
 import java.util.AbstractMap;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.Map.Entry;
 
+import org.radix.hyperscale.collections.AdaptiveArrayList;
 import org.radix.hyperscale.crypto.Hash;
 import org.radix.hyperscale.crypto.Identity;
 import org.radix.hyperscale.ledger.StateAddress;
@@ -46,10 +45,10 @@ public class VaultArgument implements SubstateArgument<Identity>
 		this.vaultAddress = StateAddress.from(VAULT_STATE_CONTEXT, vaultScope);
 		this.accountAddress = StateAddress.from(ACCOUNT_STATE_CONTEXT, vaultScope);
 		
-		final List<Entry<StateAddress, StateLockMode>> addresses = new ArrayList<>(2);
+		final AdaptiveArrayList<Entry<StateAddress, StateLockMode>> addresses = new AdaptiveArrayList<>(2);
 		addresses.add(new AbstractMap.SimpleEntry<>(this.vaultAddress, this.lockMode));
 		addresses.add(new AbstractMap.SimpleEntry<>(this.accountAddress, StateLockMode.READ));
-		this.addresses = Collections.unmodifiableList(addresses);
+		this.addresses = addresses.freeze();
 	}
 
 	@Override
