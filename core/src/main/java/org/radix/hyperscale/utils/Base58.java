@@ -51,6 +51,10 @@ import java.util.Arrays;
  */
 public final class Base58 
 {
+	private static final int BUFFER_SIZE = 1024;
+	private static final ThreadLocal<byte[]> encodedBuffer = ThreadLocal.withInitial(() -> new byte[BUFFER_SIZE]);
+	private static final ThreadLocal<byte[]> decodedBuffer = ThreadLocal.withInitial(() -> new byte[BUFFER_SIZE]);
+	
     private static final byte[] ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz".getBytes(StandardCharsets.US_ASCII);
     private static final byte ENCODED_ZERO = ALPHABET[0];
     private static final int[] INDEXES = new int[128];
@@ -83,25 +87,29 @@ public final class Base58
             ++zeros;
         
         // Convert base-256 digits to base-58 digits (plus conversion to ASCII characters)
-        input = Arrays.copyOf(input, input.length); // since we modify it in-place
-        byte[] encoded = new byte[input.length * 2]; // upper bound
-        int outputStart = encoded.length;
-        for (int inputStart = zeros; inputStart < input.length; ) 
+        final int decodedLength = input.length;
+        final byte[] decoded = decodedLength <= BUFFER_SIZE ? Base58.decodedBuffer.get() : new byte[decodedLength];
+        System.arraycopy(input, 0, decoded, 0, decodedLength);
+        
+        final int encodedLength = decodedLength * 2;
+        final byte[] encoded = encodedLength <= BUFFER_SIZE ? Base58.encodedBuffer.get() : new byte[encodedLength];
+        int outputStart = encodedLength;
+        for (int inputStart = zeros; inputStart < decodedLength; ) 
         {
-            encoded[--outputStart] = ALPHABET[divmod(input, inputStart, 256, 58)];
-            if (input[inputStart] == 0)
+            encoded[--outputStart] = ALPHABET[divmod(decoded, decodedLength, inputStart, 256, 58)];
+            if (decoded[inputStart] == 0)
                 ++inputStart; // optimization - skip leading zeros
         }
         
         // Preserve exactly as many leading encoded zeros in output as there were leading zeros in input.
-        while (outputStart < encoded.length && encoded[outputStart] == ENCODED_ZERO)
+        while (outputStart < encodedLength && encoded[outputStart] == ENCODED_ZERO)
             ++outputStart;
         
         while (--zeros >= 0)
             encoded[--outputStart] = ENCODED_ZERO;
         
         // Return encoded string (including encoded leading zeros).
-        return new String(encoded, outputStart, encoded.length - outputStart, StandardCharsets.US_ASCII);
+        return new String(encoded, outputStart, encodedLength - outputStart, StandardCharsets.US_ASCII);
     }
 
     /**
@@ -130,8 +138,9 @@ public final class Base58
             return new byte[0];
 
         // Convert the base58-encoded ASCII chars to a base58 byte sequence (base58 digits).
-        int inputlength = input.length();
-        byte[] input58 = new byte[inputlength-offset];
+        final int inputlength = input.length();
+        final int encodedLength = inputlength-offset;
+        final byte[] encoded = encodedLength <= BUFFER_SIZE ? Base58.encodedBuffer.get() : new byte[encodedLength];
         for (int i = offset; i < inputlength; ++i) 
         {
             char c = input.charAt(i);
@@ -139,30 +148,31 @@ public final class Base58
             if (digit < 0)
                 throw new IllegalArgumentException("Invalid base58 character: " + c);
 
-            input58[i-offset] = (byte) digit;
+            encoded[i-offset] = (byte) digit;
         }
         
         // Count leading zeros.
         int zeros = 0;
-        while (zeros < input58.length && input58[zeros] == 0)
+        while (zeros < encodedLength && encoded[zeros] == 0)
             ++zeros;
         
         // Convert base-58 digits to base-256 digits.
-        byte[] decoded = new byte[inputlength];
-        int outputStart = decoded.length;
-        for (int inputStart = zeros; inputStart < input58.length; ) 
+        final int decodedLength = encodedLength;
+        final byte[] decoded = decodedLength <= BUFFER_SIZE ? Base58.decodedBuffer.get() : new byte[decodedLength];
+        int outputStart = decodedLength;
+        for (int inputStart = zeros; inputStart < encodedLength; ) 
         {
-            decoded[--outputStart] = divmod(input58, inputStart, 58, 256);
-            if (input58[inputStart] == 0)
+            decoded[--outputStart] = divmod(encoded, encodedLength, inputStart, 58, 256);
+            if (encoded[inputStart] == 0)
                 ++inputStart; // optimization - skip leading zeros
         }
 
         // Ignore extra leading zeroes that were added during the calculation.
-        while (outputStart < decoded.length && decoded[outputStart] == 0)
+        while (outputStart < decodedLength && decoded[outputStart] == 0)
             ++outputStart;
 
         // Return decoded data (including original number of leading zeros).
-        return Arrays.copyOfRange(decoded, outputStart - zeros, decoded.length);
+        return Arrays.copyOfRange(decoded, outputStart - zeros, decodedLength);
     }
 
     /**
@@ -171,17 +181,18 @@ public final class Base58
      * to contain the quotient, and the return value is the remainder.
      *
      * @param number the number to divide
+     * @param length the number length in bytes
      * @param firstDigit the index within the array of the first non-zero digit
      *        (this is used for optimization by skipping the leading zeros)
      * @param base the base in which the number's digits are represented (up to 256)
      * @param divisor the number to divide by (up to 256)
      * @return the remainder of the division operation
      */
-    private static byte divmod(byte[] number, int firstDigit, int base, int divisor) 
+    private static byte divmod(byte[] number, int length, int firstDigit, int base, int divisor) 
     {
         // this is just long division which accounts for the base of the input digits
         int remainder = 0;
-        for (int i = firstDigit; i < number.length; i++) 
+        for (int i = firstDigit; i < length; i++) 
         {
             int digit = number[i] & 0xFF;
             int temp = remainder * base + digit;
