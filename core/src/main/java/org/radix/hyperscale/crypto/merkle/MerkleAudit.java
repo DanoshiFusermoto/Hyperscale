@@ -1,10 +1,12 @@
 package org.radix.hyperscale.crypto.merkle;
 
-import java.util.Collections;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
 
+import org.radix.hyperscale.collections.AdaptiveArrayList;
+import org.radix.hyperscale.collections.AdaptiveCollection;
 import org.radix.hyperscale.crypto.Hash;
 import org.radix.hyperscale.crypto.merkle.MerkleProof.Branch;
 import org.radix.hyperscale.serialization.DsonOutput;
@@ -23,7 +25,9 @@ public final class MerkleAudit extends Serializable implements Iterable<MerklePr
 	public static final MerkleAudit singleton(MerkleProof proof)
 	{
 		Objects.requireNonNull(proof, "Proof is null");
-		return new MerkleAudit(Collections.singletonList(proof));
+		final AdaptiveArrayList<MerkleProof> frozenSingleton = new AdaptiveArrayList<MerkleProof>(1);
+		frozenSingleton.add(proof);
+		return new MerkleAudit(frozenSingleton.freeze());
 	}
 	
 	@JsonProperty("proofs")
@@ -40,7 +44,10 @@ public final class MerkleAudit extends Serializable implements Iterable<MerklePr
 		Objects.requireNonNull(proofs, "Proofs is null");
 		Numbers.isZero(proofs.size(), "Proofs is empty");
 		
-		this.proofs = proofs;
+		if (proofs instanceof AdaptiveCollection adaptiveCollection && adaptiveCollection.isFrozen())
+			this.proofs = proofs;
+		else
+			this.proofs = new ArrayList<>(proofs);
 	}
 	
 	@Override
