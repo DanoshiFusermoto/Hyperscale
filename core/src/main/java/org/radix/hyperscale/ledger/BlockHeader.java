@@ -17,12 +17,13 @@ import org.radix.hyperscale.crypto.CryptoException;
 import org.radix.hyperscale.crypto.Hash;
 import org.radix.hyperscale.crypto.Hashable;
 import org.radix.hyperscale.crypto.Identity;
-import org.radix.hyperscale.crypto.MerkleProof;
-import org.radix.hyperscale.crypto.MerkleTree;
-import org.radix.hyperscale.crypto.MerkleProof.Branch;
 import org.radix.hyperscale.crypto.bls12381.BLSKeyPair;
 import org.radix.hyperscale.crypto.bls12381.BLSPublicKey;
 import org.radix.hyperscale.crypto.bls12381.BLSSignature;
+import org.radix.hyperscale.crypto.merkle.MerkleAudit;
+import org.radix.hyperscale.crypto.merkle.MerkleProof;
+import org.radix.hyperscale.crypto.merkle.MerkleTree;
+import org.radix.hyperscale.crypto.merkle.MerkleProof.Branch;
 import org.radix.hyperscale.logging.Logger;
 import org.radix.hyperscale.logging.Logging;
 import org.radix.hyperscale.network.TransportParameters;
@@ -383,12 +384,12 @@ public final class BlockHeader extends Serializable implements Comparable<BlockH
 		return this.inventoryMerkle;
 	}
 	
-	public InventoryType contains(final Hash item, final InventoryType type) 
+	public boolean contains(final Hash item, final InventoryType type) 
 	{
 		if (this.inventory.get(type).contains(item))
-			return type;
+			return true;
 		
-		return null;
+		return false;
 	}
 
 	public InventoryType contains(final Hash item, final InventoryType ... types) 
@@ -524,49 +525,23 @@ public final class BlockHeader extends Serializable implements Comparable<BlockH
 	{
 		return this.signature;
 	}
-	
-	public final boolean isInRange(final BlockHeader other, final int limit)
-	{
-		Objects.requireNonNull(other, "Block header is null");
-		
-		long thisHeight = this.getHeight();
-		long otherHeight = other.getHeight();
-		long heightDelta = Math.abs(thisHeight - otherHeight);
-		if (heightDelta > limit)
-			return false;
-		
-		return true;
-	}
 
-	public final boolean isAheadOf(final BlockHeader other)
-	{
-		return isAheadOf(other, 0);
-	}
-
-	public final boolean isAheadOf(final BlockHeader other, final int minDelta)
-	{
-		Objects.requireNonNull(other, "Block header is null");
-
-		long thisHeight = this.getHeight();
-		long otherHeight = other.getHeight();
-		long heightDelta = thisHeight - otherHeight;
-		if (heightDelta >= minDelta)
-			return true;
-		
-		return false;
-	}
-
-	public List<MerkleProof> getInventoryMerkleProof(Hash primitive) 
+	public MerkleAudit getInventoryMerkleProof(Hash primitive) 
 	{
 		// TODO hold an inventory merkle tree and query for audit proofs
-		return Collections.singletonList(MerkleProof.from(this.inventoryMerkle, Branch.ROOT));
+		return MerkleAudit.singleton(MerkleProof.from(this.inventoryMerkle, Branch.ROOT));
 	}
 	
 	public synchronized int getSize() throws SerializationException
 	{
 		if (this.size == -1)
-			this.size = Serialization.getInstance().toDson(this, Output.WIRE).length;
+			this.size = Serialization.getInstance().toDsonSize(this, Output.WIRE);
 		
 		return this.size;
+	}
+	
+	public BlockPointer asPointer()
+	{
+		return new BlockPointer(getHash());
 	}
 }
