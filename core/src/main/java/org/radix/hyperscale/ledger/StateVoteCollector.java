@@ -3,10 +3,10 @@ package org.radix.hyperscale.ledger;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 import org.eclipse.collections.api.factory.Maps;
 import org.eclipse.collections.api.map.MutableMap;
@@ -14,11 +14,12 @@ import org.radix.hyperscale.Constants;
 import org.radix.hyperscale.Context;
 import org.radix.hyperscale.crypto.CryptoException;
 import org.radix.hyperscale.crypto.Hash;
-import org.radix.hyperscale.crypto.MerkleProof;
-import org.radix.hyperscale.crypto.MerkleTree;
-import org.radix.hyperscale.crypto.MerkleProof.Branch;
 import org.radix.hyperscale.crypto.bls12381.BLSKeyPair;
 import org.radix.hyperscale.crypto.bls12381.BLSSignature;
+import org.radix.hyperscale.crypto.merkle.MerkleAudit;
+import org.radix.hyperscale.crypto.merkle.MerkleProof;
+import org.radix.hyperscale.crypto.merkle.MerkleTree;
+import org.radix.hyperscale.crypto.merkle.MerkleProof.Branch;
 import org.radix.hyperscale.logging.Logger;
 import org.radix.hyperscale.logging.Logging;
 import org.radix.hyperscale.time.Time;
@@ -68,8 +69,10 @@ public final class StateVoteCollector
 
 		this.ID = Hash.hash(block, state.getHash());
 		
-		if (statePoolLog.hasLevel(Logging.INFO))
-			statePoolLog.info(context.getName()+": Created state vote collector "+toString());
+		if (statePoolLog.hasLevel(Logging.DEBUG))
+			statePoolLog.debug(this.context.getName()+": Created state vote collector for proposal "+Block.toHeight(block)+":"+block+" with single state key "+state.getAddress());
+		else if (statePoolLog.hasLevel(Logging.INFO))
+			statePoolLog.info(this.context.getName()+": Creating state vote collector for proposal "+Block.toHeight(block)+":"+block+" with single state key");
 	}
 
 	StateVoteCollector(final Context context, final Hash block, final Collection<PendingState> states, long votePower, long voteThreshold)
@@ -99,7 +102,9 @@ public final class StateVoteCollector
 		this.ID = Hash.hash(block, stateHash);
 		
 		if (statePoolLog.hasLevel(Logging.DEBUG))
-			statePoolLog.info(context.getName()+": Created state vote collector "+toString());
+			statePoolLog.debug(this.context.getName()+": Creating StateVoteCollector for proposal "+Block.toHeight(block)+":"+block+" with state keys "+states.stream().map(sk -> sk.getAddress()).collect(Collectors.toList()));
+		else if (statePoolLog.hasLevel(Logging.INFO))
+			statePoolLog.info(this.context.getName()+": Creating StateVoteCollector for proposal "+Block.toHeight(block)+":"+block+" with "+states.size()+" state keys");
 	}
 	
 	Hash getID()
@@ -157,6 +162,14 @@ public final class StateVoteCollector
 		synchronized(this)
 		{
 			return this.states.toList();
+		}
+	}
+	
+	Collection<PendingState> getIncomplete()
+	{
+		synchronized(this)
+		{
+			return this.states.stream().filter(ps -> votes.containsKey(ps.getHash()) == false).toList();
 		}
 	}
 
@@ -230,7 +243,7 @@ public final class StateVoteCollector
 			// IMPORTANT Strict order is important for state & vote merkles as validators may execute in different sequence!
 			final Hash voteMerkleHash;
 			final MerkleTree voteMerkleTree;
-			final List<MerkleProof> rootMerkleProofAudit;
+			final MerkleAudit rootMerkleProofAudit;
 			final List<Hash> sortedStateKeys = new ArrayList<Hash>(this.states.keySet());
 			sortedStateKeys.sort((h1, h2) -> UnsignedBytes.lexicographicalComparator().compare(h1.toByteArray(), h2.toByteArray()));
 			if (MERKLE_AUDITS_DISABLED == false)
@@ -243,13 +256,13 @@ public final class StateVoteCollector
 				}
 				
 				voteMerkleHash = voteMerkleTree.buildTree();
-				rootMerkleProofAudit = Collections.singletonList(MerkleProof.from(voteMerkleHash, Branch.ROOT));
+				rootMerkleProofAudit = MerkleAudit.singleton(MerkleProof.from(voteMerkleHash, Branch.ROOT));
 			}
 			else
 			{
 				voteMerkleTree = null;
 				voteMerkleHash = this.block;
-				rootMerkleProofAudit = Collections.singletonList(MerkleProof.from(voteMerkleHash, Branch.ROOT));
+				rootMerkleProofAudit = MerkleAudit.singleton(MerkleProof.from(voteMerkleHash, Branch.ROOT));
 			}
 			
 			BLSSignature signature = key.getPrivateKey().sign(voteMerkleHash);
@@ -260,7 +273,7 @@ public final class StateVoteCollector
 			for (Hash stateKey : sortedStateKeys)
 			{
 				StateVote stateVote = this.votes.get(stateKey);
-				List<MerkleProof> voteMerkleAudit = MERKLE_AUDITS_DISABLED == false && this.states.size() > 1 ? voteMerkleTree.auditProof(stateVote.getObject()) : rootMerkleProofAudit;
+				MerkleAudit voteMerkleAudit = MERKLE_AUDITS_DISABLED == false && this.states.size() > 1 ? voteMerkleTree.auditProof(stateVote.getObject()) : rootMerkleProofAudit;
 				StateVote completedStateVote = new StateVote(stateVote.getAddress(), stateVote.getAtom(), stateVote.getBlock(), stateVote.getExecution(),
 															 voteMerkleHash, voteMerkleAudit, key.getPublicKey(), signature, stateVote.getWeight());
 				completedStateVotes.add(completedStateVote);

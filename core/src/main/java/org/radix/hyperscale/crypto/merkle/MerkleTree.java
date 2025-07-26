@@ -8,7 +8,9 @@ import org.eclipse.collections.api.factory.Maps;
 import org.eclipse.collections.api.map.MutableMap;
 import org.eclipse.collections.api.map.primitive.MutableLongObjectMap;
 import org.eclipse.collections.impl.factory.primitive.LongObjectMaps;
+import org.radix.hyperscale.collections.AdaptiveArrayList;
 import org.radix.hyperscale.crypto.Hash;
+import org.radix.hyperscale.utils.MathUtils;
 
 public class MerkleTree
 {
@@ -128,7 +130,7 @@ public class MerkleTree
     			this.proofs = LongObjectMaps.mutable.<MerkleProof>ofInitialCapacity(this.leaves.size()*2).asSynchronized();
     	}
     	
-        final List<MerkleProof> auditTrail = new ArrayList<>();
+        final AdaptiveArrayList<MerkleProof> auditTrail = new AdaptiveArrayList<>(MathUtils.log2(this.leaves.size()));
         final MerkleNode leafNode = findLeaf(leafHash);
         if (leafNode != null) 
         {
@@ -139,7 +141,7 @@ public class MerkleTree
             buildAuditTrail(auditTrail, parent, leafNode);
         }
 
-        return new MerkleAudit(auditTrail);
+        return new MerkleAudit(auditTrail.freeze());
     }
 
     public static boolean verifyAudit(Hash rootHash, Hash leafHash, MerkleAudit auditTrail) 

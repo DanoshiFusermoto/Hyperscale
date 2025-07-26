@@ -48,7 +48,13 @@ public class MerkleProof implements Hashable
     
 	private MerkleProof(byte[] bytes, int offset)
 	{
-		this.direction = Branch.values()[bytes[offset]];
+		if (bytes[offset] == 0)
+			this.direction = Branch.LEFT;
+		else if (bytes[offset] == 1)
+			this.direction = Branch.RIGHT;
+		else
+			this.direction = Branch.ROOT;
+
 		this.hash = Hash.from(bytes, offset+1);
 	}
 
