@@ -11,7 +11,7 @@ public abstract class ConnectionTask extends ScheduledExecutable
 
 	protected ConnectionTask(final AbstractConnection connection, final long delay, final TimeUnit unit)
 	{
-		super(delay, 0, unit);
+		super(delay, unit);
 
 		this.connection = Objects.requireNonNull(connection, "Connection is null");
 	}
