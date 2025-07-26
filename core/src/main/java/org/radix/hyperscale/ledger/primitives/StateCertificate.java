@@ -2,18 +2,15 @@ package org.radix.hyperscale.ledger.primitives;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
 import java.util.Objects;
 
 import org.radix.hyperscale.collections.Bloom;
 import org.radix.hyperscale.crypto.CryptoException;
 import org.radix.hyperscale.crypto.Hash;
-import org.radix.hyperscale.crypto.MerkleProof;
 import org.radix.hyperscale.crypto.VoteCertificate;
 import org.radix.hyperscale.crypto.bls12381.BLSPublicKey;
 import org.radix.hyperscale.crypto.bls12381.BLSSignature;
+import org.radix.hyperscale.crypto.merkle.MerkleAudit;
 import org.radix.hyperscale.ledger.Block;
 import org.radix.hyperscale.ledger.CommitDecision;
 import org.radix.hyperscale.ledger.StateAddress;
@@ -57,7 +54,7 @@ public final class StateCertificate extends VoteCertificate implements StateOutp
 	@JsonProperty("block_audit")
 //	@DsonOutput(value = {Output.API, Output.WIRE, Output.PERSIST})
 	@DsonOutput(Output.NONE)
-	private List<MerkleProof> blockAudit;
+	private MerkleAudit blockAudit;
 	
 	// Batched StateVote merkle and audit
 	@JsonProperty("vote_merkle")
@@ -68,7 +65,7 @@ public final class StateCertificate extends VoteCertificate implements StateOutp
 	@JsonProperty("vote_audit")
 //	@DsonOutput(value = {Output.API, Output.WIRE, Output.PERSIST})
 	@DsonOutput(Output.NONE)
-	private List<MerkleProof> voteAudit;
+	private MerkleAudit voteAudit;
 
 	@SuppressWarnings("unused")
 	private StateCertificate()
@@ -79,7 +76,7 @@ public final class StateCertificate extends VoteCertificate implements StateOutp
 	}
 
 	public StateCertificate(final Hash atom, final Hash block, final SubstateTransitions states, final Hash execution, 
-							final Hash blockMerkle, final List<MerkleProof> blockAudit, final Hash voteMerkle, final List<MerkleProof> voteAudit, 
+							final Hash blockMerkle, final MerkleAudit blockAudit, final Hash voteMerkle, final MerkleAudit voteAudit, 
 							final Bloom signers, final BLSPublicKey key, final BLSSignature signature)
 	{
 		super(Objects.requireNonNull(execution, "Execution is null").equals(Hash.ZERO) == false ? CommitDecision.ACCEPT : CommitDecision.REJECT, signers, key, signature);
@@ -107,9 +104,9 @@ public final class StateCertificate extends VoteCertificate implements StateOutp
 		this.states = states;
 		this.execution = execution;
 		this.blockMerkle = blockMerkle;
-		this.blockAudit = new ArrayList<MerkleProof>(blockAudit);
+		this.blockAudit = blockAudit;
 		this.voteMerkle = voteMerkle;
-		this.voteAudit = new ArrayList<MerkleProof>(voteAudit);
+		this.voteAudit = voteAudit;
 	}
 
 	public Hash getBlock()
@@ -154,9 +151,9 @@ public final class StateCertificate extends VoteCertificate implements StateOutp
 		return this.blockMerkle;
 	}
 	
-	public List<MerkleProof> getBlockAudit()
+	public MerkleAudit getBlockAudit()
 	{
-		return Collections.unmodifiableList(this.blockAudit);
+		return this.blockAudit;
 	}
 
 	public Hash getVoteMerkle()
@@ -164,9 +161,9 @@ public final class StateCertificate extends VoteCertificate implements StateOutp
 		return this.voteMerkle;
 	}
 	
-	public List<MerkleProof> getVoteAudit()
+	public MerkleAudit getVoteAudit()
 	{
-		return Collections.unmodifiableList(this.voteAudit);
+		return this.voteAudit;
 	}
 
 	@Override
