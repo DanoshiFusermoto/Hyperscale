@@ -3,6 +3,8 @@ package org.radix.hyperscale;
 import java.lang.management.GarbageCollectorMXBean;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryUsage;
+import java.util.Map;
+
 import javax.management.NotificationEmitter;
 import javax.management.NotificationListener;
 import javax.management.openmbean.CompositeData;
@@ -17,6 +19,7 @@ public class GCMonitor
 	static 
 	{
 		memoryLog.setLevels(Logging.ALL);
+		memoryLog.setStdOut(false);
 	}
     
     private static final long 	GC_DURATION_THRESHOLD_MS = 250;
@@ -48,7 +51,6 @@ public class GCMonitor
         for (final GarbageCollectorMXBean gcBean : ManagementFactory.getGarbageCollectorMXBeans()) 
         {
             final NotificationEmitter emitter = (NotificationEmitter) gcBean;
-            
             final NotificationListener listener = (notification, handback) -> {
                 if (notification.getType().equals(GarbageCollectionNotificationInfo.GARBAGE_COLLECTION_NOTIFICATION)) 
                 {
@@ -134,11 +136,11 @@ public class GCMonitor
             alertLevel = Logging.FATAL;
         }
         
-        if (shouldLog) 
+        if (shouldLog)
             logGCEvent(alertLevel, gcName, gcAction, duration, memoryReleasedPercent, availablePercent, totalHeap);
     }
     
-    private MemoryUsage getTotalHeapUsage(java.util.Map<String, MemoryUsage> memoryUsageMap) 
+    private MemoryUsage getTotalHeapUsage(Map<String, MemoryUsage> memoryUsageMap) 
     {
         long used = 0;
         long committed = 0;

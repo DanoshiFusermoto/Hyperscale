@@ -1,5 +1,6 @@
 package org.radix.hyperscale.ledger;
 
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -254,56 +255,56 @@ public final class Block extends ExtendedObject implements CompoundPrimitive
 			int currentSize = getHeader().getSize();
 			for (Atom atom : getAccepted())
 			{
-				byte[] cached = atom.getCachedDsonOutput();
-				if (cached == null)
-					cached = Serialization.getInstance().toDson(atom, Output.WIRE);
-				
-				currentSize += cached.length;
+				ByteBuffer cached = atom.getCachedDsonOutput();
+				if (cached != null)
+					currentSize += cached.limit();
+				else
+					currentSize += Serialization.getInstance().toDsonSize(atom, Output.WIRE);
 			}
 			
 			for (Atom atom : getUnaccepted())
 			{
-				byte[] cached = atom.getCachedDsonOutput();
-				if (cached == null)
-					cached = Serialization.getInstance().toDson(atom, Output.WIRE);
-				
-				currentSize += cached.length;
+				ByteBuffer cached = atom.getCachedDsonOutput();
+				if (cached != null)
+					currentSize += cached.limit();
+				else
+					currentSize += Serialization.getInstance().toDsonSize(atom, Output.WIRE);
 			}
 
 			for (AtomCertificate certificate : getCertificates())
 			{
-				byte[] cached = certificate.getCachedDsonOutput();
-				if (cached == null)
-					cached = Serialization.getInstance().toDson(certificate, Output.WIRE);
-				
-				currentSize += cached.length;
+				ByteBuffer cached = certificate.getCachedDsonOutput();
+				if (cached != null)
+					currentSize += cached.limit();
+				else
+					currentSize += Serialization.getInstance().toDsonSize(certificate, Output.WIRE);
 			}
 
 			for (ExecutionTimeout timeout : getUnexecuted())
 			{
-				byte[] cached = timeout.getCachedDsonOutput();
-				if (cached == null)
-					cached = Serialization.getInstance().toDson(timeout, Output.WIRE);
-				
-				currentSize += cached.length;
+				ByteBuffer cached = timeout.getCachedDsonOutput();
+				if (cached != null)
+					currentSize += cached.limit();
+				else
+					currentSize += Serialization.getInstance().toDsonSize(timeout, Output.WIRE);
 			}
 
 			for (CommitTimeout timeout : getUncommitted())
 			{
-				byte[] cached = timeout.getCachedDsonOutput();
-				if (cached == null)
-					cached = Serialization.getInstance().toDson(timeout, Output.WIRE);
-				
-				currentSize += cached.length;
+				ByteBuffer cached = timeout.getCachedDsonOutput();
+				if (cached != null)
+					currentSize += cached.limit();
+				else
+					currentSize += Serialization.getInstance().toDsonSize(timeout, Output.WIRE);
 			}
 			
 			for (PolyglotPackage pakage : getPackages())
 			{
-				byte[] cached = pakage.getCachedDsonOutput();
-				if (cached == null)
-					cached = Serialization.getInstance().toDson(pakage, Output.WIRE);
-				
-				currentSize += cached.length;
+				ByteBuffer cached = pakage.getCachedDsonOutput();
+				if (cached != null)
+					currentSize += cached.limit();
+				else
+					currentSize += Serialization.getInstance().toDsonSize(pakage, Output.WIRE);
 			}
 
 			currentSize += getExecutables().size() * Hash.BYTES;

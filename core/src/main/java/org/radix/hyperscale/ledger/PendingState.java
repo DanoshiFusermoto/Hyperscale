@@ -31,7 +31,7 @@ import org.radix.hyperscale.logging.Logger;
 import org.radix.hyperscale.logging.Logging;
 import org.radix.hyperscale.utils.Numbers;
 
-public final class PendingState implements Hashable, StateAddressable
+public final class PendingState implements Hashable, StateAddressable, Comparable<PendingState>
 {
 	// State vote merkle verification cache
 	// TODO refactor this away from here
@@ -127,6 +127,9 @@ public final class PendingState implements Hashable, StateAddressable
 				throw new IllegalArgumentException("Input substate is not for state address "+this.address);
 			
 			this.stateInput = stateInput;
+			
+			if (stateLog.hasLevel(Logging.DEBUG))
+				stateLog.debug(this.context.getName()+": State input is set for pending state "+stateInput);
 		}
 	}
 	
@@ -411,10 +414,16 @@ public final class PendingState implements Hashable, StateAddressable
 		
 		return false;
 	}
+	
+	@Override
+	public int compareTo(PendingState other)
+	{
+		return this.address.compareTo(other.address);
+	}
 
 	@Override
 	public String toString()
 	{
-		return this.address+(this.lockMode == null ? "":" "+this.lockMode)+" @ "+this.atom.getHash()+":"+(this.header == null ? "unaccepted":this.header.getHeight());
+		return this.address+(this.lockMode == null ? "":" "+this.lockMode)+" @ "+this.atom.getHash()+" "+(this.header == null ? "unaccepted":(this.header.getHeight()+":"+this.header.getHash()));
 	}
 }

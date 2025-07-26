@@ -134,35 +134,71 @@ public class PersistedConfiguration
 	 * Returns a property value with default if not found
 	 */
 	@SuppressWarnings("unchecked")
-	public <T> T get(String key, T defaultValue)
+	public <T> T get(String key, T _default)
 	{
 		String value = this.properties.getProperty(key);
 		
 		if (value == null)
-			return defaultValue;
+			return _default;
 		
-		if (defaultValue == null)
+		if (_default == null)
 			return (T) value;
-		else if (defaultValue instanceof Byte)
+		else if (_default instanceof Byte)
 			return (T) Byte.valueOf(value);
-		else if (defaultValue instanceof Short)
+		else if (_default instanceof Short)
 			return (T) Short.valueOf(value);
-		else if (defaultValue instanceof Integer)
+		else if (_default instanceof Integer)
 			return (T) Integer.valueOf(value);
-		else if (defaultValue instanceof Long)
+		else if (_default instanceof Long)
 			return (T) Long.valueOf(value);
-		else if (defaultValue instanceof Float)
+		else if (_default instanceof Float)
 			return (T) Float.valueOf(value);
-		else if (defaultValue instanceof Double)
+		else if (_default instanceof Double)
 			return (T) Double.valueOf(value);
-		else if (defaultValue instanceof Boolean)
+		else if (_default instanceof Boolean)
 			return (T) Boolean.valueOf(value);
-		else if (defaultValue instanceof String)
+		else if (_default instanceof String)
 			return (T) value;
 		
 		return null;
 	}
 	
+	/**
+	 * Returns a boolean primitive property value with default if not found
+	 */
+	public boolean get(String key, boolean _default)
+	{
+		final String value = this.properties.getProperty(key);
+		if (value == null)
+			return _default;
+		
+		return Boolean.parseBoolean(value);
+	}
+
+	/**
+	 * Returns an int primitive property value with default if not found
+	 */
+	public int get(String key, int _default)
+	{
+		final String value = this.properties.getProperty(key);
+		if (value == null)
+			return _default;
+		
+		return Integer.parseInt(value);
+	}
+
+	/**
+	 * Returns a long primitive property value with default if not found
+	 */
+	public long get(String key, long _default)
+	{
+		final String value = this.properties.getProperty(key);
+		if (value == null)
+			return _default;
+		
+		return Long.parseLong(value);
+	}
+
 	public Enumeration<?> propertyNames()
 	{
 		return this.properties.propertyNames();

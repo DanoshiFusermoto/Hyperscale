@@ -146,6 +146,43 @@ public class Configuration extends PersistedConfiguration
 
 		return null;
 	}
+	
+	/**
+	 * Returns a boolean primitive property value with default if not found
+	 */
+	public boolean get(String key, boolean _default)
+	{
+		final String value = getCommandLine(key, null);
+		if (value == null)
+			return super.get(key, _default);
+	
+		return Boolean.parseBoolean(value);
+	}
+
+	/**
+	 * Returns an int primitive property value with default if not found
+	 */
+	public int get(String key, int _default)
+	{
+		final String value = getCommandLine(key, null);
+		if (value == null)
+			return super.get(key, _default);
+	
+		return Integer.parseInt(value);
+	}
+
+	/**
+	 * Returns a long primitive property value with default if not found
+	 */
+	public long get(String key, long _default)
+	{
+		final String value = getCommandLine(key, null);
+		if (value == null)
+			return super.get(key, _default);
+	
+		return Long.parseLong(value);
+	}
+
 
 	public boolean hasCommandLine(String key)
 	{

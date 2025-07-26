@@ -108,8 +108,7 @@ public class StateMachine extends Function
 				final Atom atom = this.atomBuilder.build(Universe.get().getPrimitivePOW());
 				printStream.println("Submitting atom "+atom.getHash()+" -> "+Serialization.getInstance().toJsonObject(atom, Output.API).toString(4));
 
-				if (context.getLedger().submit(atom) == false)
-					printStream.println("Failed to submit atom "+atom);
+				context.getLedger().submit(atom);
 			}
 			finally
 			{

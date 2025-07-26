@@ -20,31 +20,38 @@ public final class ComputeKey extends Key
 	private transient Identity identity;
 
 	@JsonCreator
-	public static ComputeKey from(byte[] bytes)
+	public static ComputeKey from(final byte[] bytes)
 	{
 	    return new ComputeKey(bytes, 0);
 	}
 
-	public static ComputeKey from(byte[] bytes, int offset)
+	public static ComputeKey from(final byte[] bytes, final int offset)
 	{
 	    return new ComputeKey(bytes, offset);
 	}
 	
-	public static ComputeKey from(Hash key)
+	public static ComputeKey from(final Hash key)
 	{
 	    return new ComputeKey(key.toByteArray(), 0);
 	}
 
-	public static ComputeKey from(String key)
+	public static ComputeKey from(final String key)
 	{
-		byte[] bytes = Base58.fromBase58(Objects.requireNonNull(key, "Key string is null"));
-	    return new ComputeKey(bytes, 0);
+	    return new ComputeKey(key);
 	}
 
-	private ComputeKey(byte[] key, int offset)  
+	private ComputeKey(final String key)  
+	{
+		Objects.requireNonNull(key, "Key string is null");
+		byte[] bytes = Base58.fromBase58(key);
+		Numbers.equals(bytes.length, BYTES, "Invalid compute key size");
+		this.bytes = bytes;
+	}
+	
+	private ComputeKey(final byte[] key, final int offset)  
 	{
 		Objects.requireNonNull(key, "Key bytes is null");
-		Numbers.equals(key.length-offset, BYTES, "Invalid compute key size "+(key.length-offset));
+		Numbers.equals(key.length-offset, BYTES, "Invalid compute key size");
 		this.bytes = Arrays.copyOfRange(key, offset, key.length);
 	}
 
