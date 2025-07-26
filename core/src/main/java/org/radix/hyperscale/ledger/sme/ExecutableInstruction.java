@@ -21,9 +21,10 @@ abstract class ExecutableInstruction extends ArgumentedInstruction
 			argumentClasses[a+1] = arguments[a].getClass();
 		}
 		
-		Method[] methods = this.getClass().getDeclaredMethods();
-		for (Method methref : methods) 
+		Method[] methods = getClass().getDeclaredMethods();
+		for (int m = 0 ; m < methods.length ; m++) 
 		{
+			final Method methref = methods[m];
 	        if (!methref.getName().equals("lock"))
 	            continue;
 
@@ -64,8 +65,9 @@ abstract class ExecutableInstruction extends ArgumentedInstruction
 		}
 		
 		Method[] methods = getClass().getDeclaredMethods();
-		for (Method methref : methods) 
+		for (int m = 0 ; m < methods.length ; m++) 
 		{
+			final Method methref = methods[m];
 	        if (!methref.getName().equals("execute"))
 	            continue;
 
