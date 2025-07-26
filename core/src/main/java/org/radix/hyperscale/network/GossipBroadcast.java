@@ -1,13 +1,12 @@
 package org.radix.hyperscale.network;
 
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
+import org.radix.hyperscale.collections.AdaptiveArrayList;
+import org.radix.hyperscale.collections.AdaptiveCollection;
 import org.radix.hyperscale.common.Primitive;
 import org.radix.hyperscale.ledger.ShardGroupID;
 import org.radix.hyperscale.utils.Numbers;
@@ -16,12 +15,12 @@ final class GossipBroadcast
 {
 	private final long				timestamp; 				
 	private final Primitive 		primitive;
-	private final List<ShardGroupID> shardGroupIDs;
+	private final Collection<ShardGroupID> shardGroupIDs;
 	
 	GossipBroadcast(final Primitive primitive)
 	{
 		this.primitive = Objects.requireNonNull(primitive, "Primitive is null");
-		this.shardGroupIDs = new ArrayList<ShardGroupID>(4);
+		this.shardGroupIDs = new AdaptiveArrayList<ShardGroupID>(4);
 		this.timestamp = System.currentTimeMillis();
 	}
 
@@ -42,7 +41,7 @@ final class GossipBroadcast
 		if (shardGroupIDs.length == 1)
 			this.shardGroupIDs = Collections.singletonList(shardGroupIDs[0]);
 		else
-			this.shardGroupIDs = Arrays.asList(shardGroupIDs);
+			this.shardGroupIDs = new AdaptiveArrayList<ShardGroupID>(shardGroupIDs).freeze();
 	}
 
 	GossipBroadcast(final Primitive primitive, final Collection<ShardGroupID> shardGroupIDs)
@@ -51,7 +50,11 @@ final class GossipBroadcast
 		Numbers.isZero(shardGroupIDs.size(), "Shard group IDs is empty");
 		this.primitive = Objects.requireNonNull(primitive, "Primitive is null");
 		this.timestamp = System.currentTimeMillis();
-		this.shardGroupIDs = new ArrayList<ShardGroupID>(shardGroupIDs);
+		
+		if (shardGroupIDs instanceof AdaptiveCollection adaptiveCollection && adaptiveCollection.isFrozen())
+			this.shardGroupIDs = shardGroupIDs;
+		else 
+			this.shardGroupIDs = new AdaptiveArrayList<ShardGroupID>(shardGroupIDs).freeze();
 	}
 	
 	public boolean isUrgent()
@@ -73,7 +76,7 @@ final class GossipBroadcast
 		return this.primitive;
 	}
 
-	public List<ShardGroupID> getShardGroups()
+	public Collection<ShardGroupID> getShardGroups()
 	{
 		return this.shardGroupIDs;
 	}
@@ -82,7 +85,16 @@ final class GossipBroadcast
 	{
 		Objects.requireNonNull(shardGroupIDs, "Shard group IDs is null");
 		Numbers.isZero(shardGroupIDs.size(), "Shard groups IDs is empty");
-		this.shardGroupIDs.clear();
+		
+		if (this.shardGroupIDs instanceof AdaptiveCollection freezable)
+		{
+			if (freezable.isFrozen())
+				throw new IllegalStateException("Shard group IDs for broadcast as already set and are immutable");
+		}
+		
+		if (this.shardGroupIDs.isEmpty() == false)
+			throw new IllegalStateException("Shard group IDs for broadcast as already set");
+		
 		this.shardGroupIDs.addAll(shardGroupIDs);
 	}
 	
@@ -91,5 +103,4 @@ final class GossipBroadcast
 	{
 		return this.primitive.getClass().getCanonicalName()+" "+this.primitive.getHash()+" "+(this.shardGroupIDs == null ? "" : this.shardGroupIDs);
 	}
-
 }
