@@ -16,7 +16,6 @@ import org.radix.hyperscale.exceptions.ServiceException;
 import org.radix.hyperscale.exceptions.StartupException;
 import org.radix.hyperscale.exceptions.TerminationException;
 import org.radix.hyperscale.executors.Executor;
-import org.radix.hyperscale.executors.ScheduledExecutable;
 import org.radix.hyperscale.logging.Logger;
 import org.radix.hyperscale.logging.Logging;
 import org.radix.hyperscale.utils.Bytes;
@@ -69,10 +68,10 @@ public final class SystemMetaData extends DatabaseStore implements Service
 			throw new RuntimeException(ex);
 		}
 
-		this.flush = Executor.getInstance().scheduleWithFixedDelay(new ScheduledExecutable(30, 30, TimeUnit.SECONDS)
+		this.flush = Executor.getInstance().scheduleWithFixedDelay(new Runnable()
 		{
 			@Override
-			public void execute()
+			public void run()
 			{
 				try
 				{
@@ -83,7 +82,7 @@ public final class SystemMetaData extends DatabaseStore implements Service
 					log.error(e.getMessage(), e);
 				}
 			}
-		});
+		}, 30, 30, TimeUnit.SECONDS);
 	}
 
 	@Override

@@ -70,7 +70,7 @@ public abstract class LatchedProcessor extends Executable
 		
 		try 
 		{
-			while(isTerminated() == false)
+			while(isTerminate() == false)
 			{
 				if (this.signalled == false)
 				{

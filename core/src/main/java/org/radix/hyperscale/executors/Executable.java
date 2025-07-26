@@ -1,53 +1,57 @@
 package org.radix.hyperscale.executors;
 
-import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Future;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 public abstract class Executable implements Runnable
 {
-	private static final AtomicLong nextID = new AtomicLong(0); 
+	private static final AtomicLong IDIncrementer = new AtomicLong(0);
 
-	private final long id = nextID.incrementAndGet();
-	private final AtomicReference<Future<?>> future = new AtomicReference<>();
-	private final AtomicBoolean terminated = new AtomicBoolean(false);
-	private final AtomicBoolean cancelled =  new AtomicBoolean(false);
-	private final AtomicBoolean finished =  new AtomicBoolean(false);
+	private enum State { 
+        PENDING,      
+        RUNNING,      
+        COMPLETED,    
+        CANCELLED,    
+        FAILED        
+    }
+	
+	private final long id = IDIncrementer.incrementAndGet();
 
-	private CountDownLatch finishLatch;
+	private final AtomicReference<Thread> thread = new AtomicReference<Thread>();
+	private CountDownLatch completionLatch;
+	
+    private final AtomicReference<State> state = new AtomicReference<>(State.PENDING);
+	private volatile Throwable thrown = null;
+	private volatile boolean terminate = false;
 
-	public final void terminate(boolean finish)
+	public final boolean isTerminate()
 	{
-		if (this.terminated.compareAndSet(false, true) == true)
-		{
-			Future<?> thisFuture = this.future.get();
-			if (thisFuture != null && thisFuture.cancel(false) == false && finish)
-				awaitFinish();
-
-			onTerminated();
-		}
-		else
-			throw new IllegalStateException("Executable "+this+" is already terminated");
+		return this.terminate;
 	}
 
-	public final boolean isTerminated()
+	// TODO need to be able to await completion
+	public final void terminate()
 	{
-		return this.terminated.get();
+		this.terminate = true;
 	}
 
+	public final boolean isRunning() 
+	{
+        return this.state.get() == State.RUNNING;
+    }
+	
 	public final boolean isCancelled()
 	{
-		return this.cancelled.get();
+		 return this.state.get() == State.CANCELLED;
 	}
 
-	public final boolean isFinished()
+	public final boolean isDone()
 	{
-		return this.finished.get();
-	}
-
+		State current = this.state.get();
+        return current == State.COMPLETED || current == State.CANCELLED || current == State.FAILED;
+    }
+	
 	public abstract void execute();
 
 	protected void onCancelled()
@@ -55,7 +59,12 @@ public abstract class Executable implements Runnable
 		// Stub function for abstract class
 	}
 
-	protected void onTerminated()
+	protected void onThrown(final Throwable thrown)
+	{
+		// Stub function for abstract class
+	}
+
+	protected void onCompleted()
 	{
 		// Stub function for abstract class
 	}
@@ -63,73 +72,110 @@ public abstract class Executable implements Runnable
 	@Override
 	public final void run()
 	{
+		if (this.state.compareAndSet(State.PENDING, State.RUNNING) == false) 
+		{
+            final State currentState = this.state.get();
+            if (currentState == State.CANCELLED)
+                return; // Already cancelled, don't run
+            else
+                throw new IllegalStateException("Executable "+this+" is in state "+currentState);
+        }
+		
+		if (this.thread.compareAndSet(null, Thread.currentThread()) == false)
+			throw new IllegalStateException("Executable "+this+" is running");
+
 		try
 		{
-			if (this.cancelled.get() == false)
-			{
-				if (this.terminated.get() == true)
-					throw new IllegalStateException("Executable "+this+" is terminated");
+			this.completionLatch = new CountDownLatch(1);
 
-				this.finished.set(false);
-				this.finishLatch = new CountDownLatch(1);
-				execute();
-			}
+			execute();
+			
+			if (this.state.compareAndSet(State.RUNNING, State.COMPLETED) == true)
+                onCompleted();
+            else
+            	onCancelled();
 		}
 		// TODO check this isnt needed
 		catch (Throwable t)
 		{
-			// FIXME weird exception happens here on startup
-			Future<?> thisFuture = this.future.get();
-			if (thisFuture != null)
-				thisFuture.cancel(false);
-
-			this.terminated.set(true);
+			this.thrown = t;
+			if (this.state.compareAndSet(State.RUNNING, State.FAILED) == true)
+                onThrown(this.thrown);
+            else
+                onCancelled();
 		}
 		finally
 		{
-			this.finished.set(true);
-			this.finishLatch.countDown();
+			// Always clean up execution state
+            this.thread.set(null);
+            if (this.completionLatch != null)
+            	this.completionLatch.countDown();
 		}
 	}
 	
 	public final boolean cancel()
 	{
-		if (this.cancelled.compareAndSet(false, true) == true)
-		{
-			Future<?> thisFuture = this.future.get();
-			if (thisFuture != null)
-			{
-				if (thisFuture.isDone() == false && thisFuture.cancel(false) == true)
-				{
-					onCancelled();
-					return true;
-				}
-			}
-			
-			return false;
-		}
-		else
-			throw new IllegalStateException("Executable "+this+" is cancelled");
+		return cancel(false);
 	}
+	
+	public final boolean cancel(boolean force)
+	{
+		final State currentState = this.state.get();
+        switch (currentState) 
+        {
+            case COMPLETED:
+            case FAILED:
+                return false;
+                
+            case CANCELLED:
+                throw new IllegalStateException("Executable " + this + " is already cancelled");
+                
+            case PENDING:
+                if (this.state.compareAndSet(State.PENDING, State.CANCELLED) == true) 
+                {
+                    onCancelled();
+                    return true;
+                } 
+                else
+                    return cancel(force);
+            case RUNNING:
+                if (this.state.compareAndSet(State.RUNNING, State.CANCELLED) == true) 
+                {
+                	final Thread runningThread = this.thread.get();
+                    if (runningThread != null) 
+                    {
+                        if (force == false) 
+                        {
+                        	this.terminate = true;
+                            if (this.completionLatch != null)
+                            {
+								try
+								{
+									this.completionLatch.await();
+								} 
+								catch (InterruptedException e)
+								{
+									Thread.currentThread().interrupt();
+									cancel(true);
+								}
+                            }
+                        } 
+                        else
+                            // Note: finalization will happen in the finally block of run()
+                            runningThread.interrupt();
+                    }
+                    return true;
+                } 
+                else
+                    return false;
+            default:
+                throw new IllegalStateException("Unknown state: " + currentState);
+        }
+	}
+	
 	public final long getID()
 	{
 		return this.id;
-	}
-
-	public final Future<?> getFuture()
-	{
-		return this.future.get();
-	}
-
-	public final void setFuture(final Future<?> future)
-	{
-		Objects.requireNonNull(future, "Executable future is null");
-		this.future.updateAndGet(f -> {
-			if (f != null)
-				throw new IllegalStateException("Future is already set for executable "+this);
-			
-			return future;
-		});
 	}
 
 	@Override
@@ -156,20 +202,6 @@ public abstract class Executable implements Runnable
 	@Override
 	public String toString()
 	{
-		return "ID: "+this.id+" Terminated: "+this.terminated;
-	}
-
-	private void awaitFinish()
-	{
-		try 
-		{
-			if (this.finishLatch != null)
-				this.finishLatch.await();
-		} 
-		catch (InterruptedException e) 
-		{
-			Thread.currentThread().interrupt();
-			
-		}
+		return "ID: "+this.id;
 	}
 }

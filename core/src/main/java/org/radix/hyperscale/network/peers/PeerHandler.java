@@ -28,6 +28,7 @@ import org.radix.hyperscale.Context;
 import org.radix.hyperscale.Service;
 import org.radix.hyperscale.Universe;
 import org.radix.hyperscale.WebService;
+import org.radix.hyperscale.collections.AdaptiveArrayList;
 import org.radix.hyperscale.crypto.Hash;
 import org.radix.hyperscale.crypto.Identity;
 import org.radix.hyperscale.events.EventListener;
@@ -35,7 +36,6 @@ import org.radix.hyperscale.exceptions.ServiceException;
 import org.radix.hyperscale.exceptions.StartupException;
 import org.radix.hyperscale.exceptions.TerminationException;
 import org.radix.hyperscale.executors.Executor;
-import org.radix.hyperscale.executors.ScheduledExecutable;
 import org.radix.hyperscale.logging.Logger;
 import org.radix.hyperscale.logging.Logging;
 import org.radix.hyperscale.network.AbstractConnection;
@@ -244,18 +244,18 @@ public class PeerHandler implements Service
 			});
 			
 	        // PEERS HOUSEKEEPING //
-			long houseKeepingInterval = this.context.getConfiguration().get("network.peers.broadcast.interval", 60);
-			this.houseKeepingTaskFuture = Executor.getInstance().scheduleWithFixedDelay(new ScheduledExecutable(houseKeepingInterval, houseKeepingInterval, TimeUnit.SECONDS)
+			int houseKeepingInterval = this.context.getConfiguration().get("network.peers.broadcast.interval", 60);
+			this.houseKeepingTaskFuture = Executor.getInstance().scheduleWithFixedDelay(new Runnable()
 			{
 				@Override
-				public void execute()
+				public void run()
 				{
  					try
 					{
 						// Clean out aged peers with no activity
 						for (final Peer peer : PeerHandler.this.getPeerStore().get(new AllPeersFilter())) 
 						{
-							if (peer.getIdentity() != null && PeerHandler.this.context.getNetwork().has(peer.getIdentity(), ConnectionState.CONNECTING, ConnectionState.CONNECTED))
+							if (peer.getIdentity() != null && PeerHandler.this.context.getNetwork().has(peer.getIdentity(), ConnectionState.SELECT_CONNECTING_CONNECTED))
 								continue;
 							
 							// Is aged?
@@ -276,7 +276,7 @@ public class PeerHandler implements Service
 						PeerHandler.this.getPeerStore().flush();
 	
 						// Ping / pongs //
-						for (final AbstractConnection connection : PeerHandler.this.context.getNetwork().get(StandardConnectionFilter.build(PeerHandler.this.context).setStates(ConnectionState.CONNECTED)))
+						for (final AbstractConnection connection : PeerHandler.this.context.getNetwork().get(StandardConnectionFilter.build(PeerHandler.this.context).setStates(ConnectionState.SELECT_CONNECTED)))
 						{
 							synchronized(PeerHandler.this.pings)
 							{
@@ -299,7 +299,7 @@ public class PeerHandler implements Service
 
 						// Peer refresh
 						// Seems single connection refresh every 60s is sufficient on networks up to about 5k nodes
-						final StandardConnectionFilter connectionFilter = StandardConnectionFilter.build(PeerHandler.this.context).setStates(ConnectionState.CONNECTED);
+						final StandardConnectionFilter connectionFilter = StandardConnectionFilter.build(PeerHandler.this.context).setStates(ConnectionState.SELECT_CONNECTED);
 						final List<AbstractConnection> connections = PeerHandler.this.context.getNetwork().get(connectionFilter, true);
 						if (connections.isEmpty() == false)
 							PeerHandler.this.context.getNetwork().getMessaging().send(new GetPeersMessage(), connections.getFirst());
@@ -309,7 +309,7 @@ public class PeerHandler implements Service
 						networklog.error("Peers update failed", t);
 					}
 				}
-			});
+			}, houseKeepingInterval, houseKeepingInterval, TimeUnit.SECONDS);
 	
 			// Register listeners
 			this.context.getEvents().register(this.peerListener);
@@ -424,7 +424,7 @@ public class PeerHandler implements Service
 	{
 		Objects.requireNonNull(identities, "Identities is null");
 		
-		List<Peer> peers = new ArrayList<Peer>();
+		final AdaptiveArrayList<Peer> peers = new AdaptiveArrayList<Peer>();
 		for (final Identity identity : identities)
 		{
 			final Peer peer = getPeerStore().get(identity);
@@ -440,7 +440,7 @@ public class PeerHandler implements Service
 		if (sorter != null)
 			peers.sort(sorter);
 
-		return Collections.unmodifiableList(peers);
+		return peers.freeze();
 	}
 	
 	/**

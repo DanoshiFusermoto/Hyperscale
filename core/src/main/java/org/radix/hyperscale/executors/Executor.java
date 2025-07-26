@@ -77,38 +77,38 @@ public class Executor
 	public Future<?> schedule(final ScheduledExecutable executable)
 	{
 		Objects.requireNonNull(executable, "Executable to schedule is null");
-		executable.setFuture(this.scheduledExecutor.schedule(executable, executable.getInitialDelay(), executable.getTimeUnit()));
-		return executable.getFuture();
+		return this.scheduledExecutor.schedule(executable, executable.getDelay(), executable.getTimeUnit());
 	}
 
-	public Future<?> scheduleWithFixedDelay(final ScheduledExecutable executable)
-	{
-		Objects.requireNonNull(executable, "Executable to schedule is null");
-		executable.setFuture(this.scheduledExecutor.scheduleWithFixedDelay(executable, executable.getInitialDelay(), executable.getRecurrentDelay(), executable.getTimeUnit()));
-		return executable.getFuture();
-	}
-
-	public Future<?> scheduleAtFixedRate(final ScheduledExecutable executable)
-	{
-		Objects.requireNonNull(executable, "Executable to schedule is null");
-		executable.setFuture(this.scheduledExecutor.scheduleAtFixedRate(executable, executable.getInitialDelay(), executable.getRecurrentDelay(), executable.getTimeUnit()));
-		return executable.getFuture();
-	}
-
-	public Future<?> schedule(final Executable executable, final int initialDelay, final TimeUnit unit)
+	public Future<?> schedule(final Executable executable, final int delay, final TimeUnit unit)
 	{
 		Objects.requireNonNull(executable, "Executable to schedule is null");
 		Objects.requireNonNull(unit, "Executable time unit is null");
-		executable.setFuture(this.scheduledExecutor.schedule(executable, initialDelay, unit));
-		return executable.getFuture();
+		return this.scheduledExecutor.schedule(executable, delay, unit);
 	}
 
-	public Future<?> schedule(final Runnable runnable, final int initialDelay, final TimeUnit unit)
+	public Future<?> schedule(final Runnable runnable, final int delay, final TimeUnit unit)
 	{
 		Objects.requireNonNull(runnable, "Runnable to schedule is null");
 		Objects.requireNonNull(unit, "Executable time unit is null");
 
-		return this.scheduledExecutor.schedule(runnable, initialDelay, unit);
+		return this.scheduledExecutor.schedule(runnable, delay, unit);
+	}
+
+	public Future<?> scheduleWithFixedDelay(final Runnable runnable, final int delay, final int interval, final TimeUnit unit)
+	{
+		Objects.requireNonNull(runnable, "Runnable to schedule is null");
+		Objects.requireNonNull(unit, "Executable time unit is null");
+
+		return this.scheduledExecutor.scheduleWithFixedDelay(runnable, delay, interval, unit);
+	}
+
+	public Future<?> scheduleAtFixedRate(final Runnable runnable, final int delay, final int interval, final TimeUnit unit)
+	{
+		Objects.requireNonNull(runnable, "Runnable to schedule is null");
+		Objects.requireNonNull(unit, "Executable time unit is null");
+
+		return this.scheduledExecutor.scheduleAtFixedRate(runnable, delay, interval, unit);
 	}
 
 	public Future<?> submit(final Runnable runnable)
@@ -126,8 +126,6 @@ public class Executor
 	public Future<?> submit(final Executable executable)
 	{
 		Objects.requireNonNull(executable, "Executable to submit is null");
-		Future<?> future = this.immediateExecutor.submit(executable);
-		executable.setFuture(future);
-		return future;
+		return this.immediateExecutor.submit(executable);
 	}
 }

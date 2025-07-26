@@ -8,6 +8,6 @@ public abstract class NetworkTask extends ScheduledExecutable
 {
 	protected NetworkTask(final long delay, final TimeUnit unit)
 	{
-		super(delay, 0, unit);
+		super(delay, unit);
 	}
 }

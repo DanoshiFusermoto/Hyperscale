@@ -103,7 +103,7 @@ public class BootstrapService extends Executable
 
 		final int connectionTimeout = this.context.getConfiguration().get("network.discovery.connection.timeout", 10000);
 		final int readTimeout = this.context.getConfiguration().get("network.discovery.read.timeout", 10000);
-		while(isCompleted == false && isTerminated() == false)
+		while(isCompleted == false && isTerminate() == false)
 		{
 			if (this.context.getNetwork().count(Protocol.TCP, ConnectionState.SELECT_CONNECTED) > 0)
 			{
@@ -213,6 +213,6 @@ public class BootstrapService extends Executable
 		}		
 		
 		networkLog.info(this.context.getName()+": Boostrapper terminating");
-		terminate(false);
+		terminate();
 	}
 }

@@ -6,7 +6,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -161,10 +160,8 @@ final public class Spamathon
 	        }
 	    }	    
 
-	    final Future<?> spamFuture = this.spamExecutor.submit(spammer);		
-	    spammer.setFuture(spamFuture);
+	    this.spamExecutor.submit(spammer);		
 		this.spammer = spammer;
-
 		return (T) spammer;
 	}
 
