@@ -7,10 +7,11 @@ import java.util.List;
 import java.util.Objects;
 
 import org.radix.hyperscale.crypto.Hash;
-import org.radix.hyperscale.crypto.MerkleProof;
 import org.radix.hyperscale.crypto.bls12381.BLSKeyPair;
 import org.radix.hyperscale.crypto.bls12381.BLSPublicKey;
 import org.radix.hyperscale.crypto.bls12381.BLSSignature;
+import org.radix.hyperscale.crypto.merkle.MerkleAudit;
+import org.radix.hyperscale.crypto.merkle.MerkleProof;
 import org.radix.hyperscale.utils.Numbers;
 
 public final class StateVote extends Vote<BLSKeyPair, BLSPublicKey, BLSSignature>
@@ -47,7 +48,7 @@ public final class StateVote extends Vote<BLSKeyPair, BLSPublicKey, BLSSignature
 	private final Hash block;
 	private final Hash execution;
 	private final Hash voteMerkle;
-	private final List<MerkleProof> voteAudit;
+	private final MerkleAudit voteAudit;
 	
 	StateVote(final StateAddress address, final Hash atom, final Hash block, final Hash execution, final BLSPublicKey owner, final long weight)
 	{
@@ -58,10 +59,10 @@ public final class StateVote extends Vote<BLSKeyPair, BLSPublicKey, BLSSignature
 		this.execution = execution;
 		this.address = address;
 		this.voteMerkle = Hash.ZERO;
-		this.voteAudit = Collections.emptyList();
+		this.voteAudit = MerkleAudit.NULL;
 	}
 
-	StateVote(final StateAddress address, final Hash atom, final Hash block, final Hash execution, final Hash voteMerkle, final List<MerkleProof> voteAudit, final BLSPublicKey owner, final BLSSignature signature, final long weight)
+	StateVote(final StateAddress address, final Hash atom, final Hash block, final Hash execution, final Hash voteMerkle, final MerkleAudit voteAudit, final BLSPublicKey owner, final BLSSignature signature, final long weight)
 	{
 		super(convertToHash(address, atom, block, execution), execution.equals(Hash.ZERO) == false ? CommitDecision.ACCEPT : CommitDecision.REJECT, owner, signature, weight);
 		Objects.requireNonNull(voteMerkle, "Vote merkle is null");
@@ -75,10 +76,10 @@ public final class StateVote extends Vote<BLSKeyPair, BLSPublicKey, BLSSignature
 		this.execution = execution;
 		this.address = address;
 		this.voteMerkle = voteMerkle;
-		this.voteAudit = new ArrayList<MerkleProof>(voteAudit);
+		this.voteAudit = voteAudit;
 	}
 	
-	StateVote(final Hash object, final StateAddress address, final Hash atom, final Hash block, final Hash execution, final Hash voteMerkle, final List<MerkleProof> voteAudit, final BLSPublicKey owner, final BLSSignature signature, final long weight)
+	StateVote(final Hash object, final StateAddress address, final Hash atom, final Hash block, final Hash execution, final Hash voteMerkle, final MerkleAudit voteAudit, final BLSPublicKey owner, final BLSSignature signature, final long weight)
 	{
 		super(object, execution.equals(Hash.ZERO) == false ? CommitDecision.ACCEPT : CommitDecision.REJECT, owner, signature, weight);
 		
@@ -93,7 +94,7 @@ public final class StateVote extends Vote<BLSKeyPair, BLSPublicKey, BLSSignature
 		this.execution = execution;
 		this.address = address;
 		this.voteMerkle = voteMerkle;
-		this.voteAudit = new ArrayList<MerkleProof>(voteAudit);
+		this.voteAudit = voteAudit;
 	}
 
 	@Override
@@ -175,9 +176,9 @@ public final class StateVote extends Vote<BLSKeyPair, BLSPublicKey, BLSSignature
 		return this.voteMerkle;
 	}
 	
-	public List<MerkleProof> getVoteAudit()
+	public MerkleAudit getVoteAudit()
 	{
-		return Collections.unmodifiableList(this.voteAudit);
+		return this.voteAudit;
 	}
 	
 	// TODO put back to final
