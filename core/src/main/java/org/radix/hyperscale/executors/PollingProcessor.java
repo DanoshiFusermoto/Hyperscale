@@ -12,7 +12,7 @@ public abstract class PollingProcessor extends Executable
 	{
 		try 
 		{
-			while(isTerminated() == false)
+			while(isTerminate() == false)
 			{
                 process();
 			}

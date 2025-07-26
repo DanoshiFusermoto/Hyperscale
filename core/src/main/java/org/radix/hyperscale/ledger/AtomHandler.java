@@ -355,7 +355,7 @@ public class AtomHandler implements Service, LedgerInterface
 	@Override
 	public void stop() throws TerminationException 
 	{
-		this.atomProcessor.terminate(true);
+		this.atomProcessor.terminate();
 
 		this.context.getEvents().unregister(this.syncBlockListener);
 		this.context.getEvents().unregister(this.asyncAtomListener);

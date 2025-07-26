@@ -68,7 +68,7 @@ final class LedgerSearch implements Service, LedgerSearchInterface
 		
 		public PrimitiveSearchTask(PrimitiveSearchQuery query, long delay, TimeUnit unit)
 		{
-			super(delay, 0, unit);
+			super(delay, unit);
 			
 			this.query = Objects.requireNonNull(query, "Primitive search query is null");
 			this.responses = Collections.synchronizedMap(new HashMap<ShardGroupID, PrimitiveSearchResponse>());
@@ -125,7 +125,7 @@ final class LedgerSearch implements Service, LedgerSearchInterface
 		
 		public SubstateSearchTask(SubstateSearchQuery query, long delay, TimeUnit unit)
 		{
-			super(delay, 0, unit);
+			super(delay, unit);
 			
 			this.query = Objects.requireNonNull(query, "Substate search query is null");
 			this.queryFuture = new CompletableFuture<SubstateSearchResponse>();
@@ -167,7 +167,7 @@ final class LedgerSearch implements Service, LedgerSearchInterface
 
 		public AssociationSearchTask(AssociationSearchQuery query, long delay, TimeUnit unit)
 		{
-			super(delay, 0, unit);
+			super(delay, unit);
 			
 			this.query = Objects.requireNonNull(query, "Association search query is null");
 			this.responses = Collections.synchronizedMap(new HashMap<ShardGroupID, AssociationSearchResponse>());
@@ -652,7 +652,7 @@ final class LedgerSearch implements Service, LedgerSearchInterface
 							if (searchShardGroupID == localShardGroupID.intValue())
 								continue;
 							
-							StandardConnectionFilter standardPeerFilter = StandardConnectionFilter.build(this.context).setStates(ConnectionState.CONNECTED).setShardGroupID(ShardGroupID.from(searchShardGroupID)).setSynced(true);
+							StandardConnectionFilter standardPeerFilter = StandardConnectionFilter.build(this.context).setStates(ConnectionState.SELECT_CONNECTED).setShardGroupID(ShardGroupID.from(searchShardGroupID)).setSynced(true);
 							Collection<AbstractConnection> connectedPeers = this.context.getNetwork().get(standardPeerFilter);
 							if (connectedPeers.isEmpty())
 							{
@@ -712,7 +712,7 @@ final class LedgerSearch implements Service, LedgerSearchInterface
 			}
 			else	
 			{
-				StandardConnectionFilter standardPeerFilter = StandardConnectionFilter.build(this.context).setStates(ConnectionState.CONNECTED).setShardGroupID(searchShardGroupID).setSynced(true);
+				StandardConnectionFilter standardPeerFilter = StandardConnectionFilter.build(this.context).setStates(ConnectionState.SELECT_CONNECTED).setShardGroupID(searchShardGroupID).setSynced(true);
 				Collection<AbstractConnection> connectedStatePeers = this.context.getNetwork().get(standardPeerFilter);
 				if (connectedStatePeers.isEmpty())
 					throw new IOException(this.context.getName()+": No peers available to query substate "+query.getAddress()+" @ shard group ID "+searchShardGroupID);
@@ -777,7 +777,7 @@ final class LedgerSearch implements Service, LedgerSearchInterface
 						if (searchShardGroupID == localShardGroupID.intValue())
 							continue;
 						
-						StandardConnectionFilter standardPeerFilter = StandardConnectionFilter.build(this.context).setStates(ConnectionState.CONNECTED).setShardGroupID(ShardGroupID.from(searchShardGroupID)).setSynced(true);
+						StandardConnectionFilter standardPeerFilter = StandardConnectionFilter.build(this.context).setStates(ConnectionState.SELECT_CONNECTED).setShardGroupID(ShardGroupID.from(searchShardGroupID)).setSynced(true);
 						Collection<AbstractConnection> connectedPeers = this.context.getNetwork().get(standardPeerFilter);
 						if (connectedPeers.isEmpty())
 						{
