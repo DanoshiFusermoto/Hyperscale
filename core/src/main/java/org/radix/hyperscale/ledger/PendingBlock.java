@@ -4,7 +4,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -15,6 +15,7 @@ import java.util.function.Consumer;
 import org.eclipse.collections.api.factory.Maps;
 import org.eclipse.collections.impl.factory.Sets;
 import org.radix.hyperscale.Context;
+import org.radix.hyperscale.collections.AdaptiveArrayList;
 import org.radix.hyperscale.crypto.Hash;
 import org.radix.hyperscale.crypto.Hashable;
 import org.radix.hyperscale.exceptions.ValidationException;
@@ -42,7 +43,14 @@ public final class PendingBlock implements Hashable
 	private static final int DEFAULT_STATE_LOCKS_PER_ATOM = 4;
 	private static final int STATE_LOCKS_PER_ATOM_MULTIPLIER = 2;
 	
-	public static enum SUPR {INTR, SOFT, HARD};
+	public static enum SUPR 
+	{
+		INTR, SOFT, HARD;
+
+		static final EnumSet<SUPR> SOFT_SELECT = EnumSet.of(SUPR.SOFT);
+		static final EnumSet<SUPR> HARD_SELECT = EnumSet.of(SUPR.HARD);
+		static final EnumSet<SUPR> SOFT_HARD_SELECT = EnumSet.of(SUPR.SOFT, SUPR.HARD);
+	};
 
 	private final Context context;
 	private	final long 	  witnessedAt;
@@ -106,7 +114,7 @@ public final class PendingBlock implements Hashable
 				InventoryType discoveredType = null;
 				for (int i = 0 ; i < types.length ; i++)
 				{
-					if (header.contains(item, types[i]) != null)
+					if (header.contains(item, types[i]) == true)
 					{
 						if (discoveredType != null)
 						{
@@ -405,9 +413,9 @@ public final class PendingBlock implements Hashable
 	        {
 	            case ACCEPTED, UNACCEPTED, EXECUTABLE, LATENT, PACKAGES:
 	            {
-	            	InventoryType type = this.header.contains(item, types[i]);
-	            	if (type != null)
-	            		return type;
+	            	if (this.header.contains(item, types[i]) == true)
+	            		return types[i];
+	            	
 	                continue;
 	            }
 	            default:
@@ -748,14 +756,14 @@ public final class PendingBlock implements Hashable
 
 		synchronized(this)
 		{
-			List<Hash> absent = new ArrayList<Hash>(this.header.getInventorySize(type));
+			final AdaptiveArrayList<Hash> absent = new AdaptiveArrayList<Hash>(this.header.getInventorySize(type));
 			for(Hash item : this.header.getInventory(type))
 			{
 				if (this.absent.contains(item) == true)
 					absent.add(item);
 			}
 
-			return Collections.unmodifiableList(absent);
+			return absent.freeze();
 		}
 	}
 	
@@ -906,21 +914,21 @@ public final class PendingBlock implements Hashable
 			switch(type)
 			{
 			case ACCEPTED:
-				return (List<T>) (this.accepted.isEmpty() ? Collections.emptyList() : Collections.unmodifiableList(new ArrayList<>(this.accepted.values())));
+				return (List<T>) (this.accepted.isEmpty() ? Collections.emptyList() : new AdaptiveArrayList<>(this.accepted.values()).freeze());
 			case UNACCEPTED:
-				return (List<T>) (this.unaccepted.isEmpty() ? Collections.emptyList() : Collections.unmodifiableList(new ArrayList<>(this.unaccepted.values())));
+				return (List<T>) (this.unaccepted.isEmpty() ? Collections.emptyList() : new AdaptiveArrayList<>(this.unaccepted.values()).freeze());
 			case COMMITTED:
-				return (List<T>) (this.committed.isEmpty() ? Collections.emptyList() : Collections.unmodifiableList(new ArrayList<>(this.committed.values())));
+				return (List<T>) (this.committed.isEmpty() ? Collections.emptyList() : new AdaptiveArrayList<>(this.committed.values()).freeze());
 			case EXECUTABLE:
-				return (List<T>) (this.executable.isEmpty() ? Collections.emptyList() : Collections.unmodifiableList(new ArrayList<>(this.executable.values())));
+				return (List<T>) (this.executable.isEmpty() ? Collections.emptyList() : new AdaptiveArrayList<>(this.executable.values()).freeze());
 			case LATENT:
-				return (List<T>) (this.latent.isEmpty() ? Collections.emptyList() : Collections.unmodifiableList(new ArrayList<>(this.latent.values())));
+				return (List<T>) (this.latent.isEmpty() ? Collections.emptyList() : new AdaptiveArrayList<>(this.latent.values()).freeze());
 			case UNCOMMITTED:
-				return (List<T>) (this.uncommitted.isEmpty() ? Collections.emptyList() : Collections.unmodifiableList(new ArrayList<>(this.uncommitted.values())));
+				return (List<T>) (this.uncommitted.isEmpty() ? Collections.emptyList() : new AdaptiveArrayList<>(this.uncommitted.values()).freeze());
 			case UNEXECUTED:
-				return (List<T>) (this.unexecuted.isEmpty() ? Collections.emptyList() : Collections.unmodifiableList(new ArrayList<>(this.unexecuted.values())));
+				return (List<T>) (this.unexecuted.isEmpty() ? Collections.emptyList() : new AdaptiveArrayList<>(this.unexecuted.values()).freeze());
 			case PACKAGES:
-				return (List<T>) (this.packages.isEmpty() ? Collections.emptyList() : Collections.unmodifiableList(new ArrayList<>(this.packages.values())));
+				return (List<T>) (this.packages.isEmpty() ? Collections.emptyList() : new AdaptiveArrayList<>(this.packages.values()).freeze());
 			default:
 				throw new IllegalArgumentException("Inventory type "+type+" is not supported");
 			}

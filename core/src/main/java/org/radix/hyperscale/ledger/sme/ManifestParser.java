@@ -1,10 +1,9 @@
 package org.radix.hyperscale.ledger.sme;
 
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 
+import org.radix.hyperscale.collections.AdaptiveArrayList;
 import org.radix.hyperscale.collections.LRUCacheMap;
 import org.radix.hyperscale.crypto.Hash;
 import org.radix.hyperscale.crypto.Identity;
@@ -27,21 +26,21 @@ import org.radix.hyperscale.utils.UInt256;
 public class ManifestParser 
 {
 	private final static int MANIFEST_MAX_INSTRUCTION_ARGUMENTS = 16;
-	private final static int MANIFEST_ARGUMENT_CACHE_SIZE = 2<<16;
+	private final static int MANIFEST_ARGUMENT_CACHE_SIZE = 1<<16;
 	private final static int MANIFEST_ARGUMENT_MAX_LENGTH = 64;
 	private final static LRUCacheMap<String, Argument<?>> argCache = new LRUCacheMap<String, Argument<?>>(MANIFEST_ARGUMENT_CACHE_SIZE);
 
 	public static List<Object> parse(final List<String> manifest) throws ManifestException
 	{
 		ManifestParser parser = new ManifestParser(manifest.size());
-		return Collections.unmodifiableList(parser.convert(manifest));
+		return parser.convert(manifest);
 	}
 	
-	private final List<Object> objects;
+	private final AdaptiveArrayList<Object> objects;
 	
 	private ManifestParser(final int size)
 	{
-		this.objects = new ArrayList<Object>(size);
+		this.objects = new AdaptiveArrayList<Object>(size);
 	}
 	
 	private List<Object> convert(final List<String> manifest) throws ManifestException
@@ -143,7 +142,7 @@ public class ManifestParser
 			throw new UnsupportedOperationException("Unknown manifest type: "+entry);
 		}
 		
-		return this.objects;
+		return this.objects.freeze();
 	}
 	
 	private Blob getBlob(final HashArgument hash)

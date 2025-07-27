@@ -2,22 +2,25 @@ package org.radix.hyperscale.ledger.sme;
 
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
+import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
-import org.eclipse.collections.api.factory.Maps;
 import org.eclipse.collections.api.map.MutableMap;
 import org.radix.hyperscale.Context;
+import org.radix.hyperscale.collections.AdaptiveArrayList;
 import org.radix.hyperscale.crypto.ComputeKey;
 import org.radix.hyperscale.crypto.Hash;
 import org.radix.hyperscale.crypto.Identity;
-import org.radix.hyperscale.crypto.MerkleTree;
+import org.radix.hyperscale.crypto.merkle.MerkleTree;
 import org.radix.hyperscale.ledger.BlockHeader;
 import org.radix.hyperscale.ledger.CommitDecision;
 import org.radix.hyperscale.ledger.CommitOperation;
@@ -45,9 +48,6 @@ import org.radix.hyperscale.logging.Logger;
 import org.radix.hyperscale.logging.Logging;
 import org.radix.hyperscale.serialization.SerializerId2;
 
-import com.google.common.collect.LinkedHashMultimap;
-import com.google.common.collect.Multimap;
-
 public final class StateMachine
 {
 	private static final Logger stateMachineLog = Logging.getLogger("statemachine");
@@ -57,12 +57,12 @@ public final class StateMachine
 	private final 	StateMachineStatus 	status;
 	
 	private final 	List<Object> instructions;
-	private final 	MutableMap<Object, Object> primitives;
-	private final 	Multimap<StateAddress, Hash> associations;
+	private final 	Map<Object, Object> primitives;
+	private final 	Map<StateAddress, List<Hash>> associations;
 	private final 	Map<StateAddress, PendingState> pendingStates;
 
-	private final 	MutableMap<StateAddress, Package> 	packages;
-	private final 	MutableMap<StateAddress, Component> components;
+	private final 	Map<StateAddress, Package> 	packages;
+	private final 	Map<StateAddress, Component> components;
 
 	private volatile BlockHeader block;
 	private volatile int readLockCount;
@@ -79,13 +79,15 @@ public final class StateMachine
 		this.pendingAtom = Objects.requireNonNull(pendingAtom);
 		this.status = new StateMachineStatus(this);
 		this.pendingStates = pendingStates;
-		this.associations = LinkedHashMultimap.create();
-		this.primitives = Maps.mutable.ofInitialCapacity(4);
+		this.associations = new HashMap<StateAddress, List<Hash>>(4);
+		this.primitives = new HashMap<Object, Object>(4);
 
 		this.currentInstruction = -1;
 		this.instructions = ManifestParser.parse(this.pendingAtom.getAtom().getManifest());
-		this.packages = Maps.mutable.ofInitialCapacity(4);
-		this.components = Maps.mutable.ofInitialCapacity(4);
+		
+		int numReferencedPackages = estimateReferencedPackageCount();
+		this.packages = new HashMap<StateAddress, Package>(numReferencedPackages, 1.0f);
+		this.components = new HashMap<StateAddress, Component>(numReferencedPackages, 1.0f);
 	}
 	
 	Context getContext()
@@ -187,6 +189,19 @@ public final class StateMachine
 				this.readLockCount++;
 			else if (lockMode.equals(StateLockMode.WRITE))
 				this.writeLockCount++;
+		}
+	}
+	
+	public int numStateLocks(final StateLockMode lockMode)
+	{
+		synchronized(this)
+		{
+			if (lockMode.equals(StateLockMode.READ))
+				return this.readLockCount;
+			else if (lockMode.equals(StateLockMode.WRITE))
+				return this.writeLockCount;
+			else
+				return this.writeLockCount + this.readLockCount;
 		}
 	}
 	
@@ -333,10 +348,11 @@ public final class StateMachine
 	{
 		synchronized(this)
 		{
-			if (this.associations.containsEntry(address, association))
+			final List<Hash> associations = this.associations.computeIfAbsent(address, sa -> new LinkedList<Hash>());
+			if (associations.contains(association))
 				return false;
 
-			this.associations.put(address, association);
+			associations.add(association);
 			return true;
 		}
 	}			
@@ -457,7 +473,7 @@ public final class StateMachine
 		if (this.pendingAtom.getAtom() == null)
 			throw new IllegalStateException("Atom is null");
 			
-		final List<T> instructions = new ArrayList<T>(this.instructions.size());
+		final AdaptiveArrayList<T> instructions = new AdaptiveArrayList<T>(this.instructions.size());
 		for (int i = 0 ; i < this.instructions.size() ; i++)
 		{
 			final Object instruction = this.instructions.get(i);
@@ -465,7 +481,7 @@ public final class StateMachine
 				instructions.add(type.cast(instruction));
 		}
 			
-		return Collections.unmodifiableList(instructions);
+		return instructions.freeze();
 	}
 
 	private boolean isPackageEmbedded(final StateAddress packageAddress)
@@ -487,17 +503,6 @@ public final class StateMachine
 		return false;
 	}
 
-	public List<Entry<StateAddress, Hash>> getAssociations()
-	{
-		synchronized(this)
-		{
-			if (this.associations.isEmpty())
-				return Collections.emptyList();
-			
-			return Collections.unmodifiableList(new ArrayList<Entry<StateAddress, Hash>>(this.associations.entries()));
-		}
-	}
-	
 	public Hash getExecutionDigest()
 	{
 		synchronized(this)
@@ -512,6 +517,25 @@ public final class StateMachine
 		{
 			return this.commitOperation;
 		}
+	}
+
+	private int estimateReferencedPackageCount()
+	{
+		int numReferencedPackages = 0;
+		for (int i = 0 ; i < this.instructions.size() ; i++)
+		{
+			final Object instruction = this.instructions.get(i);
+			if (instruction instanceof Instruction)
+			{
+				if (instruction instanceof Deploy)
+					numReferencedPackages++;
+				else if (instruction instanceof Instantiate)
+					numReferencedPackages++;
+				else if (instruction instanceof Method)
+					numReferencedPackages++;
+			}
+		}
+		return numReferencedPackages;
 	}
 	
 	private boolean isRequired(final StateAddress packageAddress)
@@ -598,14 +622,14 @@ public final class StateMachine
 		}
 	}
 	
-	public Collection<PolyglotPackage> load(final Collection<PolyglotPackage> pakages, boolean throwIfNotRequired)
+	public List<PolyglotPackage> load(final Collection<PolyglotPackage> pakages, boolean throwIfNotRequired)
 	{
 		synchronized(this)
 		{
 			if (isProvisioned())
 				throw new IllegalStateException("State machine for atom "+this.pendingAtom.getHash()+" is already PROVISIONED when loading package "+pakages.stream().map(p -> p.getAddress()).collect(Collectors.toList()));
 
-			final Collection<PolyglotPackage> loadedPackages = new ArrayList<PolyglotPackage>(packages.size());
+			final AdaptiveArrayList<PolyglotPackage> loadedPackages = new AdaptiveArrayList<PolyglotPackage>(pakages.size());
 			for (final PolyglotPackage pakage : pakages)
 			{
 				if (isRequired(pakage.getAddress()) == false)
@@ -625,7 +649,7 @@ public final class StateMachine
 			if (isProvisioned())
 				provisioned();
 			
-			return loadedPackages;
+			return loadedPackages.freeze();
 		}
 	}
 
@@ -975,12 +999,15 @@ public final class StateMachine
 					this.currentInstruction = -1;
 					
 					// Check all buckets are empty
-					this.primitives.allSatisfy(primitive -> {
-						if (primitive instanceof Bucket bucket && bucket.isEmpty() == false)
-							throw new IllegalStateException("Bucket "+bucket+" is not empty");
-						
-						return true;
-					});
+					if (this.primitives.isEmpty() == false)
+					{
+						this.primitives.values().stream().allMatch(primitive -> {
+							if (primitive instanceof Bucket bucket && bucket.isEmpty() == false)
+								throw new IllegalStateException("Bucket "+bucket+" is not empty");
+							
+							return true;
+						});
+					}
 					
 					this.status.set(State.COMPLETED);
 				}
@@ -1002,7 +1029,7 @@ public final class StateMachine
 				buildExecutionOutput();
 
 				// Close all contexts
-				this.components.each(component -> component.close());
+				this.components.values().forEach(component -> component.close());
 			}
 		}
 	}
@@ -1224,12 +1251,13 @@ public final class StateMachine
 			synchronized(this.pendingStates)
 			{
 				executionMerkle = new MerkleTree(this.pendingStates.size());
-				orderedPendingStates = new ArrayList<>(this.pendingStates.values());
+				orderedPendingStates = new AdaptiveArrayList<>(this.pendingStates.values());
 			}
 			orderedPendingStates.sort((ps1, ps2) -> ps1.getAddress().compareTo(ps2.getAddress()));
 			
-			for (final PendingState pendingState : orderedPendingStates)
+			for (int i = 0 ; i < orderedPendingStates.size() ; i++)
 			{
+				final PendingState pendingState = orderedPendingStates.get(i);
 				final SubstateLog substateLog = pendingState.getSubstateLog();
 				substateLog.seal();
 
@@ -1281,11 +1309,11 @@ public final class StateMachine
 			
 			// Filter substates that are relevant to the local shard group.  
 			// NOTE Blob substates are persisted in all shard groups the atom touches as they provide a mapping to the parent atom & proposal.
-			final List<SubstateTransitions> filteredSubstateTransitions;
-			final Multimap<Integer, SubstateTransitions> snapshotSubstateTransitions;
+			final AdaptiveArrayList<SubstateTransitions> filteredSubstateTransitions;
+			final AdaptiveArrayList<Entry<Integer, SubstateTransitions>> snapshotSubstateTransitions;
 			synchronized(this.pendingStates)
 			{
-				filteredSubstateTransitions = new ArrayList<>(this.pendingStates.size());
+				filteredSubstateTransitions = new AdaptiveArrayList<>(this.pendingStates.size());
 				for (final PendingState pendingState : this.pendingStates.values())
 				{
 					final ShardGroupID shardGroupID = ShardMapper.toShardGroup(pendingState.getAddress().getShardID(), numShardGroups);
@@ -1300,7 +1328,7 @@ public final class StateMachine
 				}
 				
 				// Build the substate operation log
-				snapshotSubstateTransitions = LinkedHashMultimap.create();
+				snapshotSubstateTransitions = new AdaptiveArrayList<>(this.instructions.size());
 				for (final PendingState pendingState : this.pendingStates.values())
 				{
 					final SubstateLog substateLog = pendingState.getSubstateLog();
@@ -1313,23 +1341,31 @@ public final class StateMachine
 						if (substateTransitions.isVoid())
 							continue;
 							
-						snapshotSubstateTransitions.put(i, substateTransitions);
+						snapshotSubstateTransitions.add(new AbstractMap.SimpleEntry<>(i, substateTransitions));
 					}
 				}
 			}
+			filteredSubstateTransitions.freeze();
+			snapshotSubstateTransitions.freeze();
 				
-			final Multimap<StateAddress, Hash> filteredAssociations = LinkedHashMultimap.create();
-			for (final Entry<StateAddress, Hash> association : this.associations.entries())
+			final AdaptiveArrayList<Entry<StateAddress, Hash>> filteredAssociations = new AdaptiveArrayList<>(this.associations.size());
+			for (final StateAddress stateAddress : this.associations.keySet())
 			{
-				final ShardGroupID shardGroupID = ShardMapper.toShardGroup(association.getKey().getShardID(), numShardGroups);
+				final ShardGroupID shardGroupID = ShardMapper.toShardGroup(stateAddress.getShardID(), numShardGroups);
 				if (shardGroupID.equals(localShardGroupID) == false)
 					continue;
-				
-				if (filteredAssociations.put(association.getKey(), association.getValue()) == false)
-					stateMachineLog.warn(this.context.getName()+": Duplicate association for state address "+association.getKey()+" in atom "+this.pendingAtom.getHash());
-			}
 
-			this.commitOperation = new CommitOperation(CommitDecision.ACCEPT, this.block, this.pendingAtom.getAtom(), filteredSubstateTransitions, filteredAssociations.entries(), new SubstateOpLog(this.pendingAtom.getHash(), snapshotSubstateTransitions));
+				final List<Hash> associations = this.associations.get(stateAddress);
+				for (int i = 0 ; i < associations.size() ; i++)
+				{
+					final Hash associate = associations.get(i);
+					if (filteredAssociations.add(new AbstractMap.SimpleEntry<StateAddress, Hash>(stateAddress, associate)) == false)
+						stateMachineLog.warn(this.context.getName()+": Duplicate association for state address "+stateAddress+" in atom "+this.pendingAtom.getHash());
+				}
+			}
+			filteredAssociations.freeze();
+			
+			this.commitOperation = new CommitOperation(CommitDecision.ACCEPT, this.block, this.pendingAtom.getAtom(), filteredSubstateTransitions, filteredAssociations, new SubstateOpLog(this.pendingAtom.getHash(), snapshotSubstateTransitions));
 		}
 		else
 			this.commitOperation = new CommitOperation(CommitDecision.REJECT, this.block, this.pendingAtom.getAtom(), Collections.emptyList(), Collections.emptyList(), new SubstateOpLog(this.pendingAtom.getHash()));
